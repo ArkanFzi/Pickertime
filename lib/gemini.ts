@@ -82,3 +82,44 @@ export async function getAIInsight(
     return "Keep protecting your deep work blocks. You're making progress!";
   }
 }
+
+export async function getSmartAlarmPrep(
+  taskTitle: string,
+  role: string
+): Promise<Array<{ icon: string; text: string }>> {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+    const prompt = `
+      As a productivity assistant for "Pickertime", suggest 3 quick, actionable preparation steps for a ${role} who is about to start the task: "${taskTitle}".
+      
+      For each step, provide:
+      1. A relevant Ionicon icon name (e.g., 'cafe-outline', 'laptop-outline', 'book-outline', 'notifications-off-outline').
+      2. A short instruction (max 35 characters).
+
+      OUTPUT FORMAT (JSON ARRAY ONLY):
+      [
+        {"icon": "icon-name", "text": "Step description"},
+        {"icon": "icon-name", "text": "Step description"},
+        {"icon": "icon-name", "text": "Step description"}
+      ]
+    `;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text().trim();
+    
+    const jsonStr = text.startsWith('```') 
+      ? text.replace(/^```json/, '').replace(/```$/, '').trim() 
+      : text;
+
+    return JSON.parse(jsonStr);
+  } catch (error) {
+    return [
+      { icon: 'cafe-outline', text: 'Get your beverage ready' },
+      { icon: 'notifications-off-outline', text: 'Minimize distractions' },
+      { icon: 'play-outline', text: 'Mentally prepare for flow' }
+    ];
+  }
+}
+

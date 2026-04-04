@@ -4,7 +4,11 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useStore } from '@/store/useStore';
+import { useStore, Task } from '@/store/useStore';
+import { supabase } from '@/lib/supabase';
+import { getSmartAlarmPrep } from '@/lib/gemini';
+import { useState } from 'react';
+
 
 const PREP_STEPS: Record<string, Array<{ icon: string; text: string }>> = {
   Student: [
@@ -36,14 +40,29 @@ const PREP_STEPS: Record<string, Array<{ icon: string; text: string }>> = {
 
 export default function SmartAlarmScreen() {
   const router = useRouter();
-  const { profile, tasks } = useStore();
-  const role = profile?.role || 'Professional';
-  const prepSteps = PREP_STEPS[role] || PREP_STEPS['Professional'];
-  const nextTask = tasks.find((t) => !t.is_completed);
+  const { profile, tasks, toggleTask } = useStore();
+  const [prepSteps, setPrepSteps] = useState<Array<{ icon: string; text: string }>>([]);
+  const [loadingSteps, setLoadingSteps] = useState(false);
+  const [completing, setCompleting] = useState(false);
 
+  // Find THE next task (first one in future that is not done)
+  const now = new Date();
+  const futureTasks = tasks
+    .filter(t => !t.is_completed && t.start_time && new Date(t.start_time) > now)
+    .sort((a, b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime());
+  
+  const nextTask = futureTasks[0];
+  
+  // Calculate true minutes remaining
+  const diffMs = nextTask && nextTask.start_time ? new Date(nextTask.start_time).getTime() - now.getTime() : 0;
+  const minutesUntil = Math.max(0, Math.floor(diffMs / 60000));
+
+  const role = profile?.role || 'Professional';
+  
   const fadeAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(0))).current;
   const slideAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(20))).current;
   const countAnim = useRef(new Animated.Value(1)).current;
+
 
   useEffect(() => {
     fadeAnims.forEach((anim, i) => {
@@ -62,7 +81,34 @@ export default function SmartAlarmScreen() {
         Animated.timing(countAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
       ])
     ).start();
-  }, []);
+
+    if (nextTask) {
+      fetchDynamicPrep(nextTask.title);
+    }
+  }, [nextTask?.id]);
+
+  async function fetchDynamicPrep(title: string) {
+    setLoadingSteps(true);
+    const steps = await getSmartAlarmPrep(title, role);
+    setPrepSteps(steps);
+    setLoadingSteps(false);
+  }
+
+  async function handleMarkDone() {
+    if (!nextTask) return;
+    setCompleting(true);
+    const { error } = await supabase
+      .from('tasks')
+      .update({ is_completed: true })
+      .eq('id', nextTask.id);
+    
+    if (!error) {
+      toggleTask(nextTask.id);
+      router.back();
+    }
+    setCompleting(false);
+  }
+
 
   function Anim(i: number) {
     return { opacity: fadeAnims[i], transform: [{ translateY: slideAnims[i] }] };
@@ -90,14 +136,20 @@ export default function SmartAlarmScreen() {
         {/* Hero Countdown */}
         <Animated.View style={[styles.heroCard, Anim(0)]}>
           <View style={styles.heroGlow} />
-          <Text style={styles.nextUpLabel}>Next up in</Text>
+          <Text style={styles.nextUpLabel}>{nextTask ? 'Next up in' : 'Status'}</Text>
           <Animated.View style={{ transform: [{ scale: countAnim }] }}>
-            <Text style={styles.countdown}>14<Text style={styles.countdownSmall}>m</Text></Text>
+            <Text style={styles.countdown}>
+              {nextTask ? minutesUntil : '--'}
+              <Text style={styles.countdownSmall}>m</Text>
+            </Text>
           </Animated.View>
           <View style={styles.heroDivider} />
-          <Text style={styles.heroTask}>{nextTask?.title || 'Deep Work Block'}</Text>
-          <Text style={styles.heroSub}>Stay prepared — you're on track</Text>
+          <Text style={styles.heroTask}>{nextTask?.title || 'No upcoming tasks'}</Text>
+          <Text style={styles.heroSub}>
+            {nextTask ? "Stay prepared — you're on track" : "Add a task to start tracking"}
+          </Text>
         </Animated.View>
+
 
         {/* AI Insight Chip */}
         <Animated.View style={[styles.insightCard, Anim(1)]}>
@@ -119,6 +171,7 @@ export default function SmartAlarmScreen() {
           <View style={styles.prepHeader}>
             <Ionicons name="list-outline" size={16} color="#00D4FF" />
             <Text style={styles.prepTitle}>Recommended Prep</Text>
+            {loadingSteps && <Text style={{fontSize: 10, color: '#00D4FF', marginLeft: 8}}>🤖 AI Thinking...</Text>}
           </View>
           <View style={styles.prepList}>
             {prepSteps.map((step, i) => (
@@ -129,8 +182,10 @@ export default function SmartAlarmScreen() {
                 <Text style={styles.prepItemText}>{step.text}</Text>
               </View>
             ))}
+            {!nextTask && <Text style={styles.heroSub}>No prep needed yet.</Text>}
           </View>
         </Animated.View>
+
 
         {/* Mini Timeline */}
         <Animated.View style={Anim(3)}>
@@ -165,25 +220,38 @@ export default function SmartAlarmScreen() {
         {/* Action Controls */}
         <Animated.View style={[styles.actionsWrap, Anim(3)]}>
           <TouchableOpacity
-            style={styles.startNowBtn}
-            onPress={() => { router.back(); router.push('/focus'); }}
+            style={[styles.startNowBtn, !nextTask && { opacity: 0.5 }]}
+            onPress={() => { if (nextTask) { router.back(); router.push('/focus'); } }}
             activeOpacity={0.85}
+            disabled={!nextTask}
           >
-            <Ionicons name="play" size={18} color="#fff" />
+            <Ionicons name="play" size={18} color="#0A0F1D" />
             <Text style={styles.startNowText}>Start Focus Now</Text>
           </TouchableOpacity>
 
           <View style={styles.secondaryActions}>
-            {['notifications-off-outline', 'options-outline', 'checkmark-outline'].map((icon, i) => (
-              <TouchableOpacity key={i} style={styles.secBtn} activeOpacity={0.75}>
-                <Ionicons name={icon as any} size={16} color="rgba(255,255,255,0.5)" />
-                <Text style={styles.secBtnText}>
-                  {['Snooze 5m', 'Adjust Plan', 'Mark Done'][i]}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            <TouchableOpacity style={styles.secBtn} activeOpacity={0.75} onPress={() => alert('Snoozed!')}>
+              <Ionicons name="notifications-off-outline" size={16} color="rgba(255,255,255,0.5)" />
+              <Text style={styles.secBtnText}>Snooze 5m</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.secBtn} activeOpacity={0.75} onPress={() => router.push('/(tabs)/timeline')}>
+              <Ionicons name="options-outline" size={16} color="rgba(255,255,255,0.5)" />
+              <Text style={styles.secBtnText}>Adjust Plan</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.secBtn, completing && { opacity: 0.5 }]} 
+              activeOpacity={0.75} 
+              onPress={handleMarkDone}
+              disabled={completing || !nextTask}
+            >
+              <Ionicons name="checkmark-outline" size={16} color="rgba(255,255,255,0.5)" />
+              <Text style={styles.secBtnText}>{completing ? 'Done...' : 'Mark Done'}</Text>
+            </TouchableOpacity>
           </View>
         </Animated.View>
+
       </ScrollView>
     </View>
   );
