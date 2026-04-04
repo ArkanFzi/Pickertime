@@ -1,6 +1,7 @@
 import '../global.css';
 import { useEffect, useState } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
+
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
@@ -22,7 +23,9 @@ Notifications.setNotificationHandler({
 
 
 export default function RootLayout() {
+  const router = useRouter();
   const { setUser, setProfile } = useStore();
+
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -37,7 +40,7 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session?.user) {
         setUser(session.user);
@@ -48,8 +51,21 @@ export default function RootLayout() {
       }
     });
 
-    return () => subscription.unsubscribe();
+    // Notification Response Listener
+    const notificationSub = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data;
+      if (data?.type === 'smart-alarm') {
+        // Use Root relative path
+        router.push('/smart-alarm');
+      }
+    });
+
+    return () => {
+      authSub.unsubscribe();
+      notificationSub.remove();
+    };
   }, []);
+
 
   async function loadProfile(userId: string) {
     const { data } = await supabase

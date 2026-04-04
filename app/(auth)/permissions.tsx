@@ -5,6 +5,13 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
+import { 
+  requestNotificationPermissions, 
+  requestCalendarPermissions, 
+  requestDNDPermissions 
+} from '@/lib/notifications';
+
+
 
 const PERMISSIONS = [
   {
@@ -62,10 +69,19 @@ export default function PermissionsScreen() {
 
   async function handleEnable() {
     if (enabled.notifications) {
-      const { status } = await Notifications.requestPermissionsAsync();
+      await requestNotificationPermissions();
     }
+    if (enabled.calendar) {
+      await requestCalendarPermissions();
+    }
+    if (enabled.dnd) {
+      await requestDNDPermissions();
+    }
+    // Update profile in supabase with permissions if needed
     router.replace('/');
   }
+
+
 
   return (
     <View style={styles.container}>

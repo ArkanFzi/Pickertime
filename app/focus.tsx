@@ -8,12 +8,14 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useStore } from '@/store/useStore';
 import { supabase } from '@/lib/supabase';
 
-const TOTAL_SECONDS = 25 * 60; // 25min default Pomodoro
-
 export default function FocusScreen() {
   const router = useRouter();
   const { activeTask, user } = useStore();
-  const [timeLeft, setTimeLeft] = useState(TOTAL_SECONDS);
+  
+  // Use task duration or default to 25 mins
+  const initialSeconds = (activeTask?.duration_minutes || 25) * 60;
+  
+  const [timeLeft, setTimeLeft] = useState(initialSeconds);
   const [isRunning, setIsRunning] = useState(true);
   const [shieldOn, setShieldOn] = useState(true);
   const [sessionNum, setSessNum] = useState(2);
@@ -26,7 +28,7 @@ export default function FocusScreen() {
   const size = 280;
   const radius = 130;
   const circumference = 2 * Math.PI * radius;
-  const progressPct = timeLeft / TOTAL_SECONDS;
+  const progressPct = timeLeft / initialSeconds;
   const strokeOffset = circumference * (1 - progressPct);
 
   useEffect(() => {
@@ -66,10 +68,13 @@ export default function FocusScreen() {
     await supabase.from('focus_sessions').insert({
       user_id: user.id,
       task_id: activeTask?.id || null,
-      duration_seconds: TOTAL_SECONDS,
+      duration_seconds: initialSeconds,
       completed: true,
     });
+    // Navigate back or to a success screen
+    router.replace('/(tabs)/insights');
   }
+
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;

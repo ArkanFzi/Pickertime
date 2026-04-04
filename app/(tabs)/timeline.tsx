@@ -118,19 +118,48 @@ export default function TimelineScreen() {
     ).start();
   }, []);
 
-  const displayTimeline: typeof MOCK_TIMELINE =
-    tasks.length > 0
-      ? tasks.map((t) => ({
-          time: t.start_time ? new Date(t.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '--:--',
-          type: t.is_completed ? 'done' : 'task',
-          task: {
-            title: t.title,
-            timeLabel: `${t.duration_minutes}m`,
-            priority: t.priority,
-            category: t.category,
-          },
-        }))
-      : MOCK_TIMELINE;
+  const displayTimeline = React.useMemo(() => {
+    if (tasks.length === 0) return MOCK_TIMELINE;
+
+    const sorted = [...tasks]
+      .filter(t => t.start_time)
+      .sort((a,b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime());
+    
+    const items: typeof MOCK_TIMELINE = [];
+    let lastEnd = new Date(sorted[0].start_time!);
+    lastEnd.setHours(9, 0, 0, 0); // Start day at 9 AM for timeline view if empty before
+
+    sorted.forEach((t, i) => {
+      const start = new Date(t.start_time!);
+      const end = new Date(t.end_time!);
+
+      // Check for gap
+      if (start.getTime() > lastEnd.getTime() + 15 * 60000) {
+        const gapMins = (start.getTime() - lastEnd.getTime()) / 60000;
+        items.push({
+          time: lastEnd.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          type: 'free',
+          duration: gapMins >= 60 ? `${Math.floor(gapMins/60)}h ${gapMins%60}m` : `${gapMins}m`
+        });
+      }
+
+      items.push({
+        time: start.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        type: t.is_completed ? 'done' : 'task',
+        task: {
+          title: t.title,
+          timeLabel: `${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} – ${end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
+          priority: t.priority,
+          category: t.category,
+        }
+      });
+
+      lastEnd = end;
+    });
+
+    return items;
+  }, [tasks]);
+
 
   const freeSlots = displayTimeline.filter((d) => d.type === 'free').length;
 

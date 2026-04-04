@@ -10,41 +10,33 @@ import { getAIInsight } from '@/lib/gemini';
 
 const { width } = Dimensions.get('window');
 
-const HEATMAP_DATA = {
-  Morning:   [2, 4, 3, 4, 2, 0, 1],
-  Afternoon: [3, 2, 2, 1, 3, 1, 2],
-  Evening:   [0, 1, 0, 2, 0, 0, 1],
-};
-
-const HEAT_COLORS = [
-  'rgba(255,255,255,0.05)',
-  'rgba(0,212,255,0.22)',
-  'rgba(0,212,255,0.50)',
-  'rgba(0,212,255,0.78)',
-  'rgba(0,212,255,1.0)',
-];
-
-const AI_SUGGESTIONS: Record<string, string> = {
-  Student: 'Your completion rate for homework tasks drops 40% after 6PM. Move coding blocks to your morning peak.',
-  Professional: 'You have 3 recurring meetings that fragment your deep work. Consider batching them on Tuesday afternoons.',
-  Freelancer: 'Client proposal tasks have the highest completion rate on Monday mornings. Schedule deliverables then.',
-  Creator: 'Your creative output peaks between 9–11AM. Protect this window ruthlessly.',
-  Researcher: 'Literature review sessions are most productive in 90-min blocks. Avoid back-to-back scheduling.',
-};
-
-const WEEK_FOCUS = [180, 240, 150, 300, 210, 90, 120];
 const WEEK_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
 
 export default function InsightsScreen() {
   const { profile, user } = useStore();
-  const role = profile?.role || 'Professional';
-  const suggestion = AI_SUGGESTIONS[role] || AI_SUGGESTIONS['Professional'];
-
   const [aiInsight, setAiInsight] = useState<string | null>(null);
-  const [loadingAI, setLoadingAI] = useState(false);
 
-  const totalFocusMins = WEEK_FOCUS.reduce((a, b) => a + b, 0);
-  const completionRate = 84;
+  const [loadingAI, setLoadingAI] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
+  
+  // Real data states
+  const [focusTrend, setFocusTrend] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
+  const [heatmap, setHeatmap] = useState({
+    Morning: [0, 0, 0, 0, 0, 0, 0],
+    Afternoon: [0, 0, 0, 0, 0, 0, 0],
+    Evening: [0, 0, 0, 0, 0, 0, 0],
+  });
+  const [stats, setStats] = useState({
+    totalMins: 0,
+    completionRate: 0,
+    doneCount: 0,
+    totalCount: 0,
+  });
+
+  const totalFocusMins = stats.totalMins;
+  const completionRate = stats.completionRate;
+
 
   const slideAnims = useRef(
     [0, 1, 2, 3, 4].map(() => new Animated.Value(30))
@@ -64,20 +56,84 @@ export default function InsightsScreen() {
       ]).start();
     });
 
-    fetchInsight();
-  }, []);
+    if (user) loadRealData();
+  }, [user]);
 
-  async function fetchInsight() {
+  async function loadRealData() {
+    setLoadingData(true);
+    const now = new Date();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (now.getDay() === 0 ? 6 : now.getDay() - 1));
+    monday.setHours(0, 0, 0, 0);
+
+    // 1. Fetch Focus Sessions
+    const { data: sessions } = await supabase
+      .from('focus_sessions')
+      .select('*')
+      .eq('user_id', user!.id)
+      .gte('timestamp', monday.toISOString());
+
+    if (sessions) {
+      const newTrend = [0, 0, 0, 0, 0, 0, 0];
+      const newHeat = {
+        Morning: [0, 0, 0, 0, 0, 0, 0],
+        Afternoon: [0, 0, 0, 0, 0, 0, 0],
+        Evening: [0, 0, 0, 0, 0, 0, 0],
+      };
+      let totalS = 0;
+
+      sessions.forEach(s => {
+        const d = new Date(s.timestamp);
+        const dayIdx = (d.getDay() === 0 ? 6 : d.getDay() - 1);
+        const mins = s.duration_seconds / 60;
+        newTrend[dayIdx] += Math.round(mins);
+        totalS += s.duration_seconds;
+
+        // Heatmap
+        const h = d.getHours();
+        if (h >= 6 && h < 12) newHeat.Morning[dayIdx]++;
+        else if (h >= 12 && h < 18) newHeat.Afternoon[dayIdx]++;
+        else newHeat.Evening[dayIdx]++;
+      });
+
+      setFocusTrend(newTrend);
+      setHeatmap(newHeat);
+      setStats(prev => ({ ...prev, totalMins: Math.round(totalS / 60) }));
+    }
+
+    // 2. Fetch Weekly Completion
+    const { data: tasks } = await supabase
+      .from('tasks')
+      .select('is_completed')
+      .eq('user_id', user!.id)
+      .gte('start_time', monday.toISOString());
+
+    if (tasks && tasks.length > 0) {
+      const done = tasks.filter(t => t.is_completed).length;
+      setStats(prev => ({
+        ...prev,
+        doneCount: done,
+        totalCount: tasks.length,
+        completionRate: Math.round((done / tasks.length) * 100),
+      }));
+    }
+
+    setLoadingData(false);
+    fetchAIInsight(); // Call after real data is loaded
+  }
+
+  async function fetchAIInsight() {
     if (!profile) return;
     setLoadingAI(true);
     const insight = await getAIInsight(
       profile.role || 'Professional',
       profile.focus_goal || 'Productivity',
-      {} // Pass actual focus data here in future
+      { trend: focusTrend } // Simplified context
     );
     setAiInsight(insight);
     setLoadingAI(false);
   }
+
 
   function Animated_(index: number) {
     return {
@@ -121,9 +177,10 @@ export default function InsightsScreen() {
               <Text style={styles.statLabel}>Completion</Text>
             </View>
             <Text style={styles.statValue}>{completionRate}%</Text>
-            <Text style={styles.statSubText}>32/38 blocks</Text>
+            <Text style={styles.statSubText}>{stats.doneCount}/{stats.totalCount} blocks</Text>
           </View>
         </Animated.View>
+
 
         {/* Focus Trend Chart */}
         <Animated.View style={[styles.chartCard, Animated_(1)]}>
@@ -134,9 +191,9 @@ export default function InsightsScreen() {
           <LineChart
             data={{
               labels: WEEK_LABELS,
-              datasets: [{ data: WEEK_FOCUS }],
+              datasets: [{ data: focusTrend }],
             }}
-            width={Math.min(width - 80, 340)}
+            width={Math.min(width - 40, 360)}
             height={160}
             chartConfig={{
               backgroundColor: 'transparent',
@@ -155,12 +212,13 @@ export default function InsightsScreen() {
               propsForBackgroundLines: { stroke: 'rgba(255,255,255,0.04)' },
             }}
             bezier
-            style={{ marginLeft: -16 }}
+            style={{ marginLeft: -16, marginTop: 8 }}
             withInnerLines
             withOuterLines={false}
             withShadow={false}
           />
         </Animated.View>
+
 
         {/* Heatmap */}
         <Animated.View style={[styles.heatmapCard, Animated_(2)]}>
@@ -183,15 +241,16 @@ export default function InsightsScreen() {
                 <Text key={i} style={styles.heatDayLabel}>{d}</Text>
               ))}
             </View>
-            {Object.entries(HEATMAP_DATA).map(([period, vals]) => (
+            {Object.entries(heatmap).map(([period, vals]) => (
               <View key={period} style={styles.heatRow}>
                 <Text style={styles.heatRowLabel}>{period.slice(0,3)}</Text>
                 {vals.map((v, i) => (
-                  <View key={i} style={[styles.heatCell, { backgroundColor: HEAT_COLORS[Math.min(v, 4)] }]} />
+                  <View key={i} style={[styles.heatCell, { backgroundColor: `rgba(0, 212, 255, ${Math.min(v / 4, 1)})` }]} />
                 ))}
               </View>
             ))}
           </View>
+
         </Animated.View>
 
         {/* AI Suggestion */}
@@ -208,9 +267,10 @@ export default function InsightsScreen() {
                   {loadingAI ? '🤖 Analyzing Pattern...' : 'Optimize Your Schedule'}
                 </Text>
                 <Text style={styles.suggestionBody}>
-                  {aiInsight || suggestion}
+                  {aiInsight || 'Complete a few focus sessions to get personalized advice.'}
                 </Text>
               </View>
+
             </View>
             <View style={styles.suggestionActions}>
               <TouchableOpacity style={styles.adjustBtn}>

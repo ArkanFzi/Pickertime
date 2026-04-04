@@ -8,8 +8,10 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Path, G, Line } from 'react-native-svg';
 import { supabase } from '@/lib/supabase';
 import { useStore } from '@/store/useStore';
+import { scheduleTaskNotification } from '@/lib/notifications';
 
 const CATEGORIES = [
+
   { id: 'Work', color: '#00D4FF' },
   { id: 'Study', color: '#A78BFA' },
   { id: 'Health', color: '#34D399' },
@@ -93,21 +95,74 @@ function RadialTimePicker({ value, onChange }: { value: number; onChange: (v: nu
 
 export default function ScheduleScreen() {
   const router = useRouter();
-  const { user, profile, addTask } = useStore();
+  const { user, profile, tasks, addTask } = useStore();
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Work');
   const [priority, setPriority] = useState('High');
   const [duration, setDuration] = useState(60);
   const [loading, setLoading] = useState(false);
+  const [conflictTask, setConflictTask] = useState<any>(null);
+  const [nextSlot, setNextSlot] = useState<{ start: Date; end: Date } | null>(null);
+
   const suggestions = SUGGESTIONS[profile?.role || 'Professional'];
+
 
   const now = new Date();
   const startH = now.getHours();
   const startM = Math.round(now.getMinutes() / 15) * 15;
-  const startTime = `${String(startH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
+  const startTimeStr = `${String(startH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
   const endH = startH + Math.floor((startM + duration) / 60);
   const endM = (startM + duration) % 60;
-  const endTime = `${String(endH % 24).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+  const endTimeStr = `${String(endH % 24).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+
+  // Conflict Detection Effect
+  useEffect(() => {
+    checkConflicts();
+    findNextAvailableSlot();
+  }, [duration, tasks]);
+
+  function checkConflicts() {
+    const startDt = new Date();
+    startDt.setSeconds(0, 0);
+    const endDt = new Date(startDt.getTime() + duration * 60000);
+
+    const conflict = tasks.find(t => {
+      if (t.is_completed || !t.start_time || !t.end_time) return false;
+      const ts = new Date(t.start_time);
+      const te = new Date(t.end_time);
+      // Overlap logic: (StartA < EndB) and (EndA > StartB)
+      return (startDt < te) && (endDt > ts);
+    });
+    setConflictTask(conflict || null);
+  }
+
+  function findNextAvailableSlot() {
+    // Collect all future non-completed tasks sorted
+    const sorted = tasks
+      .filter(t => !t.is_completed && t.start_time && new Date(t.end_time!) > now)
+      .sort((a, b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime());
+
+    let proposedStart = new Date(now);
+    proposedStart.setSeconds(0, 0);
+    
+    // Find first gap wide enough
+    for (const t of sorted) {
+      const ts = new Date(t.start_time!);
+      const te = new Date(t.end_time!);
+      
+      const gapMins = (ts.getTime() - proposedStart.getTime()) / 60000;
+      if (gapMins >= duration) {
+        break; // Found it!
+      }
+      proposedStart = te > proposedStart ? te : proposedStart;
+    }
+
+    setNextSlot({
+      start: proposedStart,
+      end: new Date(proposedStart.getTime() + duration * 60000)
+    });
+  }
+
 
   async function handleSave(startNow: boolean) {
     if (!title.trim()) {
@@ -142,8 +197,13 @@ export default function ScheduleScreen() {
     if (error) {
       Alert.alert('Error', error.message);
     } else {
-      if (data) addTask(data as any);
+      if (data) {
+        addTask(data as any);
+        // Schedule local notification
+        scheduleTaskNotification(data as any);
+      }
       if (startNow) {
+
         router.push('/focus');
       } else {
         Alert.alert('✅ Saved', 'Task added to your timeline.');
@@ -232,46 +292,84 @@ export default function ScheduleScreen() {
         <View style={styles.timeRange}>
           <View style={styles.timeItem}>
             <Text style={styles.timeItemLabel}>Start Time</Text>
-            <Text style={styles.timeItemValue}>{startTime}</Text>
+            <Text style={styles.timeItemValue}>{startTimeStr}</Text>
           </View>
           <Ionicons name="arrow-forward" size={16} color="rgba(255,255,255,0.2)" />
           <View style={styles.timeItem}>
             <Text style={styles.timeItemLabel}>End Time</Text>
-            <Text style={styles.timeItemValue}>{endTime}</Text>
+            <Text style={styles.timeItemValue}>{endTimeStr}</Text>
           </View>
         </View>
 
+        {/* Conflict Warning */}
+        {conflictTask && (
+          <View style={styles.conflictBanner}>
+            <Ionicons name="alert-circle" size={16} color="#F87171" />
+            <Text style={styles.conflictBannerText}>
+              Overlaps with: <Text style={{fontWeight:'700'}}>{conflictTask.title}</Text>
+            </Text>
+          </View>
+        )}
+
+
         {/* Smart Recommendation */}
-        <View style={styles.smartCard}>
+        <View style={[styles.smartCard, conflictTask && { borderColor: 'rgba(248, 113, 113, 0.3)' }]}>
           <View style={styles.smartGlow} />
           <View style={styles.smartTop}>
             <View>
               <View style={styles.smartTitleRow}>
-                <Ionicons name="flash" size={13} color="#00D4FF" />
-                <Text style={styles.smartTitle}>Best Energy Match</Text>
+                <Ionicons name={conflictTask ? "alert-circle" : "flash"} size={13} color={conflictTask ? "#F87171" : "#00D4FF"} />
+                <Text style={styles.smartTitle}>{conflictTask ? "Schedule Busy" : "Best Energy Match"}</Text>
               </View>
-              <Text style={styles.smartDesc}>Aligns perfectly with your peak focus window.</Text>
+              <Text style={styles.smartDesc}>
+                {conflictTask ? "The current slot is occupied." : "Aligns perfectly with your peak focus window."}
+              </Text>
             </View>
-            <View style={styles.matchBadge}>
-              <Text style={styles.matchText}>98% Match</Text>
+            <View style={[styles.matchBadge, conflictTask && { backgroundColor: 'rgba(248, 113, 113, 0.15)', borderColor: 'rgba(248, 113, 113, 0.3)' }]}>
+              <Text style={[styles.matchText, conflictTask && { color: '#F87171' }]}>
+                {conflictTask ? "Busy" : "98% Match"}
+              </Text>
             </View>
           </View>
-          <View style={styles.smartSlot}>
-            <View>
-              <Text style={styles.smartSlotTime}>2:00 PM – 4:00 PM</Text>
-              <Text style={styles.smartSlotSub}>No conflicts • High Energy</Text>
+          {nextSlot && (
+            <View style={styles.smartSlot}>
+              <View>
+                <Text style={styles.smartSlotTime}>
+                  {nextSlot.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – 
+                  {nextSlot.end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                </Text>
+                <Text style={[styles.smartSlotSub, conflictTask && { color: '#F87171' }]}>
+                  {conflictTask ? "Next Available Slot" : "Auto-calculated Optima"}
+                </Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.smartApplyBtn}
+                onPress={() => {
+                   // This is complex because date is current. 
+                   // For now, we'll just show it.
+                   Alert.alert('Apply Suggested Slot', 'Coming soon: Automatically shifting start time.');
+                }}
+              >
+                <Ionicons name="sparkles" size={16} color="rgba(255,255,255,0.7)" />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.smartApplyBtn}>
-              <Ionicons name="checkmark" size={16} color="rgba(255,255,255,0.7)" />
-            </TouchableOpacity>
-          </View>
+          )}
         </View>
 
+
         {/* Actions */}
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => handleSave(true)} disabled={loading} activeOpacity={0.85}>
-          <Ionicons name="play" size={14} color="#0A0F1D" />
-          <Text style={styles.primaryBtnText}>Save & Start Focus</Text>
+        <TouchableOpacity 
+          style={[styles.primaryBtn, conflictTask && { backgroundColor: '#F87171' }]} 
+          onPress={() => handleSave(true)} 
+          disabled={loading} 
+          activeOpacity={0.85}
+        >
+          <Ionicons name={conflictTask ? "warning" : "play"} size={14} color="#0A0F1D" />
+          <Text style={styles.primaryBtnText}>
+            {conflictTask ? "Save Anyway" : "Save & Start Focus"}
+          </Text>
         </TouchableOpacity>
+
 
         <TouchableOpacity style={styles.ghostBtn} onPress={() => handleSave(false)} disabled={loading} activeOpacity={0.8}>
           <Text style={styles.ghostBtnText}>Save for Later</Text>
@@ -381,4 +479,12 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
   },
   ghostBtnText: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.7)' },
+  conflictBanner: {
+    backgroundColor: 'rgba(248, 113, 113, 0.12)', 
+    borderWidth: 1, borderColor: 'rgba(248, 113, 113, 0.25)',
+    borderRadius: 16, padding: 12, marginBottom: 20,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  conflictBannerText: { fontSize: 13, color: '#F87171', fontWeight: '500' },
 });
+
