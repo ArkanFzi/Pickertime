@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        window.FontAwesomeConfig = {
+          autoReplaceSvg: 'nest'
+        };
+      </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pickertime - Authentication & Onboarding</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        deepNavy: '#0A0F1D',
+                        electricBlue: '#00D4FF',
+                        darkSurface: 'rgba(255, 255, 255, 0.03)',
+                        glassBorder: 'rgba(255, 255, 255, 0.1)',
+                    },
+                    backgroundImage: {
+                        'glow-gradient': 'radial-gradient(circle at center, rgba(0, 212, 255, 0.15) 0%, rgba(10, 15, 29, 0) 70%)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0A0F1D;
+            color: #ffffff;
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+        }
+        ::-webkit-scrollbar { display: none; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .text-gradient {
+            background: linear-gradient(135deg, #ffffff 0%, #00D4FF 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .dot-pattern {
+            background-image: radial-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+
+        /* Custom Input Styles */
+        input:focus {
+            outline: none;
+            border-color: rgba(0, 212, 255, 0.5);
+            box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.5);
+        }
+        
+        /* Interactive Chip Styles */
+        .chip-radio:checked + label {
+            background: rgba(0, 212, 255, 0.15);
+            border-color: rgba(0, 212, 255, 0.5);
+            color: #00D4FF;
+        }
+    </style>
+</head>
+<body class="antialiased min-h-[100dvh] flex flex-col relative">
+
+    <!-- Ambient Background Glows -->
+    <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-glow-gradient pointer-events-none -z-10"></div>
+    <div class="absolute top-0 left-0 w-full h-full dot-pattern opacity-30 pointer-events-none -z-20"></div>
+
+    <!-- Main Container - Mobile First -->
+    <main class="flex-1 w-full max-w-[375px] mx-auto flex flex-col px-6 pt-12 pb-8 relative z-10 md:max-w-md lg:max-w-lg xl:max-w-xl">
+        
+        <!-- Auth Header -->
+        <section id="auth_header" class="flex flex-col mb-8">
+            <h1 class="text-3xl font-bold tracking-tight mb-2">
+                <span class="text-gradient">Create Account</span>
+            </h1>
+            <p class="text-white/60 text-sm leading-relaxed">
+                Join Pickertime and unlock your high-performance schedule.
+            </p>
+        </section>
+
+        <!-- Account Credentials Bento -->
+        <section id="account_credentials_bento" class="glass-panel rounded-[24px] p-5 mb-6 flex flex-col gap-4">
+            
+            <!-- Email/Phone Input -->
+            <div class="flex flex-col gap-1.5">
+                <label class="text-xs font-medium text-white/70 ml-1">Email or Phone</label>
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                        <i class="fa-regular fa-envelope text-white/40 text-sm"></i>
+                    </div>
+                    <input type="text" placeholder="you@example.com" class="w-full bg-[#0A0F1D]/50 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm text-white placeholder-white/30 transition-all">
+                </div>
+            </div>
+
+            <!-- Password Input -->
+            <div class="flex flex-col gap-1.5">
+                <label class="text-xs font-medium text-white/70 ml-1">Password</label>
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                        <i class="fa-solid fa-lock text-white/40 text-sm"></i>
+                    </div>
+                    <input type="password" placeholder="••••••••" class="w-full bg-[#0A0F1D]/50 border border-white/10 rounded-xl py-3 pl-10 pr-10 text-sm text-white placeholder-white/30 transition-all">
+                    <button class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-white/40 hover:text-white/80 transition-colors">
+                        <i class="fa-regular fa-eye-slash text-sm"></i>
+                    </button>
+                </div>
+                <p class="text-[10px] text-electricBlue ml-1 flex items-center gap-1 mt-1">
+                    <i class="fa-solid fa-circle-check text-[8px]"></i> Must be at least 8 characters
+                </p>
+            </div>
+        </section>
+
+        <!-- Quick Profile Setup (Bento Style) -->
+        <section id="quick_profile_setup" class="glass-panel rounded-[24px] p-5 mb-8 flex flex-col gap-4">
+            <h3 class="text-sm font-semibold text-white mb-2">Profile Quick-Start</h3>
+            
+            <!-- Name Input -->
+            <div class="flex flex-col gap-1.5">
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                        <i class="fa-regular fa-user text-white/40 text-sm"></i>
+                    </div>
+                    <input type="text" placeholder="Your Name" class="w-full bg-[#0A0F1D]/50 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm text-white placeholder-white/30 transition-all">
+                </div>
+            </div>
+
+            <!-- Role Selection (Chips) -->
+            <div class="flex flex-col gap-2 mt-2">
+                <label class="text-xs font-medium text-white/70 ml-1">Primary Role</label>
+                <div class="flex flex-wrap gap-2">
+                    <div class="relative">
+                        <input type="radio" name="role" id="role_student" class="peer sr-only chip-radio">
+                        <label for="role_student" class="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-xs font-medium text-white/70 hover:bg-white/10 transition-all">
+                            <i class="fa-solid fa-graduation-cap"></i> Student
+                        </label>
+                    </div>
+                    <div class="relative">
+                        <input type="radio" name="role" id="role_professional" class="peer sr-only chip-radio" checked>
+                        <label for="role_professional" class="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-xs font-medium text-white/70 hover:bg-white/10 transition-all">
+                            <i class="fa-solid fa-briefcase"></i> Professional
+                        </label>
+                    </div>
+                    <div class="relative">
+                        <input type="radio" name="role" id="role_creator" class="peer sr-only chip-radio">
+                        <label for="role_creator" class="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-xs font-medium text-white/70 hover:bg-white/10 transition-all">
+                            <i class="fa-solid fa-palette"></i> Creator
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SSO Integration -->
+        <section id="sso_integration" class="flex flex-col gap-3 mb-8">
+            <div class="flex items-center gap-3 mb-2">
+                <div class="h-[1px] flex-1 bg-white/10"></div>
+                <span class="text-xs text-white/40 font-medium px-2">or continue with</span>
+                <div class="h-[1px] flex-1 bg-white/10"></div>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-3">
+                <button class="glass-panel flex items-center justify-center gap-2 py-3 rounded-xl hover:bg-white/5 transition-all border border-white/10">
+                    <i class="fa-brands fa-apple text-lg"></i>
+                    <span class="text-sm font-medium">Apple</span>
+                </button>
+                <button class="glass-panel flex items-center justify-center gap-2 py-3 rounded-xl hover:bg-white/5 transition-all border border-white/10">
+                    <i class="fa-brands fa-google text-sm"></i>
+                    <span class="text-sm font-medium">Google</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- Auth Actions & Footer Links -->
+        <section id="auth_actions_footer" class="mt-auto flex flex-col gap-4">
+            <button class="w-full bg-electricBlue text-[#0A0F1D] font-semibold py-4 rounded-2xl shadow-[0_0_20px_rgba(0,212,255,0.3)] hover:shadow-[0_0_30px_rgba(0,212,255,0.5)] transition-all flex items-center justify-center gap-2">
+                Complete Setup
+                <i class="fa-solid fa-arrow-right text-sm"></i>
+            </button>
+            
+            <div class="text-center">
+                <p class="text-xs text-white/60">
+                    Already have an account? 
+                    <a href="#" class="text-electricBlue font-medium hover:text-white transition-colors ml-1">Sign In</a>
+                </p>
+            </div>
+        </section>
+
+    </main>
+</body>
+</html>

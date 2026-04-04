@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        window.FontAwesomeConfig = {
+          autoReplaceSvg: 'nest'
+        };
+      </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pickertime - Smart Alert</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        deepNavy: '#0A0F1D',
+                        electricBlue: '#00D4FF',
+                        darkSurface: 'rgba(255, 255, 255, 0.03)',
+                        glassBorder: 'rgba(255, 255, 255, 0.1)',
+                    },
+                    backgroundImage: {
+                        'glow-gradient': 'radial-gradient(circle at center, rgba(0, 212, 255, 0.15) 0%, rgba(10, 15, 29, 0) 70%)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0A0F1D;
+            color: #ffffff;
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+        }
+        ::-webkit-scrollbar { display: none; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .dot-pattern {
+            background-image: radial-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 212, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0); }
+        }
+        .pulse-effect {
+            animation: pulse-glow 2s infinite;
+        }
+
+        @keyframes slideUpFade {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slide-up {
+            animation: slideUpFade 0.6s ease-out forwards;
+        }
+        
+        .delay-100 { animation-delay: 100ms; }
+        .delay-200 { animation-delay: 200ms; }
+        .delay-300 { animation-delay: 300ms; }
+    </style>
+</head>
+<body class="antialiased min-h-[100dvh] flex flex-col relative pb-24">
+
+    <!-- Ambient Background Glows -->
+    <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-glow-gradient pointer-events-none -z-10"></div>
+    <div class="absolute top-0 left-0 w-full h-full dot-pattern opacity-30 pointer-events-none -z-20"></div>
+
+    <!-- Main Container -->
+    <main class="flex-1 w-full max-w-[375px] mx-auto flex flex-col px-5 pt-8 relative z-10 md:max-w-md lg:max-w-lg xl:max-w-xl h-full overflow-y-auto">
+        
+        <!-- Header -->
+        <header id="alert-header" class="flex items-center justify-between mb-8 sticky top-0 bg-[#0A0F1D]/90 backdrop-blur-md pt-2 pb-4 z-40">
+            <div class="flex items-center gap-3">
+                <button class="w-10 h-10 rounded-full glass-panel flex items-center justify-center text-white/70 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-electricBlue animate-pulse"></span>
+                <span class="text-xs font-bold text-electricBlue uppercase tracking-wider">Smart Alert</span>
+            </div>
+        </header>
+
+        <!-- Hero: Countdown & What's Next -->
+        <section id="hero-countdown" class="mb-6 animate-slide-up opacity-0">
+            <div class="glass-panel rounded-[24px] p-6 border border-electricBlue/30 relative overflow-hidden text-center">
+                <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[200px] h-[100px] bg-electricBlue/20 blur-[40px] pointer-events-none"></div>
+                
+                <p class="text-sm text-white/60 font-medium mb-2">Next up in</p>
+                <div class="text-5xl font-bold text-white mb-4 tracking-tighter">
+                    14<span class="text-2xl text-white/50 ml-1">m</span>
+                </div>
+                
+                <div class="w-full h-px bg-gradient-to-r from-transparent via-white/20 to-transparent mb-4"></div>
+                
+                <h2 class="text-xl font-bold text-white mb-1">AP CS Homework</h2>
+                <p class="text-sm text-white/50">Chapter 4 - Binary Search</p>
+            </div>
+        </section>
+
+        <!-- Rationale Insight Chip -->
+        <section id="rationale-insight" class="mb-8 animate-slide-up opacity-0 delay-100">
+            <div class="bg-gradient-to-r from-purple-900/20 to-transparent rounded-xl p-3 border border-purple-500/20 flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400 flex-shrink-0">
+                    <i class="fa-solid fa-brain text-xs"></i>
+                </div>
+                <p class="text-xs text-white/80 leading-snug">
+                    <span class="font-bold text-white">Insight:</span> You have a free 35 minutes before your commute. Perfect for a short focus block.
+                </p>
+            </div>
+        </section>
+
+        <!-- Recommended Prep Steps -->
+        <section id="prep-steps" class="mb-8 animate-slide-up opacity-0 delay-200">
+            <h3 class="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-list-check text-electricBlue"></i>
+                Recommended Prep
+            </h3>
+            
+            <div class="space-y-2">
+                <div class="glass-panel rounded-xl p-3 flex items-center gap-3">
+                    <div class="w-6 h-6 rounded border border-white/20 flex items-center justify-center">
+                        <i class="fa-solid fa-laptop-code text-[10px] text-white/50"></i>
+                    </div>
+                    <span class="text-sm text-white/80">Open IDE & Chapter 4 PDF</span>
+                </div>
+                <div class="glass-panel rounded-xl p-3 flex items-center gap-3">
+                    <div class="w-6 h-6 rounded border border-white/20 flex items-center justify-center">
+                        <i class="fa-solid fa-glass-water text-[10px] text-white/50"></i>
+                    </div>
+                    <span class="text-sm text-white/80">Fill water bottle</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Mini Timeline Preview -->
+        <section id="mini-timeline" class="mb-8 animate-slide-up opacity-0 delay-300">
+            <h3 class="text-sm font-bold text-white mb-4">Timeline Preview</h3>
+            
+            <div class="glass-panel rounded-[20px] p-5 border border-white/10 relative">
+                <!-- Timeline Line -->
+                <div class="absolute left-[39px] top-6 bottom-6 w-px bg-white/10"></div>
+                
+                <div class="space-y-6 relative">
+                    <!-- Current -->
+                    <div class="flex items-start gap-4">
+                        <div class="text-xs text-white/50 w-12 text-right pt-1">Now</div>
+                        <div class="w-3 h-3 rounded-full bg-white/20 border-2 border-[#0A0F1D] mt-1 z-10"></div>
+                        <div class="flex-1">
+                            <p class="text-sm text-white/50">Free Time</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Next -->
+                    <div class="flex items-start gap-4">
+                        <div class="text-xs font-bold text-electricBlue w-12 text-right pt-1">14:00</div>
+                        <div class="w-3 h-3 rounded-full bg-electricBlue border-2 border-[#0A0F1D] mt-1 z-10 shadow-[0_0_10px_rgba(0,212,255,0.5)]"></div>
+                        <div class="flex-1 bg-electricBlue/10 rounded-lg p-2 border border-electricBlue/20">
+                            <p class="text-sm font-bold text-white">AP CS Homework</p>
+                            <p class="text-xs text-white/50">35m block</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Later -->
+                    <div class="flex items-start gap-4">
+                        <div class="text-xs text-white/50 w-12 text-right pt-1">14:35</div>
+                        <div class="w-3 h-3 rounded-full bg-white/20 border-2 border-[#0A0F1D] mt-1 z-10"></div>
+                        <div class="flex-1">
+                            <p class="text-sm text-white/50">Commute to Gym</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Action Control Center -->
+        <section id="action-controls" class="mb-8 animate-slide-up opacity-0 delay-300">
+            <button class="w-full bg-gradient-to-r from-electricBlue to-blue-600 rounded-[20px] py-4 px-6 flex items-center justify-center gap-3 text-white shadow-[0_0_20px_rgba(0,212,255,0.3)] pulse-effect hover:scale-[1.02] transition-transform mb-3">
+                <i class="fa-solid fa-play"></i>
+                <span class="font-bold text-lg">Start Focus Now</span>
+            </button>
+            
+            <div class="grid grid-cols-3 gap-2">
+                <button class="glass-panel rounded-xl py-3 flex flex-col items-center justify-center gap-1 hover:bg-white/5 transition-colors">
+                    <i class="fa-solid fa-bell-slash text-white/50 text-sm"></i>
+                    <span class="text-[10px] font-medium text-white/70">Snooze 5m</span>
+                </button>
+                <button class="glass-panel rounded-xl py-3 flex flex-col items-center justify-center gap-1 hover:bg-white/5 transition-colors">
+                    <i class="fa-solid fa-sliders text-white/50 text-sm"></i>
+                    <span class="text-[10px] font-medium text-white/70">Adjust Plan</span>
+                </button>
+                <button class="glass-panel rounded-xl py-3 flex flex-col items-center justify-center gap-1 hover:bg-emerald-500/10 hover:border-emerald-500/30 transition-colors group">
+                    <i class="fa-solid fa-check text-white/50 group-hover:text-emerald-400 text-sm transition-colors"></i>
+                    <span class="text-[10px] font-medium text-white/70 group-hover:text-emerald-400 transition-colors">Mark Done</span>
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Bottom Navigation Bar -->
+    <nav id="bottom-nav" class="fixed bottom-0 left-0 w-full glass-panel border-t border-white/10 bg-[#0A0F1D]/80 backdrop-blur-xl z-50 pb-safe">
+        <div class="max-w-[375px] mx-auto flex justify-between items-center px-6 py-4 md:max-w-md lg:max-w-lg xl:max-w-xl">
+            
+            <a href="#" class="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-house text-lg"></i>
+                </div>
+            </a>
+            
+            <a href="#" class="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-calendar-plus text-lg"></i>
+                </div>
+            </a>
+            
+            <!-- Active State: Timeline View -->
+            <a href="#" class="flex flex-col items-center gap-1 group">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center bg-electricBlue/10 text-electricBlue relative shadow-[0_0_15px_rgba(0,212,255,0.2)]">
+                    <i class="fa-solid fa-bars-staggered text-lg"></i>
+                    <div class="absolute -bottom-2 w-1 h-1 rounded-full bg-electricBlue shadow-[0_0_5px_rgba(0,212,255,1)]"></div>
+                </div>
+            </a>
+            
+            <a href="#" class="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-chart-simple text-lg"></i>
+                </div>
+            </a>
+
+        </div>
+    </nav>
+
+</body>
+</html>

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        window.FontAwesomeConfig = {
+          autoReplaceSvg: 'nest'
+        };
+      </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pickertime - Deep Focus Mode</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        deepNavy: '#0A0F1D',
+                        electricBlue: '#00D4FF',
+                        darkSurface: 'rgba(255, 255, 255, 0.03)',
+                        glassBorder: 'rgba(255, 255, 255, 0.1)',
+                    },
+                    backgroundImage: {
+                        'glow-gradient': 'radial-gradient(circle at center, rgba(0, 212, 255, 0.15) 0%, rgba(10, 15, 29, 0) 70%)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0A0F1D;
+            color: #ffffff;
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+        }
+        ::-webkit-scrollbar { display: none; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .dot-pattern {
+            background-image: radial-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 212, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0); }
+        }
+        .pulse-effect {
+            animation: pulse-glow 2s infinite;
+        }
+
+        @keyframes slideUpFade {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slide-up {
+            animation: slideUpFade 0.6s ease-out forwards;
+        }
+        
+        .delay-100 { animation-delay: 100ms; }
+        .delay-200 { animation-delay: 200ms; }
+        .delay-300 { animation-delay: 300ms; }
+
+        /* Progress Ring Styles */
+        .progress-ring__circle {
+            transition: stroke-dashoffset 0.35s;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+    </style>
+</head>
+<body class="antialiased min-h-[100dvh] flex flex-col relative pb-24">
+
+    <!-- Ambient Background Glows -->
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-glow-gradient pointer-events-none -z-10 animate-pulse" style="animation-duration: 4s;"></div>
+    <div class="absolute top-0 left-0 w-full h-full dot-pattern opacity-30 pointer-events-none -z-20"></div>
+
+    <!-- Main Container -->
+    <main class="flex-1 w-full max-w-[375px] mx-auto flex flex-col px-5 pt-8 relative z-10 h-full overflow-y-auto">
+        
+        <!-- Header -->
+        <header id="focus-header" class="flex items-center justify-between mb-8 sticky top-0 bg-[#0A0F1D]/90 backdrop-blur-md pt-2 pb-4 z-40">
+            <div class="flex items-center gap-3">
+                <button class="w-10 h-10 rounded-full glass-panel flex items-center justify-center text-white/70 hover:text-white transition-colors">
+                    <i class="fa-solid fa-chevron-left"></i>
+                </button>
+            </div>
+            <div class="flex items-center gap-2 bg-electricBlue/10 px-3 py-1.5 rounded-full border border-electricBlue/20">
+                <span class="w-2 h-2 rounded-full bg-electricBlue animate-pulse"></span>
+                <span class="text-xs font-bold text-electricBlue uppercase tracking-wider">Deep Focus</span>
+            </div>
+            <div class="w-10 h-10"></div> <!-- Spacer for centering -->
+        </header>
+
+        <!-- Task Info Stack -->
+        <section id="task-info" class="text-center mb-8 animate-slide-up opacity-0">
+            <div class="inline-block bg-white/5 border border-white/10 rounded-full px-3 py-1 mb-3">
+                <span class="text-xs font-medium text-white/60">Session 2 of 4</span>
+            </div>
+            <h1 class="text-2xl font-bold text-white mb-2">AP CS Homework</h1>
+            <p class="text-sm text-white/50">Chapter 4 - Binary Search</p>
+        </section>
+
+        <!-- Central Progress Ring & Timer -->
+        <section id="focus-timer" class="flex-1 flex flex-col items-center justify-center mb-10 animate-slide-up opacity-0 delay-100 relative">
+            <div class="relative w-[280px] h-[280px] flex items-center justify-center">
+                <!-- Outer Glow -->
+                <div class="absolute inset-0 rounded-full shadow-[0_0_40px_rgba(0,212,255,0.15)] pointer-events-none"></div>
+                
+                <!-- SVG Progress Ring -->
+                <svg class="absolute inset-0 w-full h-full" viewBox="0 0 280 280">
+                    <!-- Background Circle -->
+                    <circle 
+                        class="text-white/5" 
+                        stroke-width="8" 
+                        stroke="currentColor" 
+                        fill="transparent" 
+                        r="130" 
+                        cx="140" 
+                        cy="140"
+                    />
+                    <!-- Progress Circle (Electric Blue) -->
+                    <circle 
+                        class="progress-ring__circle text-electricBlue drop-shadow-[0_0_10px_rgba(0,212,255,0.5)]" 
+                        stroke-width="8" 
+                        stroke-linecap="round"
+                        stroke="currentColor" 
+                        fill="transparent" 
+                        r="130" 
+                        cx="140" 
+                        cy="140"
+                        stroke-dasharray="816.8"
+                        stroke-dashoffset="204.2" <!-- 75% progress -->
+                    />
+                </svg>
+
+                <!-- Timer Display -->
+                <div class="text-center z-10 flex flex-col items-center">
+                    <div class="text-6xl font-bold text-white tracking-tighter mb-1 drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]">
+                        24<span class="text-white/50">:</span>15
+                    </div>
+                    <p class="text-sm font-medium text-electricBlue tracking-widest uppercase">Remaining</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Distraction Shield & Ambient Sound Toggles -->
+        <section id="focus-toggles" class="mb-8 animate-slide-up opacity-0 delay-200">
+            <div class="flex justify-center gap-3">
+                <button class="glass-panel rounded-full px-4 py-2.5 flex items-center gap-2 hover:bg-white/5 transition-colors border-electricBlue/30 bg-electricBlue/5">
+                    <i class="fa-solid fa-shield-halved text-electricBlue text-sm"></i>
+                    <span class="text-xs font-medium text-white/90">Shield On</span>
+                </button>
+                <button class="glass-panel rounded-full px-4 py-2.5 flex items-center gap-2 hover:bg-white/5 transition-colors">
+                    <i class="fa-solid fa-headphones text-white/50 text-sm"></i>
+                    <span class="text-xs font-medium text-white/70">Brown Noise</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- Session Controls -->
+        <section id="session-controls" class="mb-4 animate-slide-up opacity-0 delay-300">
+            <div class="glass-panel rounded-[24px] p-2 flex items-center justify-between border-white/10">
+                <button class="flex-1 py-4 flex items-center justify-center gap-2 text-white/70 hover:text-white transition-colors group">
+                    <div class="w-10 h-10 rounded-full bg-white/5 group-hover:bg-white/10 flex items-center justify-center transition-colors">
+                        <i class="fa-solid fa-pause text-lg"></i>
+                    </div>
+                    <span class="font-medium text-sm">Pause</span>
+                </button>
+                
+                <div class="w-px h-12 bg-white/10"></div>
+                
+                <button class="flex-1 py-4 flex items-center justify-center gap-2 text-white/70 hover:text-red-400 transition-colors group">
+                    <div class="w-10 h-10 rounded-full bg-white/5 group-hover:bg-red-500/10 flex items-center justify-center transition-colors border border-transparent group-hover:border-red-500/30">
+                        <i class="fa-solid fa-stop text-lg group-hover:text-red-400"></i>
+                    </div>
+                    <span class="font-medium text-sm group-hover:text-red-400">End Early</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- Micro-break Prompt (Optional/Contextual) -->
+        <section id="micro-break" class="mb-8 animate-slide-up opacity-0 delay-300 text-center">
+            <p class="text-xs text-white/40 flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-eye text-[10px]"></i>
+                Look away for 20s in 5 mins
+            </p>
+        </section>
+
+    </main>
+
+    <!-- Bottom Navigation Bar -->
+    <nav id="bottom-nav" class="fixed bottom-0 left-0 w-full glass-panel border-t border-white/10 bg-[#0A0F1D]/80 backdrop-blur-xl z-50 pb-safe">
+        <div class="max-w-[375px] mx-auto flex justify-between items-center px-6 py-4 md:max-w-md lg:max-w-lg xl:max-w-xl">
+            
+            <!-- Dashboard (Main Hub) -->
+            <a href="#" class="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-house text-lg"></i>
+                </div>
+            </a>
+            
+            <!-- Task Creation & Scheduler -->
+            <a href="#" class="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-calendar-plus text-lg"></i>
+                </div>
+            </a>
+            
+            <!-- Timeline View (The Plan) -->
+            <a href="#" class="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-bars-staggered text-lg"></i>
+                </div>
+            </a>
+            
+            <!-- Weekly Insights -->
+            <a href="#" class="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-chart-simple text-lg"></i>
+                </div>
+            </a>
+
+        </div>
+    </nav>
+
+</body>
+</html>

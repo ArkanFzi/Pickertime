@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        window.FontAwesomeConfig = {
+          autoReplaceSvg: 'nest'
+        };
+      </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pickertime - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        deepNavy: '#0A0F1D',
+                        electricBlue: '#00D4FF',
+                        darkSurface: 'rgba(255, 255, 255, 0.03)',
+                        glassBorder: 'rgba(255, 255, 255, 0.1)',
+                    },
+                    backgroundImage: {
+                        'glow-gradient': 'radial-gradient(circle at center, rgba(0, 212, 255, 0.15) 0%, rgba(10, 15, 29, 0) 70%)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0A0F1D;
+            color: #ffffff;
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+        }
+        ::-webkit-scrollbar { display: none; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .text-gradient {
+            background: linear-gradient(135deg, #ffffff 0%, #00D4FF 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .dot-pattern {
+            background-image: radial-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+
+        /* Pulse Animation */
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 212, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0); }
+        }
+        .pulse-effect {
+            animation: pulse-glow 2s infinite;
+        }
+
+        /* Progress Ring */
+        .progress-ring__circle {
+            transition: stroke-dashoffset 0.35s;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+    </style>
+</head>
+<body class="antialiased min-h-[100dvh] flex flex-col relative pb-24">
+
+    <!-- Ambient Background Glows -->
+    <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-glow-gradient pointer-events-none -z-10"></div>
+    <div class="absolute top-0 left-0 w-full h-full dot-pattern opacity-30 pointer-events-none -z-20"></div>
+
+    <!-- Main Container - Mobile First -->
+    <main class="flex-1 w-full max-w-[375px] mx-auto flex flex-col px-5 pt-8 relative z-10 md:max-w-md lg:max-w-lg xl:max-w-xl">
+        
+        <!-- Header & Energy Status -->
+        <header id="dashboard-header" class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-white/5 border border-white/10 overflow-hidden">
+                    <img src="https://storage.googleapis.com/uxpilot-auth.appspot.com/avatars/avatar-1.jpg" alt="User Avatar" class="w-full h-full object-cover">
+                </div>
+                <div>
+                    <h1 class="text-sm font-semibold text-white">Good Morning, Alex</h1>
+                    <p class="text-[11px] text-white/50">Ready for deep focus?</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <div class="px-3 py-1.5 rounded-full bg-electricBlue/10 border border-electricBlue/30 flex items-center gap-1.5">
+                    <i class="fa-solid fa-bolt text-electricBlue text-[10px]"></i>
+                    <span class="text-xs font-semibold text-electricBlue">High Energy</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Bento Grid Layout -->
+        <div class="grid grid-cols-2 gap-3 mb-6">
+            
+            <!-- Primary Next Action (Full Width) -->
+            <section id="next-action" class="col-span-2 glass-panel rounded-[24px] p-5 relative overflow-hidden border-electricBlue/30 shadow-[0_0_15px_rgba(0,212,255,0.05)]">
+                <div class="absolute -right-10 -top-10 w-32 h-32 bg-electricBlue/10 rounded-full blur-2xl"></div>
+                
+                <h3 class="text-[10px] font-semibold text-electricBlue uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <i class="fa-solid fa-arrow-right"></i> Next Best Action
+                </h3>
+                
+                <div class="mb-4">
+                    <h2 class="text-xl font-bold text-white mb-1">Q3 Product Strategy</h2>
+                    <p class="text-xs text-white/60">Deep work block recommended based on your peak energy window.</p>
+                </div>
+                
+                <div class="flex items-center justify-between mb-5 bg-[#0A0F1D]/50 rounded-xl p-3 border border-white/5">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-regular fa-clock text-white/50 text-sm"></i>
+                        <span class="text-xs font-medium text-white/80">90 mins</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-layer-group text-white/50 text-sm"></i>
+                        <span class="text-xs font-medium text-white/80">Strategy</span>
+                    </div>
+                </div>
+                
+                <button class="w-full bg-electricBlue text-[#0A0F1D] font-bold py-3.5 rounded-xl shadow-[0_0_15px_rgba(0,212,255,0.2)] hover:shadow-[0_0_25px_rgba(0,212,255,0.4)] transition-all flex items-center justify-center gap-2 text-sm">
+                    <i class="fa-solid fa-play text-xs"></i> Start Focus
+                </button>
+            </section>
+
+            <!-- Progress Ring Tile -->
+            <section id="daily-progress" class="glass-panel rounded-[24px] p-4 flex flex-col items-center justify-center text-center relative h-[160px]">
+                <h3 class="text-[10px] font-semibold text-white/50 uppercase tracking-wider absolute top-4 left-4">Daily Plan</h3>
+                
+                <div class="relative w-20 h-20 mt-4">
+                    <svg class="w-full h-full" viewBox="0 0 100 100">
+                        <circle class="text-white/10 stroke-current" stroke-width="8" cx="50" cy="50" r="40" fill="transparent"></circle>
+                        <circle class="text-electricBlue progress-ring__circle stroke-current" stroke-width="8" stroke-linecap="round" cx="50" cy="50" r="40" fill="transparent" stroke-dasharray="251.2" stroke-dashoffset="62.8"></circle>
+                    </svg>
+                    <div class="absolute inset-0 flex flex-col items-center justify-center">
+                        <span class="text-lg font-bold text-white">75%</span>
+                    </div>
+                </div>
+                <p class="text-[10px] text-white/50 mt-2">3 of 4 Focus Blocks</p>
+            </section>
+
+            <!-- Upcoming Smart Alarm -->
+            <section id="smart-alarm-tile" class="glass-panel rounded-[24px] p-4 flex flex-col justify-between h-[160px]">
+                <div class="flex justify-between items-start">
+                    <h3 class="text-[10px] font-semibold text-white/50 uppercase tracking-wider">Upcoming</h3>
+                    <div class="w-6 h-6 rounded-full bg-electricBlue/20 flex items-center justify-center pulse-effect">
+                        <i class="fa-solid fa-bell text-electricBlue text-[10px]"></i>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 class="text-sm font-semibold text-white mb-1">Team Sync</h4>
+                    <p class="text-xs text-white/60 mb-2">Starts in 45m</p>
+                    <div class="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                        <div class="h-full bg-electricBlue w-1/3 rounded-full"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Quick Actions (Full Width List) -->
+            <section id="quick-actions" class="col-span-2 flex flex-col gap-2">
+                <h3 class="text-xs font-semibold text-white/70 mb-1 ml-1 uppercase tracking-wider">Quick Actions</h3>
+                
+                <button class="glass-panel rounded-2xl p-3.5 flex items-center justify-between hover:bg-white/5 transition-colors text-left w-full group">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/70 group-hover:bg-electricBlue/10 group-hover:text-electricBlue group-hover:border-electricBlue/30 transition-all">
+                            <i class="fa-solid fa-plus text-xs"></i>
+                        </div>
+                        <div>
+                            <h4 class="text-sm font-medium text-white">Create Task</h4>
+                            <p class="text-[10px] text-white/50">Add to today's schedule</p>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-white/30 text-xs"></i>
+                </button>
+
+                <button class="glass-panel rounded-2xl p-3.5 flex items-center justify-between hover:bg-white/5 transition-colors text-left w-full group">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/70 group-hover:bg-electricBlue/10 group-hover:text-electricBlue group-hover:border-electricBlue/30 transition-all">
+                            <i class="fa-solid fa-list-check text-xs"></i>
+                        </div>
+                        <div>
+                            <h4 class="text-sm font-medium text-white">View The Plan</h4>
+                            <p class="text-[10px] text-white/50">Check timeline view</p>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-white/30 text-xs"></i>
+                </button>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Bottom Navigation Bar -->
+    <nav id="bottom-nav" class="fixed bottom-0 left-0 w-full glass-panel border-t border-white/10 bg-[#0A0F1D]/80 backdrop-blur-xl z-50 pb-safe">
+        <div class="max-w-[375px] mx-auto flex justify-between items-center px-6 py-4 md:max-w-md lg:max-w-lg xl:max-w-xl">
+            
+            <a href="#" class="flex flex-col items-center gap-1 group">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center bg-electricBlue/10 text-electricBlue relative">
+                    <i class="fa-solid fa-house text-lg"></i>
+                    <div class="absolute -bottom-2 w-1 h-1 rounded-full bg-electricBlue"></div>
+                </div>
+            </a>
+            
+            <a href="#" class="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-calendar-plus text-lg"></i>
+                </div>
+            </a>
+            
+            <a href="#" class="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-bars-staggered text-lg"></i>
+                </div>
+            </a>
+            
+            <a href="#" class="flex flex-col items-center gap-1 text-white/40 hover:text-white/80 transition-colors">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-chart-simple text-lg"></i>
+                </div>
+            </a>
+
+        </div>
+    </nav>
+
+</body>
+</html>

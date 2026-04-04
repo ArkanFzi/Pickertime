@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        window.FontAwesomeConfig = {
+          autoReplaceSvg: 'nest'
+        };
+      </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pickertime - Authentication & Onboarding</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-3.1.1.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        deepNavy: '#0A0F1D',
+                        electricBlue: '#00D4FF',
+                        darkSurface: 'rgba(255, 255, 255, 0.03)',
+                        glassBorder: 'rgba(255, 255, 255, 0.1)',
+                    },
+                    backgroundImage: {
+                        'glow-gradient': 'radial-gradient(circle at center, rgba(0, 212, 255, 0.15) 0%, rgba(10, 15, 29, 0) 70%)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0A0F1D;
+            color: #ffffff;
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+        }
+        ::-webkit-scrollbar { display: none; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .text-gradient {
+            background: linear-gradient(135deg, #ffffff 0%, #00D4FF 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .dot-pattern {
+            background-image: radial-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+    </style>
+</head>
+<body class="antialiased min-h-[100dvh] flex flex-col relative">
+
+    <!-- Ambient Background Glows -->
+    <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-glow-gradient pointer-events-none -z-10"></div>
+    <div class="absolute top-0 left-0 w-full h-full dot-pattern opacity-30 pointer-events-none -z-20"></div>
+
+    <!-- Main Container - Mobile First -->
+    <main class="flex-1 w-full max-w-[375px] mx-auto flex flex-col px-6 pt-12 pb-8 relative z-10 md:max-w-md lg:max-w-lg xl:max-w-xl">
+        
+        <!-- Hero Branding Section -->
+        <section id="hero_branding" class="flex flex-col items-center text-center mt-8 mb-10">
+            <div class="glass-panel px-4 py-1.5 rounded-full mb-8 inline-flex items-center gap-2">
+                <i class="fa-solid fa-bolt text-electricBlue text-xs"></i>
+                <span class="text-xs font-medium text-white/80">High-performance planning</span>
+            </div>
+            
+            <h1 class="text-4xl md:text-5xl font-bold tracking-tight mb-4">
+                <span class="text-gradient">Pickertime</span>
+            </h1>
+            
+            <p class="text-white/60 text-sm md:text-base leading-relaxed max-w-[280px] mx-auto">
+                A high-performance productivity ecosystem for daily schedule management.
+            </p>
+        </section>
+
+        <!-- Feature Bento Grid Preview -->
+        <section id="feature_bento_grid" class="grid grid-cols-2 gap-3 mb-10">
+            <!-- Bento Tile 1: Role-based -->
+            <div class="glass-panel rounded-[20px] p-4 flex flex-col justify-between h-[120px] relative overflow-hidden group">
+                <div class="absolute -right-4 -top-4 w-16 h-16 bg-electricBlue/20 rounded-full blur-xl group-hover:bg-electricBlue/30 transition-all"></div>
+                <div class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center mb-2 border border-white/10">
+                    <i class="fa-solid fa-user-astronaut text-electricBlue text-sm"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-semibold text-white mb-1">Role Profiles</h3>
+                    <p class="text-[10px] text-white/50 leading-tight">AI suggestions based on your focus.</p>
+                </div>
+            </div>
+
+            <!-- Bento Tile 2: Context Alarms -->
+            <div class="glass-panel rounded-[20px] p-4 flex flex-col justify-between h-[120px] relative overflow-hidden group">
+                <div class="absolute -left-4 -bottom-4 w-16 h-16 bg-electricBlue/20 rounded-full blur-xl group-hover:bg-electricBlue/30 transition-all"></div>
+                <div class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center mb-2 border border-white/10">
+                    <i class="fa-solid fa-bell text-electricBlue text-sm"></i>
+                </div>
+                <div>
+                    <h3 class="text-sm font-semibold text-white mb-1">Context Alarms</h3>
+                    <p class="text-[10px] text-white/50 leading-tight">Smart alerts that read the room.</p>
+                </div>
+            </div>
+
+            <!-- Bento Tile 3: Chart Preview (Full Width) -->
+            <div class="glass-panel rounded-[20px] p-4 col-span-2 h-[140px] relative overflow-hidden flex flex-col">
+                <div class="flex justify-between items-center mb-2 z-10">
+                    <h3 class="text-sm font-semibold text-white">Productivity Flow</h3>
+                    <span class="text-[10px] text-electricBlue bg-electricBlue/10 px-2 py-0.5 rounded-full border border-electricBlue/20">Live</span>
+                </div>
+                <div id="productivity-chart" class="w-full flex-1 -ml-2 -mb-4 z-0"></div>
+            </div>
+        </section>
+
+        <!-- Timeline Preview (Abstract) -->
+        <section id="timeline_preview" class="mb-12">
+            <div class="glass-panel rounded-[24px] p-1 border border-white/10">
+                <div class="bg-[#0A0F1D]/80 rounded-[20px] p-4">
+                    <div class="flex items-center gap-3 mb-3 opacity-70">
+                        <div class="w-1.5 h-1.5 rounded-full bg-electricBlue shadow-[0_0_8px_rgba(0,212,255,0.8)]"></div>
+                        <div class="h-1 flex-1 bg-white/5 rounded-full overflow-hidden">
+                            <div class="h-full w-1/3 bg-gradient-to-r from-electricBlue/50 to-electricBlue rounded-full"></div>
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="h-8 bg-white/5 rounded-lg border border-white/5 flex items-center px-3">
+                            <div class="w-2 h-2 rounded-full bg-emerald-400 mr-3"></div>
+                            <div class="h-2 w-24 bg-white/20 rounded-full"></div>
+                        </div>
+                        <div class="h-8 bg-white/5 rounded-lg border border-white/5 flex items-center px-3 ml-6 opacity-60">
+                            <div class="w-2 h-2 rounded-full bg-purple-400 mr-3"></div>
+                            <div class="h-2 w-16 bg-white/20 rounded-full"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Auth Actions -->
+        <section id="auth_actions" class="mt-auto flex flex-col gap-3">
+            <button class="w-full bg-electricBlue text-[#0A0F1D] font-semibold py-4 rounded-2xl shadow-[0_0_20px_rgba(0,212,255,0.3)] hover:shadow-[0_0_30px_rgba(0,212,255,0.5)] transition-all flex items-center justify-center gap-2">
+                Create Account
+                <i class="fa-solid fa-arrow-right text-sm"></i>
+            </button>
+            <button class="w-full glass-panel text-white font-medium py-4 rounded-2xl hover:bg-white/5 transition-all">
+                Sign In
+            </button>
+        </section>
+
+        <!-- Legal Footer -->
+        <footer id="legal_footer" class="mt-8 flex justify-center items-center gap-4 text-[11px] text-white/40">
+            <a href="#" class="hover:text-white/80 transition-colors">Privacy Policy</a>
+            <span class="w-1 h-1 rounded-full bg-white/20"></span>
+            <a href="#" class="hover:text-white/80 transition-colors">Terms of Service</a>
+        </footer>
+
+    </main>
+
+    <script>
+        function initializeCharts() {
+            try {
+                // Productivity Flow Chart
+                const chartData = [{
+                    x: [1, 2, 3, 4, 5, 6, 7],
+                    y: [30, 45, 35, 65, 50, 80, 75],
+                    type: 'scatter',
+                    mode: 'lines',
+                    line: {
+                        shape: 'spline',
+                        smoothing: 1.3,
+                        color: '#00D4FF',
+                        width: 2
+                    },
+                    fill: 'tozeroy',
+                    fillcolor: 'rgba(0, 212, 255, 0.1)'
+                }];
+
+                const layout = {
+                    margin: { t: 5, r: 5, b: 5, l: 5 },
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    xaxis: { showgrid: false, zeroline: false, showticklabels: false },
+                    yaxis: { showgrid: false, zeroline: false, showticklabels: false },
+                    showlegend: false,
+                    height: 80,
+                    hovermode: false
+                };
+
+                const config = {
+                    responsive: true,
+                    displayModeBar: false,
+                    displaylogo: false
+                };
+
+                Plotly.newPlot('productivity-chart', chartData, layout, config);
+            } catch (e) {
+                console.error('Error initializing chart:', e);
+            }
+        }
+
+        window.addEventListener('load', initializeCharts);
+        setTimeout(initializeCharts, 1200);
+    </script>
+</body>
+</html>
