@@ -32,7 +32,22 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+*.env
+supabase/.env.local
+supabase/.env
+
+# secrets
+*.key
+*.pem
+service-account.json
+google-services.json
+GoogleService-Info.plist
 
 # typescript
 *.tsbuildinfo

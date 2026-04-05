@@ -1,7 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY!;
-const genAI = new GoogleGenerativeAI(apiKey);
+import { supabase } from './supabase';
 
 export type GeminiSuggestion = {
   task: string;
@@ -10,6 +7,19 @@ export type GeminiSuggestion = {
   category: string;
 };
 
+async function invokeGeminiAI(action: string, payload: any) {
+  const { data, error } = await supabase.functions.invoke('gemini-ai', {
+    body: { action, payload },
+  });
+
+  if (error) {
+    console.error(`Error invoking Gemini function (${action}):`, error);
+    throw error;
+  }
+
+  return data;
+}
+
 export async function getNextBestAction(
   role: string,
   focusGoal: string,
@@ -17,38 +27,12 @@ export async function getNextBestAction(
   currentTasks: any[]
 ): Promise<GeminiSuggestion> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-    const prompt = `
-      You are the AI engine for "Pickertime", a high-performance productivity app.
-      Based on the following user context, suggest the SINGLE most important "Next Best Action" (Task) for the user to work on right now.
-
-      USER CONTEXT:
-      - Role: ${role}
-      - Main Goal: ${focusGoal}
-      - Energy Preference: ${energyPref}
-      - Hour of Day: ${new Date().getHours()}:00
-      - Today's Tasks: ${currentTasks.map(t => t.title).join(', ') || 'No tasks created yet'}
-
-      OUTPUT FORMAT (JSON ONLY):
-      {
-        "task": "Specific task name",
-        "desc": "One-line rationale for why this is the best move right now based on energy/goal.",
-        "duration": "e.g. 45 mins",
-        "category": "e.g. Work, Study, Health"
-      }
-    `;
-
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text().trim();
-    
-    // Extract JSON from potential markdown code blocks
-    const jsonStr = text.startsWith('```') 
-      ? text.replace(/^```json/, '').replace(/```$/, '').trim() 
-      : text;
-
-    return JSON.parse(jsonStr);
+    return await invokeGeminiAI('getNextBestAction', {
+      role,
+      focusGoal,
+      energyPref,
+      currentTasks: currentTasks.map(t => ({ title: t.title })) // Minimize payload size
+    });
   } catch (error) {
     console.error('Gemini API Error:', error);
     // Fallback if AI fails
@@ -67,17 +51,7 @@ export async function getAIInsight(
   weeklyData: any
 ): Promise<string> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-    const prompt = `
-      As a productivity coach for "Pickertime", provide a one-line sharp, actionable insight for a ${role} whose goal is "${focusGoal}".
-      Focus on their weekly completion rate and potential scheduling optimizations.
-      Keep it under 140 characters.
-    `;
-
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text().trim();
+    return await invokeGeminiAI('getAIInsight', { role, focusGoal });
   } catch (error) {
     return "Keep protecting your deep work blocks. You're making progress!";
   }
@@ -88,32 +62,7 @@ export async function getSmartAlarmPrep(
   role: string
 ): Promise<Array<{ icon: string; text: string }>> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-    const prompt = `
-      As a productivity assistant for "Pickertime", suggest 3 quick, actionable preparation steps for a ${role} who is about to start the task: "${taskTitle}".
-      
-      For each step, provide:
-      1. A relevant Ionicon icon name (e.g., 'cafe-outline', 'laptop-outline', 'book-outline', 'notifications-off-outline').
-      2. A short instruction (max 35 characters).
-
-      OUTPUT FORMAT (JSON ARRAY ONLY):
-      [
-        {"icon": "icon-name", "text": "Step description"},
-        {"icon": "icon-name", "text": "Step description"},
-        {"icon": "icon-name", "text": "Step description"}
-      ]
-    `;
-
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text().trim();
-    
-    const jsonStr = text.startsWith('```') 
-      ? text.replace(/^```json/, '').replace(/```$/, '').trim() 
-      : text;
-
-    return JSON.parse(jsonStr);
+    return await invokeGeminiAI('getSmartAlarmPrep', { taskTitle, role });
   } catch (error) {
     return [
       { icon: 'cafe-outline', text: 'Get your beverage ready' },
@@ -122,4 +71,3 @@ export async function getSmartAlarmPrep(
     ];
   }
 }
-
