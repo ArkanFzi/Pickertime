@@ -52,12 +52,17 @@ cd Pickertime
 npm install
 ```
 
-### 3. Konfigurasi Environment Variables
-Buat file `.env` di root direktori dan masukkan kunci API Anda:
+5. Konfigurasi Environment Variables
+Buat file `.env` di root direktori untuk koneksi aplikasi ke Supabase:
 ```env
 EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-EXPO_PUBLIC_GEMINI_API_KEY=your_gemini_api_key
+```
+
+6. Konfigurasi AI (Supabase Edge Functions)
+Gemini API Key sekarang diamankan di server (Supabase). Untuk mengaturnya, jalankan perintah ini di Supabase CLI:
+```bash
+supabase secrets set GEMINI_API_KEY=your_gemini_api_key
 ```
 
 ### 4. Jalankan Aplikasi
