@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { User } from '@supabase/supabase-js';
+import { AuthModel } from 'pocketbase';
 
 export type UserRole = 'Student' | 'Professional' | 'Freelancer' | 'Creator' | 'Researcher' | string;
 export type EnergyPref = 'Morning' | 'Afternoon' | 'Night Owl';
@@ -16,7 +16,7 @@ export interface Profile {
 
 export interface Task {
   id: string;
-  user_id: string;
+  user: string; // PocketBase relation field name is usually 'user'
   title: string;
   description?: string;
   category: string;
@@ -31,9 +31,9 @@ export interface Task {
 
 interface AppState {
   // Auth
-  user: User | null;
+  user: AuthModel | null;
   profile: Profile | null;
-  setUser: (user: User | null) => void;
+  setUser: (user: AuthModel | null) => void;
   setProfile: (profile: Profile | null) => void;
 
   // Tasks

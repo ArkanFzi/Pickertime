@@ -1,7 +1,8 @@
 # ⚡ Pickertime: AI-Powered Productivity Ecosystem
 
 [![Expo](https://img.shields.io/badge/Expo-000020?style=for-the-badge&logo=expo&logoColor=white)](https://expo.dev/)
-[![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
+[![PocketBase](https://img.shields.io/badge/PocketBase-B8D2F2?style=for-the-badge&logo=pocketbase&logoColor=black)](https://pocketbase.io/)
+[![Caddy](https://img.shields.io/badge/Caddy-00ADD8?style=for-the-badge&logo=caddy&logoColor=white)](https://caddyserver.com/)
 [![Gemini](https://img.shields.io/badge/Gemini%20AI-4285F4?style=for-the-badge&logo=google-gemini&logoColor=white)](https://deepmind.google/technologies/gemini/)
 
 **Pickertime** bukan sekadar pengatur waktu (timer) biasa. Ini adalah ekosistem produktivitas futuristik yang menggunakan kecerdasan buatan (Gemini AI) untuk menganalisis performa Anda, menjadwalkan tugas tanpa bentrok, dan memberikan peringatan persiapan cerdas (Smart Alarm) tepat sebelum Anda memulai sesi fokus.
@@ -29,12 +30,11 @@ Visualisasi hari Anda dalam bentuk timeline yang bersih. Aplikasi secara otomati
 
 ## 🛠️ Tech Stack
 
-- **Frontend:** React Native with [Expo SDK](https://expo.dev/) (Managed Workflow)
-- **Styling:** NativeWind (Tailwind CSS for React Native)
-- **Database & Auth:** [Supabase](https://supabase.com/)
-- **Intelligence:** [Google Gemini API](https://ai.google.dev/)
-- **Navigation:** Expo Router (File-based routing)
-- **Notifications:** Expo Notifications
+- **Frontend:** React Native with [Expo SDK](https://expo.dev/)
+- **Styling:** Vanilla CSS (Refactored for performance)
+- **Backend:** [PocketBase](https://pocketbase.io/) (Self-hosted via Docker)
+- **Reverse Proxy:** [Caddy](https://caddyserver.com/)
+- **Intelligence:** [Google Gemini API](https://ai.google.dev/) (Direct Integration)
 - **State Management:** Zustand
 
 ---

@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '@/lib/supabase';
+import { pb } from '@/lib/pocketbase';
 
 export default function SignInScreen() {
   const router = useRouter();
@@ -19,13 +19,13 @@ export default function SignInScreen() {
       Alert.alert('Missing Fields', 'Enter your email and password.');
       return;
     }
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
-    if (error) {
-      Alert.alert('Sign In Failed', error.message);
-    } else {
+    try {
+      await pb.collection('Profiles').authWithPassword(email, password);
       router.replace('/');
+    } catch (error: any) {
+      Alert.alert('Sign In Failed', error.message || 'Check your credentials.');
+    } finally {
+      setLoading(false);
     }
   }
 

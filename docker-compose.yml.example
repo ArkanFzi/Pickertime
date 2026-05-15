@@ -1,0 +1,23 @@
+services:
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: pickertime-pb
+    restart: unless-stopped
+    command:
+      - --encryptionEnv
+      - PB_ENCRYPTION_KEY
+    environment:
+      PB_ENCRYPTION_KEY: ${PB_ENCRYPTION_KEY:-your_secret_32_chars_key_here_!}
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./pb_data:/pb_data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3

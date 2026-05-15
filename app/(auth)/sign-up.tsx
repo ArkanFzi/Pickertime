@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '@/lib/supabase';
+import { pb } from '@/lib/pocketbase';
 
 const ROLES = [
   { id: 'Student', icon: 'school', label: 'Student' },
@@ -38,25 +38,23 @@ export default function SignUpScreen() {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: name, role } },
-    });
-    setLoading(false);
-
-    if (error) {
-      Alert.alert('Sign Up Failed', error.message);
-    } else {
-      // Update profile role
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        await supabase
-          .from('profiles')
-          .update({ role, full_name: name })
-          .eq('id', session.user.id);
-      }
+    try {
+      await pb.collection('Profiles').create({
+        email,
+        password,
+        passwordConfirm: password,
+        full_name: name,
+        role,
+      });
+      
+      // Auto-login after signup
+      await pb.collection('Profiles').authWithPassword(email, password);
+      
       router.push('/(auth)/context-setup');
+    } catch (error: any) {
+      Alert.alert('Sign Up Failed', error.message || 'Error creating account.');
+    } finally {
+      setLoading(false);
     }
   }
 

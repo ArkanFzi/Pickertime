@@ -6,7 +6,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Path, G, Line } from 'react-native-svg';
-import { supabase } from '@/lib/supabase';
+import { pb } from '@/lib/pocketbase';
 import { useStore } from '@/store/useStore';
 import { scheduleTaskNotification } from '@/lib/notifications';
 
@@ -179,7 +179,7 @@ export default function ScheduleScreen() {
     const endDt = new Date(startDt.getTime() + duration * 60000);
 
     const taskData = {
-      user_id: user.id,
+      user: user.id,
       title: title.trim(),
       category,
       priority,
@@ -191,24 +191,22 @@ export default function ScheduleScreen() {
       alarm_minutes_before: 10,
     };
 
-    const { data, error } = await supabase.from('tasks').insert(taskData).select().single();
-    setLoading(false);
+    try {
+      const data = await pb.collection('Tasks').create(taskData);
+      addTask(data as any);
+      // Schedule local notification
+      scheduleTaskNotification(data as any);
 
-    if (error) {
-      Alert.alert('Error', error.message);
-    } else {
-      if (data) {
-        addTask(data as any);
-        // Schedule local notification
-        scheduleTaskNotification(data as any);
-      }
       if (startNow) {
-
         router.push('/focus');
       } else {
         Alert.alert('✅ Saved', 'Task added to your timeline.');
         setTitle('');
       }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to save task.');
+    } finally {
+      setLoading(false);
     }
   }
 

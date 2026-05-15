@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
 import { useStore } from '@/store/useStore';
-import { supabase } from '@/lib/supabase';
+import { pb } from '@/lib/pocketbase';
 import { getNextBestAction, GeminiSuggestion } from '@/lib/gemini';
 
 const NEXT_ACTION_BY_ROLE: Record<string, { task: string; desc: string; duration: string; category: string }> = {
@@ -70,17 +70,19 @@ export default function DashboardScreen() {
   async function loadTasks() {
     if (!user) return;
     const today = new Date().toISOString().split('T')[0];
-    const { data } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('user_id', user.id)
-      .gte('start_time', today)
-      .order('start_time', { ascending: true });
-    
-    if (data) {
-      setTasks(data as any);
-      // Fetch AI Suggestion
-      fetchAISuggestion(data);
+    try {
+      const records = await pb.collection('Tasks').getFullList({
+        filter: `user = "${user.id}" && start_time >= "${today}"`,
+        sort: 'start_time',
+      });
+      
+      if (records) {
+        setTasks(records as any);
+        // Fetch AI Suggestion
+        fetchAISuggestion(records);
+      }
+    } catch (error) {
+      console.error('Load tasks error:', error);
     }
   }
 

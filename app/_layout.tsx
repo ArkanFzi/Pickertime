@@ -5,9 +5,8 @@ import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
-import { supabase } from '@/lib/supabase';
+import { pb } from '@/lib/pocketbase';
 import { useStore } from '@/store/useStore';
-import { Session } from '@supabase/supabase-js';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -26,25 +25,22 @@ export default function RootLayout() {
   const router = useRouter();
   const { setUser, setProfile } = useStore();
 
-  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        setUser(session.user);
-        loadProfile(session.user.id);
-      }
-      setLoading(false);
-      SplashScreen.hideAsync();
-    });
+    // Initial check
+    if (pb.authStore.isValid) {
+      setUser(pb.authStore.model);
+      loadProfile(pb.authStore.model!.id);
+    }
+    setLoading(false);
+    SplashScreen.hideAsync();
 
-    const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session?.user) {
-        setUser(session.user);
-        loadProfile(session.user.id);
+    // Listen to changes
+    const removeListener = pb.authStore.onChange((token, model) => {
+      if (model) {
+        setUser(model);
+        loadProfile(model.id);
       } else {
         setUser(null);
         setProfile(null);
@@ -61,19 +57,19 @@ export default function RootLayout() {
     });
 
     return () => {
-      authSub.unsubscribe();
+      removeListener();
       notificationSub.remove();
     };
   }, []);
 
 
   async function loadProfile(userId: string) {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    if (data) setProfile(data as any);
+    try {
+      const data = await pb.collection('Profiles').getOne(userId);
+      if (data) setProfile(data as any);
+    } catch (e) {
+      console.error('Profile load error:', e);
+    }
   }
 
   if (loading) return null;

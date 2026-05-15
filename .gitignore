@@ -43,9 +43,20 @@ supabase/.env.local
 supabase/.env
 supabase/functions/.env
 
-# Supabase
+# Supabase (Remnants)
 .supabase/
 supabase/.temp/
+
+# PocketBase / Deployment
+pb_data/
+.pb_data/
+docker-compose.yml
+Caddyfile
+hooks/
+migrations/
+api.db
+api.db-shm
+api.db-wal
 
 # secrets
 *.key

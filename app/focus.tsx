@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useStore } from '@/store/useStore';
-import { supabase } from '@/lib/supabase';
+import { pb } from '@/lib/pocketbase';
 
 export default function FocusScreen() {
   const router = useRouter();
@@ -14,8 +14,8 @@ export default function FocusScreen() {
   
   async function triggerWorkspaceEvent(type: 'START_FOCUS' | 'STOP_FOCUS' | 'PAUSE_FOCUS' | 'RESET_FOCUS' | 'SESSION_COMPLETE') {
     if (!user) return;
-    await supabase.from('workspace_events').insert({
-      user_id: user.id,
+    await pb.collection('Workspace_Events').create({
+      user: user.id,
       event_type: type,
       payload: {
         task_id: activeTask?.id || null,
@@ -83,9 +83,9 @@ export default function FocusScreen() {
 
   async function handleSessionComplete() {
     if (!user) return;
-    await supabase.from('focus_sessions').insert({
-      user_id: user.id,
-      task_id: activeTask?.id || null,
+    await pb.collection('Focus_Sessions').create({
+      user: user.id,
+      task: activeTask?.id || null,
       duration_seconds: initialSeconds,
       completed: true,
     });

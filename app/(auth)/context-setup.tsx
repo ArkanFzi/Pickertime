@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '@/lib/supabase';
+import { pb } from '@/lib/pocketbase';
 import { useStore } from '@/store/useStore';
 
 const ROLES = [
@@ -35,15 +35,17 @@ export default function ContextSetupScreen() {
     if (!focusGoal.trim()) return;
     setLoading(true);
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-      const { data, error } = await supabase
-        .from('profiles')
-        .update({ role, focus_goal: focusGoal, energy_pref: energy })
-        .eq('id', session.user.id)
-        .select()
-        .single();
-      if (data) setProfile(data as any);
+    if (user) {
+      try {
+        const data = await pb.collection('Profiles').update(user.id, {
+          role,
+          focus_goal: focusGoal,
+          energy_pref: energy
+        });
+        if (data) setProfile(data as any);
+      } catch (error) {
+        console.error('Update profile error:', error);
+      }
     }
 
     setLoading(false);

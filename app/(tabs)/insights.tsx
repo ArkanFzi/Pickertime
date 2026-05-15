@@ -5,7 +5,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
 import { useStore } from '@/store/useStore';
-import { supabase } from '@/lib/supabase';
+import { pb } from '@/lib/pocketbase';
 import { getAIInsight } from '@/lib/gemini';
 
 const { width } = Dimensions.get('window');
@@ -67,55 +67,56 @@ export default function InsightsScreen() {
     monday.setHours(0, 0, 0, 0);
 
     // 1. Fetch Focus Sessions
-    const { data: sessions } = await supabase
-      .from('focus_sessions')
-      .select('*')
-      .eq('user_id', user!.id)
-      .gte('timestamp', monday.toISOString());
-
-    if (sessions) {
-      const newTrend = [0, 0, 0, 0, 0, 0, 0];
-      const newHeat = {
-        Morning: [0, 0, 0, 0, 0, 0, 0],
-        Afternoon: [0, 0, 0, 0, 0, 0, 0],
-        Evening: [0, 0, 0, 0, 0, 0, 0],
-      };
-      let totalS = 0;
-
-      sessions.forEach(s => {
-        const d = new Date(s.timestamp);
-        const dayIdx = (d.getDay() === 0 ? 6 : d.getDay() - 1);
-        const mins = s.duration_seconds / 60;
-        newTrend[dayIdx] += Math.round(mins);
-        totalS += s.duration_seconds;
-
-        // Heatmap
-        const h = d.getHours();
-        if (h >= 6 && h < 12) newHeat.Morning[dayIdx]++;
-        else if (h >= 12 && h < 18) newHeat.Afternoon[dayIdx]++;
-        else newHeat.Evening[dayIdx]++;
+    try {
+      const sessions = await pb.collection('Focus_Sessions').getFullList({
+        filter: `user = "${user!.id}" && created >= "${monday.toISOString()}"`,
       });
 
-      setFocusTrend(newTrend);
-      setHeatmap(newHeat);
-      setStats(prev => ({ ...prev, totalMins: Math.round(totalS / 60) }));
-    }
+      if (sessions && sessions.length > 0) {
+        const newTrend = [0, 0, 0, 0, 0, 0, 0];
+        const newHeat = {
+          Morning: [0, 0, 0, 0, 0, 0, 0],
+          Afternoon: [0, 0, 0, 0, 0, 0, 0],
+          Evening: [0, 0, 0, 0, 0, 0, 0],
+        };
+        let totalS = 0;
 
-    // 2. Fetch Weekly Completion
-    const { data: tasks } = await supabase
-      .from('tasks')
-      .select('is_completed')
-      .eq('user_id', user!.id)
-      .gte('start_time', monday.toISOString());
+        sessions.forEach(s => {
+          const d = new Date(s.created); // PocketBase uses 'created' by default
+          const dayIdx = (d.getDay() === 0 ? 6 : d.getDay() - 1);
+          const mins = s.duration_seconds / 60;
+          newTrend[dayIdx] += Math.round(mins);
+          totalS += s.duration_seconds;
 
-    if (tasks && tasks.length > 0) {
-      const done = tasks.filter(t => t.is_completed).length;
-      setStats(prev => ({
-        ...prev,
-        doneCount: done,
-        totalCount: tasks.length,
-        completionRate: Math.round((done / tasks.length) * 100),
-      }));
+          // Heatmap
+          const h = d.getHours();
+          if (h >= 6 && h < 12) newHeat.Morning[dayIdx]++;
+          else if (h >= 12 && h < 18) newHeat.Afternoon[dayIdx]++;
+          else newHeat.Evening[dayIdx]++;
+        });
+
+        setFocusTrend(newTrend);
+        setHeatmap(newHeat);
+        setStats(prev => ({ ...prev, totalMins: Math.round(totalS / 60) }));
+      }
+
+      // 2. Fetch Weekly Completion
+      const tasks = await pb.collection('Tasks').getFullList({
+        filter: `user = "${user!.id}" && start_time >= "${monday.toISOString()}"`,
+        fields: 'is_completed',
+      });
+
+      if (tasks && tasks.length > 0) {
+        const done = tasks.filter(t => t.is_completed).length;
+        setStats(prev => ({
+          ...prev,
+          doneCount: done,
+          totalCount: tasks.length,
+          completionRate: Math.round((done / tasks.length) * 100),
+        }));
+      }
+    } catch (error) {
+      console.error('Insights data error:', error);
     }
 
     setLoadingData(false);

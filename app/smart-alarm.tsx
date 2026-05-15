@@ -5,7 +5,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, Task } from '@/store/useStore';
-import { supabase } from '@/lib/supabase';
+import { pb } from '@/lib/pocketbase';
 import { getSmartAlarmPrep, getAIInsight } from '@/lib/gemini';
 import { useState } from 'react';
 
@@ -103,14 +103,12 @@ export default function SmartAlarmScreen() {
   async function handleMarkDone() {
     if (!nextTask) return;
     setCompleting(true);
-    const { error } = await supabase
-      .from('tasks')
-      .update({ is_completed: true })
-      .eq('id', nextTask.id);
-    
-    if (!error) {
+    try {
+      await pb.collection('Tasks').update(nextTask.id, { is_completed: true });
       toggleTask(nextTask.id);
       router.back();
+    } catch (error) {
+      console.error('Update error:', error);
     }
     setCompleting(false);
   }

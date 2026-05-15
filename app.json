@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "pickertime",
     "userInterfaceStyle": "dark",
-
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
@@ -21,7 +20,6 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0A0F1D"
       },
-
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -37,7 +35,8 @@
           "icon": "./assets/images/icon.png",
           "color": "#00D4FF"
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
