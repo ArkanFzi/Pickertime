@@ -41,6 +41,11 @@ yarn-error.*
 *.env
 supabase/.env.local
 supabase/.env
+supabase/functions/.env
+
+# Supabase
+.supabase/
+supabase/.temp/
 
 # secrets
 *.key
