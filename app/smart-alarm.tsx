@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, Task } from '@/store/useStore';
 import { supabase } from '@/lib/supabase';
-import { getSmartAlarmPrep } from '@/lib/gemini';
+import { getSmartAlarmPrep, getAIInsight } from '@/lib/gemini';
 import { useState } from 'react';
 
 
@@ -58,6 +58,7 @@ export default function SmartAlarmScreen() {
   const minutesUntil = Math.max(0, Math.floor(diffMs / 60000));
 
   const role = profile?.role || 'Professional';
+  const [aiInsight, setAiInsight] = useState<string>('');
   
   const fadeAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(0))).current;
   const slideAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(20))).current;
@@ -89,8 +90,13 @@ export default function SmartAlarmScreen() {
 
   async function fetchDynamicPrep(title: string) {
     setLoadingSteps(true);
-    const steps = await getSmartAlarmPrep(title, role);
+    // Fetch Prep Steps and Insight in parallel
+    const [steps, insight] = await Promise.all([
+      getSmartAlarmPrep(title, role),
+      profile ? getAIInsight(profile.role, profile.focus_goal || 'Stay productive', {}) : Promise.resolve('')
+    ]);
     setPrepSteps(steps);
+    if (insight) setAiInsight(insight);
     setLoadingSteps(false);
   }
 
@@ -158,11 +164,11 @@ export default function SmartAlarmScreen() {
           </View>
           <Text style={styles.insightText}>
             <Text style={styles.insightBold}>Insight: </Text>
-            {role === 'Student'
+            {aiInsight || (role === 'Student'
               ? 'You have 35 free minutes before your study session — perfect for a quick review.'
               : role === 'Creator'
               ? 'Your creative output peaks in the next window. Clear your mind now.'
-              : 'Your focus block aligns with your peak energy. Prepare to enter flow state.'}
+              : 'Your focus block aligns with your peak energy. Prepare to enter flow state.')}
           </Text>
         </Animated.View>
 

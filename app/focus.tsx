@@ -12,6 +12,21 @@ export default function FocusScreen() {
   const router = useRouter();
   const { activeTask, user } = useStore();
   
+  async function triggerWorkspaceEvent(type: 'START_FOCUS' | 'STOP_FOCUS' | 'PAUSE_FOCUS' | 'RESET_FOCUS' | 'SESSION_COMPLETE') {
+    if (!user) return;
+    await supabase.from('workspace_events').insert({
+      user_id: user.id,
+      event_type: type,
+      payload: {
+        task_id: activeTask?.id || null,
+        task_title: activeTask?.title || 'Deep Work',
+        duration_minutes: activeTask?.duration_minutes || 25,
+        timestamp: new Date().toISOString()
+      },
+      is_processed: false
+    });
+  }
+  
   // Use task duration or default to 25 mins
   const initialSeconds = (activeTask?.duration_minutes || 25) * 60;
   
@@ -43,6 +58,9 @@ export default function FocusScreen() {
         Animated.timing(breatheAnim, { toValue: 0.95, duration: 3000, useNativeDriver: true }),
       ])
     ).start();
+
+    // Trigger START event on launch
+    triggerWorkspaceEvent('START_FOCUS');
   }, []);
 
   useEffect(() => {
@@ -71,6 +89,10 @@ export default function FocusScreen() {
       duration_seconds: initialSeconds,
       completed: true,
     });
+    
+    // Trigger workspace event
+    await triggerWorkspaceEvent('SESSION_COMPLETE');
+
     // Navigate back or to a success screen
     router.replace('/(tabs)/insights');
   }

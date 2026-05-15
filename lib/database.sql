@@ -68,8 +68,23 @@ create policy "Users can CRUD own sessions" on public.focus_sessions
   for all using (auth.uid() = user_id);
 
 -- ============================================================
--- Trigger: auto-create profile on auth signup
+-- Workspace Events (Bridge to OpenClaw)
 -- ============================================================
+create table if not exists public.workspace_events (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  event_type text not null,       -- START_FOCUS, STOP_FOCUS, PAUSE_FOCUS, RESET_FOCUS
+  payload jsonb default '{}',     -- Extra info: { task_title: "...", duration: 60 }
+  is_processed boolean default false,
+  created_at timestamptz default now()
+);
+
+alter table public.workspace_events enable row level security;
+
+create policy "Users can CRUD own workspace events" on public.workspace_events
+  for all using (auth.uid() = user_id);
+
+-- Trigger: auto-create profile on auth signup
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
