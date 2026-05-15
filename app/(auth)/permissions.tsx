@@ -4,7 +4,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Notifications from 'expo-notifications';
+// expo-notifications static import removed — SDK 53 dropped push support in Expo Go.
+// Local notification permissions are handled via the lazy-loaded helper in @/lib/notifications.
 import { 
   requestNotificationPermissions, 
   requestCalendarPermissions, 

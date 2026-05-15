@@ -14,6 +14,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { pb } from '@/lib/pocketbase';
+import { useStore } from '@/store/useStore';
 
 const ROLES = [
   { id: 'Student', icon: 'school', label: 'Student' },
@@ -25,6 +26,7 @@ const ROLES = [
 
 export default function SignUpScreen() {
   const router = useRouter();
+  const { setUser } = useStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -39,20 +41,38 @@ export default function SignUpScreen() {
     }
     setLoading(true);
     try {
+      // Fields must match exactly what's configured in PocketBase Admin UI
       await pb.collection('Profiles').create({
         email,
         password,
         passwordConfirm: password,
-        full_name: name,
+        full_name: name,   // Custom field as seen in Admin UI
         role,
+        emailVisibility: true,
       });
-      
+
       // Auto-login after signup
-      await pb.collection('Profiles').authWithPassword(email, password);
-      
-      router.push('/(auth)/context-setup');
+      const authData = await pb.collection('Profiles').authWithPassword(email, password);
+
+      // Set user in global state
+      if (authData?.record) {
+        setUser(authData.record);
+      }
+
+      router.replace('/(auth)/context-setup');
     } catch (error: any) {
-      Alert.alert('Sign Up Failed', error.message || 'Error creating account.');
+      // Log full error for debugging
+      console.error('Signup Error Full:', JSON.stringify(error?.data ?? error));
+      
+      // Build a user-friendly error message from PocketBase field errors
+      let errorMsg = error.message || 'Error creating account.';
+      if (error?.data?.data) {
+        const fieldErrors = Object.entries(error.data.data)
+          .map(([field, err]: any) => `${field}: ${err.message}`)
+          .join('\n');
+        if (fieldErrors) errorMsg = fieldErrors;
+      }
+      Alert.alert('Sign Up Failed', errorMsg);
     } finally {
       setLoading(false);
     }

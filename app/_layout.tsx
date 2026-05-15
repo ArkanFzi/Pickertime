@@ -4,21 +4,27 @@ import { Stack, useRouter } from 'expo-router';
 
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import * as Notifications from 'expo-notifications';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { pb } from '@/lib/pocketbase';
 import { useStore } from '@/store/useStore';
 
 SplashScreen.preventAutoHideAsync();
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Only set notification handler outside Expo Go (SDK 53+ removed push support from Expo Go)
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+if (!isExpoGo) {
+  import('expo-notifications').then((Notifications) => {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+  });
+}
 
 
 export default function RootLayout() {
@@ -36,7 +42,7 @@ export default function RootLayout() {
     setLoading(false);
     SplashScreen.hideAsync();
 
-    // Listen to changes
+    // Listen to auth changes
     const removeListener = pb.authStore.onChange((token, model) => {
       if (model) {
         setUser(model);
@@ -47,18 +53,24 @@ export default function RootLayout() {
       }
     });
 
-    // Notification Response Listener
-    const notificationSub = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data;
-      if (data?.type === 'smart-alarm') {
-        // Use Root relative path
-        router.push('/smart-alarm');
-      }
-    });
+    // Notification tap listener — only works in development builds, not Expo Go SDK 53+
+    let notificationSub: { remove: () => void } | null = null;
+    if (!isExpoGo) {
+      import('expo-notifications').then((Notifications) => {
+        notificationSub = Notifications.addNotificationResponseReceivedListener(
+          (response: import('expo-notifications').NotificationResponse) => {
+            const data = response.notification.request.content.data;
+            if (data?.type === 'smart-alarm') {
+              router.push('/smart-alarm');
+            }
+          }
+        );
+      });
+    }
 
     return () => {
       removeListener();
-      notificationSub.remove();
+      notificationSub?.remove();
     };
   }, []);
 
