@@ -35,7 +35,7 @@ function getEnergyStatus(energyPref: string): string {
 
 export default function DashboardScreen() {
   const router = useRouter();
-  const { profile, tasks, setTasks, user } = useStore();
+  const { profile, tasks, setTasks, user, syncFetchTasks } = useStore();
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [completedCount, setCompletedCount] = useState(0);
 
@@ -64,23 +64,17 @@ export default function DashboardScreen() {
       ])
     ).start();
 
-    if (user) loadTasks();
+    if (user) {
+      loadTasks();
+    }
   }, [user]);
 
   async function loadTasks() {
     if (!user) return;
-    const today = new Date().toISOString().split('T')[0];
     try {
-      const records = await pb.collection('Tasks').getFullList({
-        filter: `user = "${user.id}" && start_time >= "${today}"`,
-        sort: 'start_time',
-      });
-      
-      if (records) {
-        setTasks(records as any);
-        // Fetch AI Suggestion
-        fetchAISuggestion(records);
-      }
+      await syncFetchTasks();
+      const currentTasks = useStore.getState().tasks;
+      fetchAISuggestion(currentTasks);
     } catch (error) {
       console.error('Load tasks error:', error);
     }
@@ -120,7 +114,7 @@ export default function DashboardScreen() {
             </View>
             <View>
               <Text style={styles.greeting}>{greeting}, {profile?.full_name?.split(' ')[0] || 'there'}</Text>
-              <Text style={styles.greetingSub}>Ready for deep focus?</Text>
+              <Text style={styles.greetingSub}>Your Focus Operating System</Text>
             </View>
           </View>
           <View style={styles.energyBadge}>
@@ -196,21 +190,27 @@ export default function DashboardScreen() {
             </View>
 
             {/* Upcoming Alarm Tile */}
-            <View style={styles.halfCard}>
-              <View style={styles.upcomingTop}>
-                <Text style={styles.halfCardLabel}>UPCOMING</Text>
+            <TouchableOpacity 
+              style={styles.upcomingCard}
+              onPress={() => router.push('/smart-alarm')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.upcomingTopRow}>
+                <Text style={styles.upcomingLabel}>UPCOMING</Text>
                 <Animated.View style={[styles.bellWrap, { transform: [{ scale: pulseAnim }] }]}>
                   <Ionicons name="notifications" size={12} color="#00D4FF" />
                 </Animated.View>
               </View>
-              <Text style={styles.upcomingTitle}>
-                {nextTask ? nextTask.title : 'Team Sync'}
-              </Text>
-              <Text style={styles.upcomingTime}>Starts in 45m</Text>
-              <View style={styles.progressBar}>
-                <View style={styles.progressFill} />
+              <View>
+                <Text style={styles.upcomingTitle} numberOfLines={1}>
+                  {nextTask ? nextTask.title : 'Team Sync'}
+                </Text>
+                <Text style={styles.upcomingTime}>Starts in 45m</Text>
+                <View style={styles.progressBar}>
+                  <View style={styles.progressFill} />
+                </View>
               </View>
-            </View>
+            </TouchableOpacity>
           </View>
 
           {/* Quick Actions */}
@@ -346,14 +346,25 @@ const styles = StyleSheet.create({
   ringCenter: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
   ringPct: { fontSize: 18, fontWeight: '800', color: '#fff' },
   ringSubText: { fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 8, textAlign: 'center' },
-  upcomingTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' },
+  upcomingCard: {
+    flex: 1, backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    borderRadius: 24, padding: 18, minHeight: 160,
+    justifyContent: 'space-between',
+  },
+  upcomingTopRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%',
+  },
+  upcomingLabel: {
+    fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.4)', letterSpacing: 1.2,
+  },
   bellWrap: {
     width: 26, height: 26, borderRadius: 13,
     backgroundColor: 'rgba(0,212,255,0.15)',
     alignItems: 'center', justifyContent: 'center',
   },
-  upcomingTitle: { fontSize: 14, fontWeight: '700', color: '#fff', marginTop: 12, marginBottom: 4, alignSelf: 'flex-start' },
-  upcomingTime: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 12, alignSelf: 'flex-start' },
+  upcomingTitle: { fontSize: 14, fontWeight: '700', color: '#fff', marginTop: 12, marginBottom: 4 },
+  upcomingTime: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 12 },
   progressBar: { width: '100%', height: 4, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 2 },
   progressFill: { width: '33%', height: 4, backgroundColor: '#00D4FF', borderRadius: 2 },
   quickActionsLabel: {

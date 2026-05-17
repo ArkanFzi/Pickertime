@@ -34,7 +34,7 @@ const MOCK_TIMELINE: Array<{
   { time: '16:00', type: 'task', task: { title: 'Strategy Review', timeLabel: '16:00 – 17:30', priority: 'Medium', category: 'Work' } },
 ];
 
-function TimelineTask({ item, onPress }: { item: typeof MOCK_TIMELINE[0]; onPress?: () => void }) {
+function TimelineTask({ item, onPress, onSmartAlarmPress }: { item: typeof MOCK_TIMELINE[0]; onPress?: () => void; onSmartAlarmPress?: () => void }) {
   const color = CATEGORY_COLORS[item.task?.category || 'General'];
 
   if (item.type === 'done') {
@@ -87,11 +87,15 @@ function TimelineTask({ item, onPress }: { item: typeof MOCK_TIMELINE[0]; onPres
           </View>
         </View>
         {/* Smart Alarm chip */}
-        <View style={styles.alarmChip}>
+        <TouchableOpacity 
+          style={styles.alarmChip}
+          onPress={onSmartAlarmPress}
+          activeOpacity={0.8}
+        >
           <Ionicons name="notifications-outline" size={11} color="#00D4FF" />
           <Text style={styles.alarmChipText}>Smart Alarm set · 10 min before</Text>
           <Ionicons name="chevron-forward" size={11} color="rgba(255,255,255,0.3)" />
-        </View>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -99,7 +103,7 @@ function TimelineTask({ item, onPress }: { item: typeof MOCK_TIMELINE[0]; onPres
 
 export default function TimelineScreen() {
   const router = useRouter();
-  const { tasks, user } = useStore();
+  const { tasks, user, syncFetchTasks, setActiveTask } = useStore();
   const [filter, setFilter] = useState('All Tasks');
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -115,14 +119,24 @@ export default function TimelineScreen() {
         Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
       ])
     ).start();
-  }, []);
+
+    if (user) {
+      syncFetchTasks();
+    }
+  }, [user]);
 
   const displayTimeline = React.useMemo(() => {
-    if (tasks.length === 0) return MOCK_TIMELINE;
+    if (tasks.length === 0) return [];
 
-    const sorted = [...tasks]
-      .filter(t => t.start_time)
-      .sort((a,b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime());
+    const filtered = tasks.filter(t => {
+      if (!t.start_time) return false;
+      if (filter === 'All Tasks') return true;
+      return t.category === filter;
+    });
+
+    if (filtered.length === 0) return [];
+
+    const sorted = [...filtered].sort((a,b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime());
     
     const items: typeof MOCK_TIMELINE = [];
     let lastEnd = new Date(sorted[0].start_time!);
@@ -134,7 +148,7 @@ export default function TimelineScreen() {
 
       // Check for gap
       if (start.getTime() > lastEnd.getTime() + 15 * 60000) {
-        const gapMins = (start.getTime() - lastEnd.getTime()) / 60000;
+        const gapMins = Math.round((start.getTime() - lastEnd.getTime()) / 60000);
         items.push({
           time: lastEnd.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
           type: 'free',
@@ -157,7 +171,7 @@ export default function TimelineScreen() {
     });
 
     return items;
-  }, [tasks]);
+  }, [tasks, filter]);
 
 
   const freeSlots = displayTimeline.filter((d) => d.type === 'free').length;
@@ -174,7 +188,7 @@ export default function TimelineScreen() {
           <Text style={styles.dateText}>{dateStr}</Text>
         </View>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.iconBtn}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/smart-alarm')} activeOpacity={0.8}>
             <Ionicons name="notifications-outline" size={20} color="rgba(255,255,255,0.7)" />
             <View style={styles.notifDot} />
           </TouchableOpacity>
@@ -205,12 +219,24 @@ export default function TimelineScreen() {
               <Animated.View style={[styles.freeSlotsIcon, { transform: [{ scale: pulseAnim }] }]}>
                 <Ionicons name="flash" size={13} color="#00D4FF" />
               </Animated.View>
-              <View>
-                <Text style={styles.freeSlotsTitle}>{freeSlots} Free Slot{freeSlots > 1 ? 's' : ''} Available</Text>
-                <Text style={styles.freeSlotsSub}>Take advantage of open focus time</Text>
+              <View style={{ flex: 1, flexShrink: 1, paddingRight: 8 }}>
+                <Text style={styles.freeSlotsTitle} numberOfLines={1}>{freeSlots} Free Slot{freeSlots > 1 ? 's' : ''} Available</Text>
+                <Text style={styles.freeSlotsSub} numberOfLines={2} ellipsizeMode="tail">Take advantage of open focus time</Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.jumpBtn}>
+            <TouchableOpacity 
+              style={styles.jumpBtn}
+              onPress={() => {
+                const nextTask = tasks.find(t => !t.is_completed);
+                if (nextTask) {
+                  setActiveTask(nextTask);
+                  router.push('/focus');
+                } else {
+                  router.push('/schedule');
+                }
+              }}
+              activeOpacity={0.8}
+            >
               <Text style={styles.jumpBtnText}>Jump to Next</Text>
             </TouchableOpacity>
           </View>
@@ -227,13 +253,26 @@ export default function TimelineScreen() {
             <Text style={styles.currentTimeLabel}>{`${String(currentHour).padStart(2,'0')}:${String(currentMinute).padStart(2,'0')}`}</Text>
           </View>
 
-          {displayTimeline.map((item, i) => (
-            <TimelineTask
-              key={i}
-              item={item}
-              onPress={() => router.push('/schedule')}
-            />
-          ))}
+          {displayTimeline.length === 0 ? (
+            <View style={styles.emptyStateCard}>
+              <Ionicons name="calendar-clear-outline" size={48} color="rgba(255,255,255,0.2)" />
+              <Text style={styles.emptyStateTitle}>No Tasks Today</Text>
+              <Text style={styles.emptyStateSub}>Schedule a focus block or study session to build your timeline.</Text>
+              <TouchableOpacity style={styles.createTaskBtn} onPress={() => router.push('/schedule')}>
+                <Ionicons name="add" size={16} color="#0A0F1D" />
+                <Text style={styles.createTaskBtnText}>Create Task</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            displayTimeline.map((item, i) => (
+              <TimelineTask
+                key={i}
+                item={item}
+                onPress={() => router.push('/schedule')}
+                onSmartAlarmPress={() => router.push('/smart-alarm')}
+              />
+            ))
+          )}
         </View>
       </ScrollView>
     </View>
@@ -292,7 +331,7 @@ const styles = StyleSheet.create({
     borderRadius: 20, padding: 14,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
-  freeSlotsLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  freeSlotsLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, flexShrink: 1 },
   freeSlotsIcon: {
     width: 34, height: 34, borderRadius: 17,
     backgroundColor: 'rgba(0,212,255,0.12)',
@@ -377,4 +416,18 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     shadowColor: '#00D4FF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 8,
   },
+  emptyStateCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 24, padding: 32, alignItems: 'center',
+    marginTop: 40, marginHorizontal: 20,
+  },
+  emptyStateTitle: { fontSize: 20, fontWeight: '700', color: '#fff', marginTop: 16, marginBottom: 8 },
+  emptyStateSub: { fontSize: 13, color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginBottom: 24, lineHeight: 20 },
+  createTaskBtn: {
+    backgroundColor: '#00D4FF', borderRadius: 18, paddingVertical: 14, paddingHorizontal: 24,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    shadowColor: '#00D4FF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
+  },
+  createTaskBtnText: { fontSize: 15, fontWeight: '700', color: '#0A0F1D' },
 });

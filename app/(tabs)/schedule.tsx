@@ -6,9 +6,8 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Path, G, Line } from 'react-native-svg';
-import { pb } from '@/lib/pocketbase';
 import { useStore } from '@/store/useStore';
-import { scheduleTaskNotification } from '@/lib/notifications';
+// pb & scheduleTaskNotification kini dikelola di dalam syncAddTask (useStore)
 
 const CATEGORIES = [
 
@@ -95,7 +94,8 @@ function RadialTimePicker({ value, onChange }: { value: number; onChange: (v: nu
 
 export default function ScheduleScreen() {
   const router = useRouter();
-  const { user, profile, tasks, addTask } = useStore();
+  // ✅ Gunakan syncAddTask — operasi API + state dikelola terpusat di store
+  const { user, profile, tasks, syncAddTask, setActiveTask } = useStore();
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Work');
   const [priority, setPriority] = useState('High');
@@ -178,33 +178,31 @@ export default function ScheduleScreen() {
     const startDt = new Date();
     const endDt = new Date(startDt.getTime() + duration * 60000);
 
-    const taskData = {
-      user: user.id,
-      title: title.trim(),
-      category,
-      priority,
-      duration_minutes: duration,
-      start_time: startDt.toISOString(),
-      end_time: endDt.toISOString(),
-      is_completed: false,
-      has_alarm: true,
-      alarm_minutes_before: 10,
-    };
-
     try {
-      const data = await pb.collection('Tasks').create(taskData);
-      addTask(data as any);
-      // Schedule local notification
-      scheduleTaskNotification(data as any);
+      // ✅ syncAddTask menangani: PocketBase create + addTask state + scheduleNotification
+      const newTask = await syncAddTask({
+        user: user.id,
+        title: title.trim(),
+        category,
+        priority: priority as 'High' | 'Medium' | 'Low',
+        duration_minutes: duration,
+        start_time: startDt.toISOString(),
+        end_time: endDt.toISOString(),
+        is_completed: false,
+        has_alarm: true,
+        alarm_minutes_before: 10,
+      });
 
       if (startNow) {
+        setActiveTask(newTask);
         router.push('/focus');
       } else {
-        Alert.alert('✅ Saved', 'Task added to your timeline.');
+        Alert.alert('✅ Tersimpan', 'Tugas ditambahkan ke timeline Anda.');
         setTitle('');
+        router.push('/(tabs)/timeline');
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to save task.');
+      Alert.alert('Gagal Menyimpan', error.message || 'Tidak dapat menyimpan tugas. Periksa koneksi internet.');
     } finally {
       setLoading(false);
     }

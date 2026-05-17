@@ -7,7 +7,7 @@ export default function Index() {
   // If user is authenticated, send to Dashboard (tabs index)
   // Otherwise, send to the Welcome/Onboarding flow
   if (user) {
-    return <Redirect href="/" />;
+    return <Redirect href="/(tabs)" />;
   }
 
   return <Redirect href="/(auth)/welcome" />;

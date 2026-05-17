@@ -78,7 +78,7 @@ export default function PermissionsScreen() {
     if (enabled.dnd) {
       await requestDNDPermissions();
     }
-    // Update profile in supabase with permissions if needed
+    // Update profile with permissions if needed
     router.replace('/');
   }
 

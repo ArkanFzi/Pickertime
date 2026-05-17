@@ -16,8 +16,8 @@ Pickertime menggunakan pendekatan **Hybrid AI** di mana kecerdasan dibagi menjad
     *   Membuka VS Code.
     *   Memutar musik Lofi di Spotify.
 
-## 3. Integrasi Gemini (Cloud Functions)
-Logika Gemini tidak lagi ditaruh di Supabase Edge Functions, melainkan dideploy sebagai **Appwrite Functions**. Hal ini memudahkan pengelolaan API Key secara terpusat di satu server pribadi Anda.
+## 3. Integrasi Gemini (Local Proxy)
+Logika Gemini tidak lagi diekspos di aplikasi mobile, melainkan diproxy melalui **PocketBase JS Hooks** (`pb_hooks`). Hal ini memudahkan pengelolaan API Key secara terpusat dan aman di satu server pribadi Anda tanpa mengeksposnya ke publik.
 
 ## 4. Masa Depan: Local LLM
 Dengan RAM 32GB, ke depannya Anda bahkan bisa menjalankan model bahasa lokal (seperti **Llama 3 via Ollama**) langsung di server Anda, sehingga Anda benar-benar tidak butuh API Key dari Google lagi untuk tugas-tugas analisis data jadwal.
