@@ -53,16 +53,16 @@ npm install
 ```
 
 5. Konfigurasi Environment Variables
-Buat file `.env` di root direktori untuk koneksi aplikasi ke Supabase:
+Buat file `.env` di root direktori untuk koneksi aplikasi ke PocketBase:
 ```env
-EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+EXPO_PUBLIC_PB_URL=your_pocketbase_url
 ```
 
-6. Konfigurasi AI (Supabase Edge Functions)
-Gemini API Key sekarang diamankan di server (Supabase). Untuk mengaturnya, jalankan perintah ini di Supabase CLI:
+6. Konfigurasi AI (PocketBase JS Hooks)
+Gemini API Key sekarang diamankan di server (PocketBase). Atur *environment variable* sebelum menjalankan PocketBase:
 ```bash
-supabase secrets set GEMINI_API_KEY=your_gemini_api_key
+export GEMINI_API_KEY=your_gemini_api_key
+./pocketbase serve
 ```
 
 ### 4. Jalankan Aplikasi
@@ -73,7 +73,7 @@ Gunakan aplikasi **Expo Go** di HP Anda atau jalankan di emulator.
 
 ---
 
-## 📊 Struktur Database (Supabase)
+## 📊 Struktur Database (PocketBase)
 
 Aplikasi ini menggunakan skema database berikut untuk sinkronisasi data:
 

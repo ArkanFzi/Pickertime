@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, Animated, Dimensions,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
 import { useStore } from '@/store/useStore';
@@ -14,7 +15,8 @@ const WEEK_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 
 export default function InsightsScreen() {
-  const { profile, user } = useStore();
+  const router = useRouter();
+  const { profile, user, snoozeCount, syncFetchTasks } = useStore();
   const [aiInsight, setAiInsight] = useState<string | null>(null);
 
   const [loadingAI, setLoadingAI] = useState(false);
@@ -36,6 +38,7 @@ export default function InsightsScreen() {
 
   const totalFocusMins = stats.totalMins;
   const completionRate = stats.completionRate;
+  const snoozeRate = stats.totalCount > 0 ? Math.min(100, Math.round((snoozeCount / stats.totalCount) * 100)) : (snoozeCount > 0 ? 15 : 0);
 
 
   const slideAnims = useRef(
@@ -56,7 +59,10 @@ export default function InsightsScreen() {
       ]).start();
     });
 
-    if (user) loadRealData();
+    if (user) {
+      syncFetchTasks();
+      loadRealData();
+    }
   }, [user]);
 
   async function loadRealData() {
@@ -274,10 +280,10 @@ export default function InsightsScreen() {
 
             </View>
             <View style={styles.suggestionActions}>
-              <TouchableOpacity style={styles.adjustBtn}>
+              <TouchableOpacity style={styles.adjustBtn} onPress={() => router.push('/schedule')} activeOpacity={0.8}>
                 <Text style={styles.adjustBtnText}>Adjust Schedule</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.dismissBtn}>
+              <TouchableOpacity style={styles.dismissBtn} onPress={() => setAiInsight(null)} activeOpacity={0.8}>
                 <Text style={styles.dismissBtnText}>Dismiss</Text>
               </TouchableOpacity>
             </View>
@@ -295,15 +301,19 @@ export default function InsightsScreen() {
               </View>
             </View>
             <View style={styles.alarmEffRight}>
-              <Text style={styles.alarmEffValue}>28%</Text>
-              <Text style={styles.alarmEffTrend}>High snooze rate</Text>
+              <Text style={styles.alarmEffValue}>{snoozeRate}%</Text>
+              <Text style={styles.alarmEffTrend}>{snoozeRate > 20 ? 'High snooze rate' : 'Excellent consistency'}</Text>
             </View>
           </View>
         </Animated.View>
 
         {/* Goals Button */}
         <Animated.View style={Animated_(4)}>
-          <TouchableOpacity style={styles.goalsBtn}>
+          <TouchableOpacity 
+            style={styles.goalsBtn} 
+            onPress={() => router.push('/(auth)/context-setup')}
+            activeOpacity={0.8}
+          >
             <View style={styles.goalsBtnLeft}>
               <Ionicons name="options-outline" size={18} color="rgba(255,255,255,0.5)" />
               <Text style={styles.goalsBtnText}>Adjust Goals & Notifications</Text>

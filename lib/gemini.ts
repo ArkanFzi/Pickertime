@@ -1,12 +1,10 @@
 /**
  * Pickertime Gemini AI Engine
  * 
- * This module was refactored from Supabase Edge Functions to direct 
- * Gemini API calls for better autonomy in the PocketBase ecosystem.
+ * This module uses the secure PocketBase proxy endpoint
+ * to ensure API keys are never exposed to the client app.
  */
-
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+import { pb } from '@/lib/pocketbase';
 
 export type GeminiSuggestion = {
   task: string;
@@ -16,27 +14,18 @@ export type GeminiSuggestion = {
 };
 
 async function callGemini(prompt: string) {
-  if (!GEMINI_API_KEY) {
-    console.warn("Gemini API Key is missing. Fitur AI akan menggunakan fallback.");
-    throw new Error("Missing API Key");
+  try {
+    // Call the secure custom proxy endpoint hosted on PocketBase
+    const response = await pb.send('/api/ai/gemini', {
+      method: 'POST',
+      body: { prompt },
+    });
+    
+    return response.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  } catch (error) {
+    console.warn("AI Proxy Error:", error);
+    throw new Error("Failed to fetch AI suggestion from backend proxy.");
   }
-
-  const response = await fetch(GEMINI_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.7,
-        topP: 1,
-        topK: 1,
-        maxOutputTokens: 1000,
-      },
-    }),
-  });
-
-  const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 
 export async function getNextBestAction(

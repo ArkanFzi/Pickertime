@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { pb } from '@/lib/pocketbase';
 import { useStore } from '@/store/useStore';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ROLES = [
   { id: 'Student', icon: 'school', label: 'Student' },
@@ -26,6 +27,7 @@ const ROLES = [
 
 export default function SignUpScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { setUser } = useStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -47,7 +49,7 @@ export default function SignUpScreen() {
         password,
         passwordConfirm: password,
         full_name: name,   // Custom field as seen in Admin UI
-        role,
+        role: role.trim(),
         emailVisibility: true,
       });
 
@@ -90,8 +92,9 @@ export default function SignUpScreen() {
       >
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 48) + 20 }]}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
           {/* Header */}
           <View style={styles.header}>
@@ -120,6 +123,7 @@ export default function SignUpScreen() {
                   onChangeText={setEmail}
                   placeholder="you@example.com"
                   placeholderTextColor="rgba(255,255,255,0.25)"
+                  cursorColor="#00D4FF"
                   style={styles.input}
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -137,6 +141,7 @@ export default function SignUpScreen() {
                   onChangeText={setPassword}
                   placeholder="••••••••"
                   placeholderTextColor="rgba(255,255,255,0.25)"
+                  cursorColor="#00D4FF"
                   style={styles.input}
                   secureTextEntry={!showPass}
                 />
@@ -166,6 +171,7 @@ export default function SignUpScreen() {
                 onChangeText={setName}
                 placeholder="Your Name"
                 placeholderTextColor="rgba(255,255,255,0.25)"
+                cursorColor="#00D4FF"
                 style={styles.input}
               />
             </View>

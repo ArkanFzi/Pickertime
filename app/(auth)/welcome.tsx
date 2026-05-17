@@ -24,7 +24,7 @@ export default function WelcomeScreen() {
 
   useEffect(() => {
     if (user) {
-      router.replace('/');
+      router.replace('/(tabs)');
       return;
     }
 

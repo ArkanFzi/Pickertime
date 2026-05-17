@@ -38,9 +38,9 @@ export default function ContextSetupScreen() {
     if (user) {
       try {
         const data = await pb.collection('Profiles').update(user.id, {
-          role,
-          focus_goal: focusGoal,
-          energy_pref: energy
+          role: role.trim(),
+          focus_goal: focusGoal.trim(),
+          energy_pref: energy.trim(),
         });
         if (data) setProfile(data as any);
       } catch (error) {

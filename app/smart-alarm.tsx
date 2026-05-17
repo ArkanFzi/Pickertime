@@ -1,13 +1,13 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, StyleSheet, Animated,
+  View, Text, TouchableOpacity, ScrollView, StyleSheet, Animated, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, Task } from '@/store/useStore';
-import { pb } from '@/lib/pocketbase';
 import { getSmartAlarmPrep, getAIInsight } from '@/lib/gemini';
-import { useState } from 'react';
+
+const SNOOZE_MINUTES = 5;
 
 
 const PREP_STEPS: Record<string, Array<{ icon: string; text: string }>> = {
@@ -40,10 +40,17 @@ const PREP_STEPS: Record<string, Array<{ icon: string; text: string }>> = {
 
 export default function SmartAlarmScreen() {
   const router = useRouter();
-  const { profile, tasks, toggleTask } = useStore();
+  const { profile, tasks, syncToggleTask, syncSnoozeTask, syncFetchTasks, user, setActiveTask } = useStore();
   const [prepSteps, setPrepSteps] = useState<Array<{ icon: string; text: string }>>([]);
   const [loadingSteps, setLoadingSteps] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [snoozing, setSnoozing] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      syncFetchTasks();
+    }
+  }, [user]);
 
   // Find THE next task (first one in future that is not done)
   const now = new Date();
@@ -104,13 +111,35 @@ export default function SmartAlarmScreen() {
     if (!nextTask) return;
     setCompleting(true);
     try {
-      await pb.collection('Tasks').update(nextTask.id, { is_completed: true });
-      toggleTask(nextTask.id);
+      // ✅ Menggunakan syncToggleTask — API + state diperbarui secara atomik
+      await syncToggleTask(nextTask.id);
       router.back();
-    } catch (error) {
-      console.error('Update error:', error);
+    } catch (error: any) {
+      console.error('[handleMarkDone] Error:', error);
+      Alert.alert('Gagal', error?.message || 'Tidak dapat menandai tugas selesai. Coba lagi.');
+    } finally {
+      setCompleting(false);
     }
-    setCompleting(false);
+  }
+
+  async function handleSnooze() {
+    if (!nextTask) return;
+    setSnoozing(true);
+    try {
+      // ✅ Menggunakan syncSnoozeTask — menggeser start_time & end_time di server + state
+      await syncSnoozeTask(nextTask.id, SNOOZE_MINUTES);
+      Alert.alert(
+        `Ditunda ${SNOOZE_MINUTES} menit ⏰`,
+        `"${nextTask.title}" sekarang dijadwalkan mulai pukul ${new Date(
+          new Date(nextTask.start_time!).getTime() + SNOOZE_MINUTES * 60000
+        ).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}.`
+      );
+    } catch (error: any) {
+      console.error('[handleSnooze] Error:', error);
+      Alert.alert('Gagal Snooze', error?.message || 'Tidak dapat menunda tugas. Coba lagi.');
+    } finally {
+      setSnoozing(false);
+    }
   }
 
 
@@ -225,7 +254,7 @@ export default function SmartAlarmScreen() {
         <Animated.View style={[styles.actionsWrap, Anim(3)]}>
           <TouchableOpacity
             style={[styles.startNowBtn, !nextTask && { opacity: 0.5 }]}
-            onPress={() => { if (nextTask) { router.back(); router.push('/focus'); } }}
+            onPress={() => { if (nextTask) { setActiveTask(nextTask); router.back(); router.push('/focus'); } }}
             activeOpacity={0.85}
             disabled={!nextTask}
           >
@@ -234,9 +263,15 @@ export default function SmartAlarmScreen() {
           </TouchableOpacity>
 
           <View style={styles.secondaryActions}>
-            <TouchableOpacity style={styles.secBtn} activeOpacity={0.75} onPress={() => alert('Snoozed!')}>
-              <Ionicons name="notifications-off-outline" size={16} color="rgba(255,255,255,0.5)" />
-              <Text style={styles.secBtnText}>Snooze 5m</Text>
+            {/* ✅ FIXED: Snooze sekarang menggeser jadwal +5 menit di server & state */}
+            <TouchableOpacity
+              style={[styles.secBtn, (snoozing || !nextTask) && { opacity: 0.5 }]}
+              activeOpacity={0.75}
+              onPress={handleSnooze}
+              disabled={snoozing || !nextTask}
+            >
+              <Ionicons name="notifications-off-outline" size={16} color={snoozing ? '#00D4FF' : 'rgba(255,255,255,0.5)'} />
+              <Text style={styles.secBtnText}>{snoozing ? 'Menunda...' : 'Snooze 5m'}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.secBtn} activeOpacity={0.75} onPress={() => router.push('/(tabs)/timeline')}>
