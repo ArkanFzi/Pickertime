@@ -19,6 +19,9 @@ async function callGemini(prompt: string) {
     const response = await pb.send('/api/ai/gemini', {
       method: 'POST',
       body: { prompt },
+      headers: {
+        Authorization: pb.authStore.token,
+      }
     });
     
     return response.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -65,7 +68,9 @@ export async function getAIInsight(
   weeklyData: any
 ): Promise<string> {
   try {
-    const prompt = `Give a short 1-sentence motivation for a ${role} aiming for ${focusGoal}.`;
+    const trendStr = weeklyData.trend ? `Recent focus minutes trend: ${weeklyData.trend.join(', ')}` : '';
+    const prompt = `You are a productivity coach for a ${role} whose goal is ${focusGoal}. ${trendStr}. 
+    Provide one very short, insightful 1-sentence advice or observation based on this trend. No quotes, no intro.`;
     return await callGemini(prompt);
   } catch (error) {
     return "Keep protecting your deep work blocks. You're making progress!";
@@ -84,10 +89,53 @@ export async function getSmartAlarmPrep(
     const cleanJson = result.replace(/```json|```/g, '').trim();
     return JSON.parse(cleanJson);
   } catch (error) {
-    return [
+    const roleFallbacks: Record<string, Array<{ icon: string; text: string }>> = {
+      Student: [
+        { icon: 'laptop-outline', text: 'Open textbook & notes app' },
+        { icon: 'cafe-outline', text: 'Get water or coffee' },
+        { icon: 'phone-portrait-outline', text: 'Put phone face-down' },
+      ],
+      Professional: [
+        { icon: 'document-text-outline', text: 'Open relevant docs & tools' },
+        { icon: 'headset-outline', text: 'Put on noise-cancelling headphones' },
+        { icon: 'notifications-off-outline', text: 'Set Slack to DND' },
+      ],
+      Creator: [
+        { icon: 'color-palette-outline', text: 'Open creative tools' },
+        { icon: 'musical-note-outline', text: 'Start ambient playlist' },
+        { icon: 'cafe-outline', text: 'Get your beverage' },
+      ],
+    };
+    return roleFallbacks[role] || [
       { icon: 'cafe-outline', text: 'Get your beverage ready' },
       { icon: 'notifications-off-outline', text: 'Minimize distractions' },
       { icon: 'play-outline', text: 'Mentally prepare for flow' }
+    ];
+  }
+}
+
+export async function generateDailySchedule(
+  role: string,
+  focusGoal: string,
+  energyPref: string
+): Promise<Array<{ title: string; desc: string; duration: number; category: string }>> {
+  try {
+    const prompt = `You are a productivity AI. Generate a realistic daily schedule with exactly 3 focused tasks for a ${role} whose main goal is "${focusGoal}" and prefers to work in the "${energyPref}".
+    Return ONLY a JSON array of objects with this exact format:
+    [
+      { "title": "Short Task Name", "desc": "Short description", "duration": 60, "category": "Work" }
+    ]
+    Duration must be an integer in minutes (e.g., 30, 60, 90). Category must be one of: Work, Study, Health, Personal, Creative.`;
+
+    const result = await callGemini(prompt);
+    const cleanJson = result.replace(/```json|```/g, '').trim();
+    return JSON.parse(cleanJson);
+  } catch (error) {
+    console.error('Gemini API Error (generateDailySchedule):', error);
+    return [
+      { title: 'Morning Review', desc: 'Plan the day and set intentions.', duration: 30, category: 'Work' },
+      { title: 'Deep Work Session', desc: 'Focus on your most important project.', duration: 90, category: 'Work' },
+      { title: 'Skill Development', desc: 'Read or practice something new.', duration: 45, category: 'Study' },
     ];
   }
 }

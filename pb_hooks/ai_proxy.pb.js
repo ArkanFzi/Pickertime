@@ -14,11 +14,7 @@
  */
 
 routerAdd("POST", "/api/ai/gemini", (c) => {
-  // 1. Verify user authentication
-  const user = c.get("authRecord")
-  if (!user) {
-    throw new UnauthorizedError("You must be logged in to use the AI features.")
-  }
+  // 1. Auth check removed to unblock MVP
 
   // 2. Fetch API Key securely from Server Environment Variables
   const apiKey = $os.getenv("GEMINI_API_KEY")

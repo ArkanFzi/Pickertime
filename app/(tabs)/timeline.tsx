@@ -4,8 +4,9 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useStore } from '@/store/useStore';
+import { useStore, CreateTaskPayload } from '@/store/useStore';
 import { Task } from '@/store/useStore';
+import { generateDailySchedule } from '@/lib/gemini';
 
 const CATEGORY_COLORS: Record<string, string> = {
   Work: '#00D4FF',
@@ -23,11 +24,11 @@ const FILTERS = ['All Tasks', 'Work', 'Study', 'Personal', 'Health'];
 const MOCK_TIMELINE: Array<{
   time: string;
   type: 'task' | 'free' | 'done';
-  task?: { title: string; timeLabel: string; priority?: string; category?: string };
+  task?: { id?: string; title: string; timeLabel: string; priority?: string; category?: string };
   duration?: string;
 }> = [
-  { time: '09:00', type: 'done', task: { title: 'Morning Review', timeLabel: '09:00 – 09:30', category: 'Work' } },
-  { time: '10:00', type: 'task', task: { title: 'Deep Work Block', timeLabel: '10:00 – 12:00 (2h)', priority: 'High', category: 'Work' } },
+  { time: '09:00', type: 'done', task: { id: 'm1', title: 'Morning Review', timeLabel: '09:00 – 09:30', category: 'Work' } },
+  { time: '10:00', type: 'task', task: { id: 'm2', title: 'Deep Work Block', timeLabel: '10:00 – 12:00 (2h)', priority: 'High', category: 'Work' } },
   { time: '12:00', type: 'free', duration: '1h 30m' },
   { time: '13:30', type: 'task', task: { title: 'Team Sync', timeLabel: '13:30 – 14:30', category: 'Work' } },
   { time: '15:00', type: 'free', duration: '1h' },
@@ -70,7 +71,11 @@ function TimelineTask({ item, onPress, onSmartAlarmPress }: { item: typeof MOCK_
     <View style={[styles.slotRow, styles.slotRowLg]}>
       <Text style={[styles.timeLabel, styles.timeLabelBold]}>{item.time}</Text>
       <View style={styles.taskLine} />
-      <View style={styles.taskCardWrap}>
+      <TouchableOpacity 
+        style={styles.taskCardWrap} 
+        onPress={onPress}
+        activeOpacity={0.85}
+      >
         <View style={[styles.taskCard, styles.taskCardActive]}>
           <View style={[styles.accentBar, { backgroundColor: color }]} />
           <View style={styles.taskCardInner}>
@@ -96,21 +101,30 @@ function TimelineTask({ item, onPress, onSmartAlarmPress }: { item: typeof MOCK_
           <Text style={styles.alarmChipText}>Smart Alarm set · 10 min before</Text>
           <Ionicons name="chevron-forward" size={11} color="rgba(255,255,255,0.3)" />
         </TouchableOpacity>
-      </View>
+      </TouchableOpacity>
     </View>
   );
 }
 
 export default function TimelineScreen() {
   const router = useRouter();
-  const { tasks, user, syncFetchTasks, setActiveTask } = useStore();
+  const { tasks, user, profile, syncFetchTasks, setActiveTask, syncAddMultipleTasks } = useStore();
   const [filter, setFilter] = useState('All Tasks');
+  const [isAutoPlanning, setIsAutoPlanning] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  const today = new Date();
-  const dateStr = today.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' });
-  const currentHour = today.getHours();
-  const currentMinute = today.getMinutes();
+  // Real-time tracking of current time
+  const [nowTime, setNowTime] = useState(new Date());
+
+  useEffect(() => {
+    // Update the time every 60 seconds so the timeline moves live
+    const timer = setInterval(() => setNowTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const dateStr = nowTime.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'short' });
+  const currentHour = nowTime.getHours();
+  const currentMinute = nowTime.getMinutes();
 
   useEffect(() => {
     Animated.loop(
@@ -124,6 +138,43 @@ export default function TimelineScreen() {
       syncFetchTasks();
     }
   }, [user]);
+
+  async function handleAutoPlan() {
+    if (!user || !profile) return;
+    setIsAutoPlanning(true);
+    try {
+      const generated = await generateDailySchedule(profile.role, profile.focus_goal, profile.energy_pref);
+      
+      const payloads: CreateTaskPayload[] = [];
+      let startTime = new Date(nowTime);
+      startTime.setMinutes(Math.ceil(startTime.getMinutes() / 15) * 15); // round up to nearest 15
+      
+      for (const item of generated) {
+        const startDt = new Date(startTime);
+        const endDt = new Date(startDt.getTime() + item.duration * 60000);
+        
+        payloads.push({
+          user: user.id,
+          title: item.title,
+          description: item.desc,
+          category: item.category,
+          priority: 'High',
+          duration_minutes: item.duration,
+          start_time: startDt.toISOString(),
+          end_time: endDt.toISOString()
+        });
+        
+        // Gap of 15 mins between tasks
+        startTime = new Date(endDt.getTime() + 15 * 60000);
+      }
+      
+      await syncAddMultipleTasks(payloads);
+    } catch (err) {
+      console.error('AutoPlan failed:', err);
+    } finally {
+      setIsAutoPlanning(false);
+    }
+  }
 
   const displayTimeline = React.useMemo(() => {
     if (tasks.length === 0) return [];
@@ -160,6 +211,7 @@ export default function TimelineScreen() {
         time: start.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
         type: t.is_completed ? 'done' : 'task',
         task: {
+          id: t.id,
           title: t.title,
           timeLabel: `${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} – ${end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
           priority: t.priority,
@@ -244,31 +296,48 @@ export default function TimelineScreen() {
 
         {/* Timeline */}
         <View style={styles.timeline}>
-          {/* Vertical Line */}
-          <View style={styles.timelineLine} />
+          {/* Only show timeline lines when there are tasks */}
+          {displayTimeline.length > 0 && (
+            <>
+              {/* Vertical Line */}
+              <View style={styles.timelineLine} />
 
-          {/* Current Time Indicator */}
-          <View style={[styles.currentTimeLine, { top: currentHour * 60 + currentMinute - 120 }]}>
-            <View style={styles.currentTimeDot} />
-            <Text style={styles.currentTimeLabel}>{`${String(currentHour).padStart(2,'0')}:${String(currentMinute).padStart(2,'0')}`}</Text>
-          </View>
+              {/* Current Time Indicator */}
+              <View style={[styles.currentTimeLine, { top: currentHour * 60 + currentMinute - 120 }]}>
+                <View style={styles.currentTimeDot} />
+                <Text style={styles.currentTimeLabel}>{`${String(currentHour).padStart(2,'0')}:${String(currentMinute).padStart(2,'0')}`}</Text>
+              </View>
+            </>
+          )}
 
           {displayTimeline.length === 0 ? (
             <View style={styles.emptyStateCard}>
-              <Ionicons name="calendar-clear-outline" size={48} color="rgba(255,255,255,0.2)" />
+              <Ionicons name="sparkles" size={48} color="rgba(0,212,255,0.2)" />
               <Text style={styles.emptyStateTitle}>No Tasks Today</Text>
-              <Text style={styles.emptyStateSub}>Schedule a focus block or study session to build your timeline.</Text>
-              <TouchableOpacity style={styles.createTaskBtn} onPress={() => router.push('/schedule')}>
-                <Ionicons name="add" size={16} color="#0A0F1D" />
-                <Text style={styles.createTaskBtnText}>Create Task</Text>
-              </TouchableOpacity>
+              <Text style={styles.emptyStateSub}>Schedule a focus block manually, or let AI generate a personalized schedule based on your profile.</Text>
+              
+              <View style={styles.emptyStateActions}>
+                <TouchableOpacity 
+                  style={[styles.createTaskBtn, isAutoPlanning && { opacity: 0.5 }]} 
+                  onPress={handleAutoPlan}
+                  disabled={isAutoPlanning}
+                >
+                  <Ionicons name="color-wand" size={16} color="#0A0F1D" />
+                  <Text style={styles.createTaskBtnText}>{isAutoPlanning ? 'AI Planning...' : 'Auto-Plan My Day'}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.ghostTaskBtn} onPress={() => router.push('/schedule')} disabled={isAutoPlanning}>
+                  <Ionicons name="add" size={16} color="#00D4FF" />
+                  <Text style={styles.ghostTaskBtnText}>Manual Entry</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ) : (
             displayTimeline.map((item, i) => (
               <TimelineTask
                 key={i}
                 item={item}
-                onPress={() => router.push('/schedule')}
+                onPress={() => item.task?.id ? router.push(`/edit-task?id=${item.task.id}`) : router.push('/schedule')}
                 onSmartAlarmPress={() => router.push('/smart-alarm')}
               />
             ))
@@ -424,10 +493,19 @@ const styles = StyleSheet.create({
   },
   emptyStateTitle: { fontSize: 20, fontWeight: '700', color: '#fff', marginTop: 16, marginBottom: 8 },
   emptyStateSub: { fontSize: 13, color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginBottom: 24, lineHeight: 20 },
+  emptyStateActions: { flexDirection: 'column', gap: 12, width: '100%' },
   createTaskBtn: {
-    backgroundColor: '#00D4FF', borderRadius: 18, paddingVertical: 14, paddingHorizontal: 24,
-    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#00D4FF', borderRadius: 18, paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     shadowColor: '#00D4FF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
+    width: '100%',
   },
   createTaskBtnText: { fontSize: 15, fontWeight: '700', color: '#0A0F1D' },
+  ghostTaskBtn: {
+    backgroundColor: 'rgba(0,212,255,0.05)', borderRadius: 18, paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1, borderColor: 'rgba(0,212,255,0.2)',
+    width: '100%',
+  },
+  ghostTaskBtnText: { fontSize: 15, fontWeight: '700', color: '#00D4FF' },
 });

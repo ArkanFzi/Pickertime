@@ -1,16 +1,17 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-
-.claude
 # dependencies
 node_modules/
-.env
+.pnp
+.pnp.js
 
-# Expo
+# Expo & React Native
 .expo/
 dist/
 web-build/
 expo-env.d.ts
+/ios
+/android
 
 # Native
 .kotlin/
@@ -20,20 +21,28 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+*.cert
+*.der
+*.keystore
 
-# Metro
+# Metro & Bundler
 .metro-health-check*
+*.jsbundle
 
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# macOS
+# macOS & Windows
 .DS_Store
-*.pem
+Thumbs.db
 
-# local env files
+# Environment Files
 .env
 .env.local
 .env.*.local
@@ -41,41 +50,42 @@ yarn-error.*
 .env.test
 .env.production
 *.env
-supabase/.env.local
-supabase/.env
-supabase/functions/.env
 
 # Supabase (Remnants)
 .supabase/
 supabase/.temp/
+supabase/.env.local
+supabase/.env
+supabase/functions/.env
 
-# PocketBase / Deployment
+# PocketBase & Deployment / Secrets
 pb_data/
 .pb_data/
 docker-compose.yml
 Caddyfile
-hooks/
-migrations/
 api.db
 api.db-shm
 api.db-wal
-
-# secrets
-*.key
-*.pem
 service-account.json
 google-services.json
 GoogleService-Info.plist
 
-# typescript
-*.tsbuildinfo
+# IDEs & Editors
+.vscode/
+.idea/
+*.suo
+*.swp
+*.swo
 
-# generated native folders
-/ios
-/android
+# TypeScript / Testing
+*.tsbuildinfo
+/coverage
+.nyc_output
 
 # AI Tools & Assistants
 .gemini/
+.claude/
+.claude
 .cursor/
 .cursorrules
 .cursorignore
@@ -89,4 +99,3 @@ GoogleService-Info.plist
 .cline/
 .roo/
 .bolt/
-.claude/

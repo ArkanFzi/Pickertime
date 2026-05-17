@@ -73,6 +73,7 @@ export async function scheduleTaskNotification(task: Task): Promise<string | nul
         priority: Notifications.AndroidNotificationPriority.MAX,
       },
       trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: triggerDate,
       } as any,
     });

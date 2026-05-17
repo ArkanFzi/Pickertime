@@ -72,6 +72,11 @@ interface AppState {
   syncAddTask: (payload: CreateTaskPayload) => Promise<Task>;
 
   /**
+   * Bulk insert tasks to PocketBase, then update local state.
+   */
+  syncAddMultipleTasks: (payloads: CreateTaskPayload[]) => Promise<Task[]>;
+
+  /**
    * Memperbarui field tertentu sebuah task di PocketBase,
    * lalu merefleksikannya ke state lokal.
    * @throws Error jika gagal
@@ -90,6 +95,12 @@ interface AppState {
    * @throws Error jika gagal
    */
   syncSnoozeTask: (id: string, minutesToAdd: number) => Promise<void>;
+
+  /**
+   * Menghapus task dari PocketBase + state lokal.
+   * @throws Error jika gagal
+   */
+  syncDeleteTask: (id: string) => Promise<void>;
 
   // Focus Session
   activeTask: Task | null;
@@ -161,6 +172,32 @@ export const useStore = create<AppState>((set, get) => ({
     return newTask;
   },
 
+  // ─── syncAddMultipleTasks ───────────────────────────────────────────────────
+  syncAddMultipleTasks: async (payloads) => {
+    const newTasks: Task[] = [];
+    
+    // Process sequentially to keep it simple, or Promise.all if supported by server
+    for (const payload of payloads) {
+      const data = await pb.collection('Tasks').create({
+        ...payload,
+        is_completed: payload.is_completed ?? false,
+        has_alarm: payload.has_alarm ?? true,
+        alarm_minutes_before: payload.alarm_minutes_before ?? 10,
+      });
+      const t = data as unknown as Task;
+      newTasks.push(t);
+      try {
+        scheduleTaskNotification(t);
+      } catch (e) {
+        console.warn('Failed scheduling notification:', e);
+      }
+    }
+
+    // Perbarui state lokal dengan tugas-tugas baru
+    set((state) => ({ tasks: [...newTasks, ...state.tasks] }));
+    return newTasks;
+  },
+
   // ─── syncUpdateTask ─────────────────────────────────────────────────────────
   syncUpdateTask: async (id, updates) => {
     // 1. Kirim ke server
@@ -221,6 +258,20 @@ export const useStore = create<AppState>((set, get) => ({
     }));
 
     get().incrementSnooze();
+  },
+
+  // ─── syncDeleteTask ─────────────────────────────────────────────────────────
+  syncDeleteTask: async (id) => {
+    const taskIndex = get().tasks.findIndex((t) => t.id === id);
+    if (taskIndex === -1) throw new Error(`Task dengan id "${id}" tidak ditemukan.`);
+
+    // 1. Kirim ke server
+    await pb.collection('Tasks').delete(id);
+
+    // 2. Hanya jika server berhasil, hapus dari state lokal
+    set((state) => ({
+      tasks: state.tasks.filter((t) => t.id !== id),
+    }));
   },
 
   // ─── syncFetchTasks ─────────────────────────────────────────────────────────

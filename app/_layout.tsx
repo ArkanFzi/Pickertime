@@ -89,7 +89,7 @@ export default function RootLayout() {
   return (
     <>
       <StatusBar style="light" backgroundColor="#0A0F1D" />
-      <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+      <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="focus" options={{ headerShown: false, presentation: 'fullScreenModal' }} />

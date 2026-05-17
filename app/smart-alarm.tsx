@@ -59,7 +59,9 @@ export default function SmartAlarmScreen() {
     .sort((a, b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime());
   
   const nextTask = futureTasks[0];
-  
+  const nextNextTask = futureTasks[1];
+  const currentTask = tasks.find(t => t.start_time && t.end_time && new Date(t.start_time) <= now && new Date(t.end_time) >= now && !t.is_completed);
+
   // Calculate true minutes remaining
   const diffMs = nextTask && nextTask.start_time ? new Date(nextTask.start_time).getTime() - now.getTime() : 0;
   const minutesUntil = Math.max(0, Math.floor(diffMs / 60000));
@@ -173,7 +175,7 @@ export default function SmartAlarmScreen() {
           <Animated.View style={{ transform: [{ scale: countAnim }] }}>
             <Text style={styles.countdown}>
               {nextTask ? minutesUntil : '--'}
-              <Text style={styles.countdownSmall}>m</Text>
+              {nextTask && <Text style={styles.countdownSmall}>m</Text>}
             </Text>
           </Animated.View>
           <View style={styles.heroDivider} />
@@ -191,11 +193,9 @@ export default function SmartAlarmScreen() {
           </View>
           <Text style={styles.insightText}>
             <Text style={styles.insightBold}>Insight: </Text>
-            {aiInsight || (role === 'Student'
-              ? 'You have 35 free minutes before your study session — perfect for a quick review.'
-              : role === 'Creator'
-              ? 'Your creative output peaks in the next window. Clear your mind now.'
-              : 'Your focus block aligns with your peak energy. Prepare to enter flow state.')}
+            {aiInsight || (nextTask 
+              ? `You have ${minutesUntil} minutes before "${nextTask.title}". Use this time to prepare and clear distractions.`
+              : 'Add upcoming tasks to receive AI personalized insights.')}
           </Text>
         </Animated.View>
 
@@ -226,26 +226,32 @@ export default function SmartAlarmScreen() {
           <View style={styles.miniTimeline}>
             <View style={styles.mtLine} />
             <View style={styles.mtItem}>
-              <Text style={styles.mtTime}>Now</Text>
-              <View style={[styles.mtDot, styles.mtDotInactive]} />
-              <Text style={styles.mtLabel}>Free Time</Text>
+              <Text style={styles.mtTime}>{now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}</Text>
+              <View style={[styles.mtDot, currentTask ? styles.mtDotActive : styles.mtDotInactive]} />
+              <Text style={currentTask ? styles.mtLabelActive : styles.mtLabel}>
+                {currentTask ? `Doing: ${currentTask.title}` : 'Free Time'}
+              </Text>
             </View>
             <View style={styles.mtItem}>
               <Text style={[styles.mtTime, styles.mtTimeActive]}>
                 {nextTask?.start_time
-                  ? new Date(nextTask.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-                  : '14:00'}
+                  ? new Date(nextTask.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+                  : '--:--'}
               </Text>
               <View style={[styles.mtDot, styles.mtDotActive]} />
               <View style={styles.mtActiveBlock}>
-                <Text style={styles.mtActiveTitle}>{nextTask?.title || 'Focus Block'}</Text>
-                <Text style={styles.mtActiveDuration}>{nextTask?.duration_minutes || 35}m block</Text>
+                <Text style={styles.mtActiveTitle}>{nextTask?.title || 'No Upcoming Task'}</Text>
+                {nextTask && <Text style={styles.mtActiveDuration}>{nextTask.duration_minutes}m block</Text>}
               </View>
             </View>
             <View style={styles.mtItem}>
-              <Text style={styles.mtTime}>After</Text>
+              <Text style={styles.mtTime}>
+                {nextNextTask?.start_time
+                  ? new Date(nextNextTask.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+                  : 'Later'}
+              </Text>
               <View style={[styles.mtDot, styles.mtDotInactive]} />
-              <Text style={styles.mtLabel}>Next activity</Text>
+              <Text style={styles.mtLabel}>{nextNextTask?.title || 'Free Time'}</Text>
             </View>
           </View>
         </Animated.View>
@@ -388,6 +394,7 @@ const styles = StyleSheet.create({
     shadowColor: '#00D4FF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 6,
   },
   mtLabel: { fontSize: 13, color: 'rgba(255,255,255,0.45)' },
+  mtLabelActive: { fontSize: 13, color: '#00D4FF', fontWeight: '600' },
   mtActiveBlock: {
     backgroundColor: 'rgba(0,212,255,0.10)',
     borderWidth: 1, borderColor: 'rgba(0,212,255,0.25)',

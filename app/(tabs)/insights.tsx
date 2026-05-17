@@ -160,7 +160,7 @@ export default function InsightsScreen() {
           <Text style={styles.pageTitle}>Weekly Insights</Text>
           <Text style={styles.weekRange}>{getWeekRange()}</Text>
         </View>
-        <TouchableOpacity style={styles.calBtn}>
+        <TouchableOpacity style={styles.calBtn} onPress={() => router.push('/timeline')}>
           <Ionicons name="calendar-outline" size={18} color="rgba(255,255,255,0.7)" />
         </TouchableOpacity>
       </View>
