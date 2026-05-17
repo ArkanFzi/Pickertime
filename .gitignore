@@ -71,3 +71,20 @@ GoogleService-Info.plist
 # generated native folders
 /ios
 /android
+
+# AI Tools & Assistants
+.gemini/
+.cursor/
+.cursorrules
+.cursorignore
+.cursor-server/
+.windsurf/
+.codeium/
+.copilot/
+.cody/
+.continue/
+.aider*
+.cline/
+.roo/
+.bolt/
+.claude/
