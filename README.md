@@ -99,4 +99,4 @@ Kontribusi selalu diterima! Jika Anda menemukan bug atau ingin menambahkan fitur
 Didistribusikan di bawah lisensi MIT. Lihat `LICENSE` untuk informasi lebih lanjut.
 
 ---
-*Created with ❤️ by [ArkanFzi](https://github.com/ArkanFzi)*
+*Created by [ArkanFzi](https://github.com/ArkanFzi)*
