@@ -5,7 +5,7 @@ import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
-import { pb } from '@/lib/pocketbase';
+import { pb, loadInitialAuth } from '@/lib/pocketbase';
 import { useStore } from '@/store/useStore';
 
 SplashScreen.preventAutoHideAsync();
@@ -34,13 +34,25 @@ export default function RootLayout() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Initial check
-    if (pb.authStore.isValid) {
-      setUser(pb.authStore.model);
-      loadProfile(pb.authStore.model!.id);
+    async function init() {
+      try {
+        const storedUser = await loadInitialAuth();
+        if (storedUser) {
+          setUser(storedUser);
+          await loadProfile(storedUser.id);
+        } else if (pb.authStore.isValid && pb.authStore.model) {
+          setUser(pb.authStore.model);
+          await loadProfile(pb.authStore.model.id);
+        }
+      } catch (err) {
+        console.error('Auth initialization error:', err);
+      } finally {
+        setLoading(false);
+        await SplashScreen.hideAsync();
+      }
     }
-    setLoading(false);
-    SplashScreen.hideAsync();
+
+    init();
 
     // Listen to auth changes
     const removeListener = pb.authStore.onChange((token, model) => {

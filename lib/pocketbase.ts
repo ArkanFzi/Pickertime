@@ -8,7 +8,10 @@ if (!global.EventSource) {
   (global as any).EventSource = EventSource;
 }
 
-export const PB_URL = process.env.EXPO_PUBLIC_POCKETBASE_URL || 'https://api.elarisnoir.my.id';
+export const PB_URL =
+  process.env.EXPO_PUBLIC_POCKETBASE_URL ||
+  process.env.EXPO_PUBLIC_PB_URL ||
+  'https://api.elarisnoir.my.id';
 
 const authStore = new AsyncAuthStore({
   save: async (serialized) => await AsyncStorage.setItem('pb_auth', serialized),
@@ -20,3 +23,19 @@ export const pb = new PocketBase(PB_URL, authStore);
 
 // Disable auto-cancellation to prevent issues with React concurrency
 pb.autoCancellation(false);
+
+export async function loadInitialAuth() {
+  try {
+    const raw = await AsyncStorage.getItem('pb_auth');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.token && (parsed?.record || parsed?.model)) {
+        pb.authStore.save(parsed.token, parsed.record || parsed.model);
+        return parsed.record || parsed.model;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load stored auth:', e);
+  }
+  return null;
+}

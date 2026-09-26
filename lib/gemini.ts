@@ -45,9 +45,9 @@ export async function getNextBestAction(
     { "task": "Title", "desc": "Context-aware explanation", "duration": "X mins", "category": "Work/Study/..." }`;
 
     const result = await callGemini(prompt);
-    // Rough cleanup if Gemini wraps it in code blocks
-    const cleanJson = result.replace(/```json|```/g, '').trim();
-    return JSON.parse(cleanJson);
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No JSON object found in response');
+    return JSON.parse(jsonMatch[0]);
   } catch (error) {
     console.error('Gemini API Error:', error);
     return {
@@ -81,8 +81,9 @@ export async function getSmartAlarmPrep(
     Return ONLY a JSON array of objects: [{"icon": "ionicons-icon-name", "text": "Short instruction"}]`;
 
     const result = await callGemini(prompt);
-    const cleanJson = result.replace(/```json|```/g, '').trim();
-    return JSON.parse(cleanJson);
+    const jsonMatch = result.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) throw new Error('No JSON array found in response');
+    return JSON.parse(jsonMatch[0]);
   } catch (error) {
     return [
       { icon: 'cafe-outline', text: 'Get your beverage ready' },

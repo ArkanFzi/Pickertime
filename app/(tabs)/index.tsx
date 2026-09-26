@@ -37,7 +37,6 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { profile, tasks, setTasks, user, syncFetchTasks } = useStore();
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const [completedCount, setCompletedCount] = useState(0);
 
   const [aiSuggestion, setAiSuggestion] = useState<GeminiSuggestion | null>(null);
   const [loadingAI, setLoadingAI] = useState(false);
@@ -48,9 +47,9 @@ export default function DashboardScreen() {
   const greeting = getGreeting();
   const energyStatus = getEnergyStatus(profile?.energy_pref || 'Morning');
 
-  const totalTasks = tasks.length || 4;
-  const doneCount = tasks.filter((t) => t.is_completed).length || completedCount;
-  const progressPct = totalTasks > 0 ? Math.round((doneCount / totalTasks) * 100) : 75;
+  const totalTasks = tasks.length;
+  const doneCount = tasks.filter((t) => t.is_completed).length;
+  const progressPct = totalTasks > 0 ? Math.round((doneCount / totalTasks) * 100) : 0;
 
   const radius = 40;
   const circumference = 2 * Math.PI * radius;
