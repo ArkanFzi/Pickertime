@@ -42,6 +42,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "30ac566e-ce40-41e9-befd-304a5d99ce31"
+      }
+    },
+    "owner": "fzi2"
   }
 }
