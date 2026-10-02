@@ -1,0 +1,11 @@
+[Unit]
+Description=Backup harian pb_data Pickertime
+
+[Timer]
+OnCalendar=*-*-* 03:17:00 UTC
+RandomizedDelaySec=900
+Persistent=true
+Unit=pickertime-pb-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Relay backup Pickertime ke GCS tiap 15 menit
+
+[Timer]
+OnCalendar=*:00/15
+Persistent=true
+Unit=pickertime-pb-relay.service
+
+[Install]
+WantedBy=timers.target
