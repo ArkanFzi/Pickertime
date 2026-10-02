@@ -51,18 +51,22 @@ Fakta terukur, 2026-10-02:
   (`git checkout HEAD -- .claude`, `claude_dipulihkan=9`). `.gitignore` diambil versi production
   (pola lebih luas) + `.claude` ditambahkan kembali; `.env` tetap terignore
   (`git check-ignore -v .env` → `.gitignore:52:*.env`). Status: DONE
-- [ ] **M1.4** PR `feat/integrasikan-production` → `dev`, CI hijau, lalu merge. Status: DOING
-  (`npx tsc --noEmit` lokal: `tsc_rc=0`)
-- [ ] **M1.5** Verifikasi `app/edit-task.tsx` ada di `origin/dev` setelah M1.4:
-  `git cat-file -e origin/dev:app/edit-task.tsx`. Status: TODO (di local branch sudah ada)
+- [x] **M1.4** PR #1 `feat/integrasikan-production` → `dev` dibuat, CI lengkap hijau
+  (`Type-check -> completed success`, `Skema PocketBase + hook AI -> completed success`,
+  `main hanya hasil merge PR -> skipped`, `GitGuardian Security Checks -> completed success`),
+  lalu merged: `MERGE=200 merged True`, dev head sempat `0eecd0c Merge pull request #1`.
+  Lokal `npx tsc --noEmit` = `tsc_rc=0`. Status: DONE
+- [x] **M1.5** `git cat-file -e origin/dev:app/edit-task.tsx` → `edit_task_di_dev=ADA`.
+  Status: DONE
 
 ## M2 — Hapus cabang `production`
 
 Gerbang keras: M1.1 dan M1.5 harus `DONE` lebih dulu. Setelah `DONE`, isi unik terbukti ada di `dev`
 dan salinan patch ada di histori.
 
-- [ ] **M2.1** `git push origin --delete production`, verifikasi `git ls-remote --heads origin production`
-  kosong. Status: TODO (tergantung M1)
+- [x] **M2.1** `git push origin --delete production` → `- [deleted]         production`;
+  verifikasi `git ls-remote --heads origin production` = `''` dan sisa heads = `dev main`
+  (branch `feat/integrasikan-production` ikut dihapus setelah merge). Status: DONE
 
 ## M3 — Model cabang ditegakkan, bukan cuma ditulis
 
@@ -78,15 +82,32 @@ Fakta terukur: AGENTS.md:38-41 sudah menuliskan `dev` = base/staging, `main` = p
   `website-porto2` ditolak `remote: error: GH006: Protected branch update failed for refs/heads/main.`
   / `- Changes must be made through a pull request.` setelah `enforce_admins=true` dipasang di sana.
   Status: DONE (fact) — perbaikan ke `enforce_admins=true` dicatat di M3.1b
-- [ ] **M3.1b** `main` Pickertime: set `enforce_admins=true`, lalu buktikan dengan push
-  fast-forward langsung yang harusnya ditolak `GH006`. Status: TODO
-- [ ] **M3.2** `dev`: blokir force-push dan penghapusan branch (`allow_force_pushes=false`,
-  `allow_deletions=false`), push langsung tetap boleh supaya kerja harian tidak tersendat;
-  PR `feat/*` tetap jalur resmi. Status: TODO
+- [x] **M3.1b** `main` Pickertime: `enforce_admins=true` dipasang (`PUT=200`, readback
+  `main | enforce_admins True | force False | del False | ctx ['Type-check', 'Skema PocketBase + hook AI'] | pr_reviews 0`),
+  lalu dibuktikan dengan probe fast-forward (commit kosong di branch sementara):
+  `remote: - Changes must be made through a pull request.` +
+  `remote: - 2 of 2 required status checks are expected.` +
+  `! [remote rejected] HEAD -> main (protected branch hook declined)`, `rc=1`.
+  Branch probe `probe/main-guard` sudah dihapus dari remote. Status: DONE
+- [x] **M3.2** `dev`: proteksi dibuat (`PUT_dev=200`), readback
+  `dev | enforce_admins False | force False | del False | ctx None | pr_reviews None` →
+  force-push dan penghapusan cabang diblokir, push langsung oleh pemilik tetap jalan
+  (dibuktikan: `rc_dev_push=0`). Status: DONE
 - [ ] **M3.3** Cek `guard-main` ("main hanya hasil merge PR", `.github/workflows/ci.yml:72-73`)
-  masih diperlukan setelah M3.1, atau jadi duplicasi yang bisa dipangkas. Status: TODO
-- [ ] **M3.4** Tulis model cabang + status penegakan mekanisnya ke `AGENTS.md`/`docs` supaya
-  asumsi "main trigger deploy" tidak lagi tertulis sebagai fakta kalau belum fakta. Status: TODO
+  masih diperlukan setelah M3.1, atau jadi duplicasi yang bisa dipangkas.
+  Observasi sementara: di PR ke `dev` check itu `skipped`, jadi ia hanya bernilai di event
+  push ke `main` — dan sejak `enforce_admins=true`, push langsung ke `main` sudah tidak mungkin.
+  Kandidat: pangkas, atau pertahankan sebagai defense-in-depth. Status: TODO
+- [ ] **M3.5** Sisa probe di `dev`: commit kosong `5619be7 probe: uji push langsung ke dev`
+  sekarang jadi head `dev`, karena menguji "push langsung boleh" memang butuh push nyata.
+  Commit itu tidak bisa saya bersihkan secara jujur: `allow_force_pushes=false` (guard yang baru
+  dipasang) memblokir `--force-with-lease`. Kalau mau bersih: aktifkan force-push sementara →
+  `git push --force-with-lease origin 0eecd0c:dev` → matikan lagi. Butuh keputusan pemilik.
+  Status: BLOCKED-user
+- [x] **M3.4** `AGENTS.md:38-45` ditulis ulang sesuai fakta: `dev` = base + proteksi terpasang,
+  `main` = produksi dengan `enforce_admins=true` + required checks, `production` dinyatakan sudah
+  dihapus, dan klaim "deploy backend ke GCP via main" ditandai eksplisit sebagai **belum punya pipa**
+  (rujuk M4) alih-alih dibiarkan terbaca sebagai fakta. Status: DONE
 
 ## M4 — Jalur CI/CD produksi di `main` masih klaim, belum ada pipanya
 

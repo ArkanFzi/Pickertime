@@ -36,9 +36,21 @@ Sebelum memulai pengerjaan kode/bug:
 ## 🦊 Git & GitHub Workflow (Pola Inafood)
 
 - **Branch `dev`**: Base branch pengembangan dan staging. Semua branch fitur/bugfix WAJIB bercabang dari `dev`.
-- **Branch `main`**: Production deployment branch. Khusus untuk deploy backend ke GCP. DILARANG push langsung ke `main`.
+  Ditegakkan (2026-10-02): branch protection aktif, `allow_force_pushes=false`,
+  `allow_deletions=false`, tidak ada required status check → push langsung oleh pemilik masih jalan.
+- **Branch `main`**: Production deployment branch. DILARANG push langsung ke `main` — bukan cuma aturan
+  tertulis: `enforce_admins=true`, `required_pull_request_reviews=0 approval`, required checks
+  `Type-check` + `Skema PocketBase + hook AI`. Push langsung ditolak GitHub dengan
+  `GH006: Changes must be made through a pull request`.
+  **Catatan jujur**: klaim "khusus untuk deploy backend ke GCP" belum punya pipa — satu-satunya
+  workflow di `.github/workflows/` adalah `ci.yml` (job `typecheck`, `schema`, `guard-main`),
+  tidak ada job deploy. Jalur produksi nyata sampai hari ini: PocketBase jalan di VM
+  (`api.elarisnoir.my.id`) dan aplikasi mobile memakai profil EAS. Lihat `TODO.md` M4.
 - **Branch Tasks**: `feat/<nama-fitur>` atau `fix/<nama-bug>` (dibuat dari `dev`).
-- **Alur PR**: `feat/*` -> PR -> `dev` (staging) -> PR -> `main` (trigger GCP backend deployment).
+- **Alur PR**: `feat/*` -> PR -> `dev` (staging) -> PR -> `main`.
+- **Tidak ada branch `production`**: cabang itu dihapus 2026-10-02 setelah kerja uniknya
+  (`app/edit-task.tsx`) dilebur ke `dev` lewat PR #1; jaring pengaman ada di tag
+  `archive/production-20260517` dan `docs/archive/production-20260517/`.
 - **Conventional Commits**: Wajib gunakan `feat:`, `fix:`, `docs:`, `style:`, `refactor:`, `test:`, `chore:`.
 - **Claude Guard**: DILARANG menambahkan suffix `%claude%` pada nama commit atau branch.
 
