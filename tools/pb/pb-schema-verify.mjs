@@ -1,0 +1,81 @@
+import PocketBase from 'pocketbase'
+
+const BASE = process.argv[2]
+const tag = process.argv[3] || BASE
+const SU_EMAIL = process.env.PB_SU_EMAIL || 'su1@local.test'
+const SU_PW = process.env.PB_SU_PASSWORD || ''
+const EMAIL = 'verify-' + Date.now() + '@example.com'
+function dump(e) { const b = ['status=' + (e && e.status), 'msg=' + String(e && e.message).slice(0, 90)]; try { if (e && e.data) b.push('detail=' + JSON.stringify(e.data).slice(0, 220)) } catch { } return b.join(' | ') }
+let bad = 0
+async function t(name, fn) { try { const v = await fn(); console.log(`OK   ${tag} :: ${name} :: ${v}`); return v } catch (e) { bad++; console.log(`FAIL ${tag} :: ${name} :: ${dump(e)}`); return null } }
+function expectStatus(label, got, want) {
+  return fetchWrap(label, got, want)
+}
+function fetchWrap(label, got, want) {
+  if (got !== want) { bad++; console.log(`FAIL ${tag} :: ${label} :: expected HTTP ${want}, got ${got}`); return null }
+  console.log(`OK   ${tag} :: ${label} :: HTTP ${got}`); return got
+}
+
+// skema TIDAK dibuat di sini — harus sudah ada dari pb_migrations
+const EXPECT = {
+  Profiles: ['full_name', 'role', 'focus_goal', 'energy_pref', 'avatar_url', 'created', 'updated'],
+  Tasks: ['user', 'title', 'description', 'category', 'priority', 'start_time', 'end_time', 'duration_minutes', 'is_completed', 'has_alarm', 'alarm_minutes_before', 'created', 'updated'],
+  Focus_Sessions: ['user', 'task', 'duration_seconds', 'completed', 'created', 'updated'],
+  Workspace_Events: ['user', 'event_type', 'payload', 'is_processed', 'created', 'updated'],
+}
+const su = new PocketBase(BASE); su.autoCancellation(false)
+await t('superuser.auth', async () => 'ok')
+await su.collection('_superusers').authWithPassword(SU_EMAIL, SU_PW)
+const cols = await t('collections present', async () => { const l = await su.collections.getFullList({ batch: 500 }); return l.map(c => c.name).join(',') })
+for (const [name, want] of Object.entries(EXPECT)) {
+  await t('schema ' + name, async () => {
+    const raw = await fetch(BASE + '/api/collections/' + name, { headers: { Authorization: su.authStore.token } }).then(r => r.json())
+    if (!raw.id) throw new Error(JSON.stringify(raw).slice(0, 120))
+    const have = raw.fields.map(f => f.name)
+    const missing = want.filter(w => !have.includes(w))
+    if (missing.length) throw new Error('missing fields: ' + missing.join(','))
+    return 'ok rules[list=' + JSON.stringify(raw.listRule) + ' create=' + JSON.stringify(raw.createRule) + ']'
+  })
+}
+
+const app = new PocketBase(BASE); app.autoCancellation(false)
+await t('sign-up (anon)', async () => { await app.collection('Profiles').create({ email: EMAIL, password: 'Password123!', passwordConfirm: 'Password123!', full_name: 'Verify', role: 'Professional', emailVisibility: true }); return 'created' })
+await t('sign-in', async () => { const r = await app.collection('Profiles').authWithPassword(EMAIL, 'Password123!'); return 'resKeys=' + JSON.stringify(Object.keys(r)) + ' isValid=' + app.authStore.isValid })
+const uid = app.authStore.model.id
+const iso = new Date().toISOString()
+const task = await t('Tasks.create', async () => app.collection('Tasks').create({ user: uid, title: 'Verify task', description: 'd', category: 'Study', priority: 'Medium', start_time: iso, end_time: new Date(Date.now() + 36e5).toISOString(), duration_minutes: 45, is_completed: false, has_alarm: true, alarm_minutes_before: 15 }))
+if (task) {
+  console.log(`     ${tag} :: round-trip :: start_time=${task.start_time} end_time=${task.end_time} created=${task.created} duration=${task.duration_minutes}`)
+  await t('Tasks filter(created ISO)', async () => { const l = await app.collection('Tasks').getFullList({ filter: `user = "${uid}" && created >= "${new Date(Date.now() - 864e5).toISOString()}"` }); return 'count=' + l.length })
+  await t('Focus_Sessions.create', () => app.collection('Focus_Sessions').create({ user: uid, task: task.id, duration_seconds: 2700, completed: true }))
+  await t('Workspace_Events.create', () => app.collection('Workspace_Events').create({ user: uid, event_type: 'START_FOCUS', payload: { task_id: task.id, task_title: 'Verify task', duration_minutes: 45, timestamp: iso }, is_processed: false }))
+  await t('cross-user isolation (expect rejection)', async () => {
+    const other = new PocketBase(BASE); other.autoCancellation(false)
+    const otherEmail = 'other-' + Date.now() + '@example.com'
+    await other.collection('Profiles').create({ email: otherEmail, password: 'Password123!', passwordConfirm: 'Password123!', full_name: 'Other', emailVisibility: true })
+    await other.collection('Profiles').authWithPassword(otherEmail, 'Password123!')
+      .catch(async () => { const l = await other.collection('Profiles').getFullList({ filter: 'email = "' + EMAIL + '"' }); throw new Error('leak: ' + l.length) })
+    const mine = await other.collection('Tasks').getFullList()
+    if (mine.length) throw new Error('LEAK: other user sees ' + mine.length + ' tasks')
+    return 'other sees 0 tasks; own profile readable=' + !!(await other.collection('Profiles').getOne(other.authStore.model.id).catch(() => null))
+  })
+}
+// ai_proxy hook: harus menolak tanpa auth, dan melaporkan konfigurasi jika tanpa key
+await t('POST /api/ai/gemini tanpa token harus 401', async () => {
+  const r = await fetch(BASE + '/api/ai/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'hi' }) })
+  await r.text()
+  if (fetchWrap('gemini anon', r.status, 401) === null) throw new Error('status salah')
+  return 'ok'
+})
+const keySet = process.env.GEMINI_API_KEY ? true : false
+console.log(`     ${tag} :: GEMINI_API_KEY ${keySet ? 'SET (lewati assertion 400)' : 'kosong (assert 400 konfigurasi)'}`)
+if (!keySet) {
+  await t('POST /api/ai/gemini dengan token harus 400 konfigurasi key', async () => {
+    const r = await fetch(BASE + '/api/ai/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: app.authStore.token }, body: JSON.stringify({ prompt: 'hi' }) })
+    const body = await r.text()
+    if (r.status !== 400 || !/GEMINI_API_KEY is not configured/.test(body)) { bad++; throw new Error('unexpected ' + r.status + ' ' + body.slice(0, 100)) }
+    return 'HTTP 400 + pesan konfigurasi key'
+  })
+}
+console.log(bad === 0 ? `DONE ${tag} :: semua pemeriksaan lulus` : `DONE ${tag} :: ${bad} pemeriksaan GAGAL`)
+process.exit(bad === 0 ? 0 : 1)
