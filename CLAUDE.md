@@ -23,7 +23,7 @@ Sebelum mengembangkan fitur, investigasi bug, atau mengubah kode, pastikan check
 - **Dependencies**: `npm install`.
 - **Environment Variable**: Buat file `.env` di root project:
   ```env
-  EXPO_PUBLIC_POCKETBASE_URL=http://127.0.0.1:8090
+  EXPO_PUBLIC_PB_URL=http://127.0.0.1:8090
   ```
 - **Jalankan Aplikasi**:
   ```bash

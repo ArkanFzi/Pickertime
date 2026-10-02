@@ -8,7 +8,7 @@ Universal instruction file untuk semua Autonomous AI Coding Agents (Gemini, Clau
 
 - **App**: Mobile AI Productivity Tracker & Smart Alarm.
 - **Frontend**: React Native, Expo SDK 54, Expo Router v6, TypeScript, NativeWind v4, Zustand.
-- **Backend**: PocketBase v0.26+ (Docker/Go binary), Caddy Reverse Proxy, Google Gemini API Proxy (`pb_hooks/ai_proxy.pb.js`).
+- **Backend**: PocketBase 0.40.4 (Docker image `ghcr.io/muchobien/pocketbase:0.40.4`), Cloudflare Tunnel, Google Gemini API Proxy (`pb_hooks/ai_proxy.pb.js`). SDK aplikasi `pocketbase@0.26.9` — sudah diverifikasi identik perilakunya melawan server 0.26.6 dan 0.40.4.
 - **Target Deployment**: Backend di-deploy ke **Google Cloud Platform (GCP)** via branch `main`.
 
 ---
@@ -17,10 +17,10 @@ Universal instruction file untuk semua Autonomous AI Coding Agents (Gemini, Clau
 
 Sebelum memulai pengerjaan kode/bug:
 1. Pastikan dependensi frontend terpasang (`npm install`).
-2. Pastikan file `.env` terkonfigurasi (`EXPO_PUBLIC_POCKETBASE_URL=http://127.0.0.1:8090`).
+2. Pastikan file `.env` terkonfigurasi (`EXPO_PUBLIC_PB_URL=http://127.0.0.1:8090`). `lib/pocketbase.ts` juga masih menerima `EXPO_PUBLIC_POCKETBASE_URL`, tapi nama bakunya `EXPO_PUBLIC_PB_URL` (sama dengan `.env.example` dan `README.md`).
 3. Pastikan backend PocketBase aktif dan `pb_hooks/ai_proxy.pb.js` terpasang.
 4. Pastikan `GEMINI_API_KEY` terkonfigurasi di server host PocketBase, bukan di frontend.
-5. Verifikasi 4 koleksi PocketBase: `profiles`, `tasks`, `focus_sessions`, `workspace_events`.
+5. Verifikasi 4 koleksi PocketBase: `Profiles`, `Tasks`, `Focus_Sessions`, `Workspace_Events` (lihat `docs/02_migration/pocketbase_schema.md`).
 
 ---
 

@@ -52,20 +52,41 @@ cd Pickertime
 npm install
 ```
 
-5. Konfigurasi Environment Variables
+### 3. Jalankan Backend PocketBase
+Skema sudah dikodifikasi di `pb_migrations/` dan diterapkan otomatis saat boot, jadi tidak
+perlu membuat koleksi manual di Dashboard:
+```bash
+docker run -d --name pickertime-pb -p 127.0.0.1:8090:8090 \
+  -e PB_ADMIN_EMAIL=you@example.com \
+  -e PB_ADMIN_PASSWORD=password-admin-anda \
+  -e GEMINI_API_KEY=your_gemini_api_key \
+  -v "$PWD/pb_data:/pb_data" \
+  -v "$PWD/pb_hooks:/pb_hooks" \
+  -v "$PWD/pb_migrations:/pb_migrations" \
+  ghcr.io/muchobien/pocketbase:0.40.4
+```
+
+### 4. Konfigurasi Environment Variables (frontend)
 Buat file `.env` di root direktori untuk koneksi aplikasi ke PocketBase:
 ```env
-EXPO_PUBLIC_PB_URL=your_pocketbase_url
+EXPO_PUBLIC_PB_URL=http://192.168.1.15:8090
 ```
+Ganti dengan IP LAN komputer Anda kalau mengaksesnya dari HP/emulator.
 
-6. Konfigurasi AI (PocketBase JS Hooks)
-Gemini API Key sekarang diamankan di server (PocketBase). Atur *environment variable* sebelum menjalankan PocketBase:
+### 5. Konfigurasi AI
+`GEMINI_API_KEY` hanya ada di sisi server PocketBase (lihat langkah 3) dan tidak pernah
+masuk ke bundle aplikasi. Proxy-nya ada di `pb_hooks/ai_proxy.pb.js`.
+Kalau key tidak dipasang, `POST /api/ai/gemini` membalas 400
+`"GEMINI_API_KEY is not configured on the server."` — fitur lain tetap jalan.
+
+### 6. Verifikasi
 ```bash
-export GEMINI_API_KEY=your_gemini_api_key
-./pocketbase serve
+npm run typecheck
+PB_SU_EMAIL=you@example.com PB_SU_PASSWORD=password-admin-anda \
+  node tools/pb/pb-schema-verify.mjs http://127.0.0.1:8090 lokal
 ```
 
-### 4. Jalankan Aplikasi
+### 7. Jalankan Aplikasi
 ```bash
 npx expo start
 ```
@@ -73,13 +94,33 @@ Gunakan aplikasi **Expo Go** di HP Anda atau jalankan di emulator.
 
 ---
 
+## 📱 Build Mobile (EAS)
+Profil build ada di `eas.json` (`development`, `preview`, `production`). Sebelum build
+pertama:
+```bash
+npx eas-cli config      # cek nilai yang akan dipakai build
+npx eas-cli build -p android --profile preview
+```
+Dua hal yang masih wajib Anda isi sendiri (butuh akun Expo, tidak bisa saya kerjakan):
+1. `npx eas-cli init` untuk membuat `extra.eas.projectId` di `app.json`.
+2. `android.package` (mis. `id.co.pickertime`) dan `ios.bundleIdentifier` di `app.json`;
+   tanpa keduanya EAS menolak build.
+
+`EXPO_PUBLIC_PB_URL` di-inject per profil dari `eas.json`. Nilai itu ikut terkompilasi ke
+dalam biner, jadi ganti profile production kalau hostname backend berubah dan build ulang.
+---
+
 ## 📊 Struktur Database (PocketBase)
 
-Aplikasi ini menggunakan skema database berikut untuk sinkronisasi data:
+Empat koleksi, definisinya ada di `pb_migrations/` dan rinciannya di
+`docs/02_migration/pocketbase_schema.md`:
 
-- `profiles`: Menyimpan data user, role (Student, Professional, etc), dan status izin.
-- `tasks`: Menyimpan daftar rencana tugas, durasi, dan kategori.
-- `focus_sessions`: Log riwayat sesi fokus untuk analisis performa AI.
+- `Profiles` (auth): data user, `role`, `focus_goal`, `energy_pref`, `avatar_url`.
+- `Tasks`: rencana tugas, `start_time`/`end_time`, durasi, prioritas, alarm.
+- `Focus_Sessions`: log sesi fokus untuk analisis performa.
+- `Workspace_Events`: event jembatan OpenClaw (`event_type` + `payload` JSON).
+
+Setiap koleksi dibatasi API Rules `@request.auth.id`; hanya registrasi `Profiles` yang publik.
 
 ---
 

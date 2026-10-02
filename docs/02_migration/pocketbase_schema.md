@@ -1,46 +1,107 @@
-# PocketBase Schema Mapping: Pickertime
+# Skema PocketBase Pickertime (sudah dikodifikasi)
 
-Silakan buat koleksi berikut melalui Dashboard PocketBase Anda di `https://api.elarisnoir.my.id/_/`.
+Skema TIDAK dibuat manual lewat Dashboard lagi. Sumber kebenaran adalah
+`pb_migrations/1790909763_collections_snapshot.js`; server PocketBase menerapkannya
+otomatis saat boot (`automigrate` aktif secara default).
 
-## 1. Profiles (Auth Collection)
-Gunakan koleksi `users` bawaan atau ubah namanya menjadi `Profiles`.
-Tambahkan field berikut:
-- `full_name` (Text)
-- `role` (Select: Student, Professional, Researcher, Creator, Freelancer)
-- `focus_goal` (Text)
-- `energy_pref` (Select: Morning, Afternoon, Night Owl)
+## Menjalankan backend lokal
 
-## 2. Tasks (Base Collection)
-Field:
-- `user` (Relation: constant to `Profiles`, Single)
-- `title` (Text, Non-empty)
-- `category` (Select: Work, Study, Health, Personal, etc.)
-- `start_time` (DateTime)
-- `duration_minutes` (Number)
-- `is_completed` (Bool, default: false)
-- `has_alarm` (Bool)
+```bash
+docker run -d --name pickertime-pb -p 127.0.0.1:8090:8090 \
+  -e PB_ADMIN_EMAIL=<email-admin> \
+  -e PB_ADMIN_PASSWORD=<password-admin> \
+  -e GEMINI_API_KEY=<key, opsional> \
+  -v $PWD/pb_data:/pb_data \
+  -v $PWD/pb_hooks:/pb_hooks \
+  -v $PWD/pb_migrations:/pb_migrations \
+  ghcr.io/muchobien/pocketbase:0.40.4
+```
 
-## 3. Focus_Sessions (Base Collection)
-Field:
-- `user` (Relation: `Profiles`)
-- `task` (Relation: `Tasks`, Optional)
-- `duration_seconds` (Number)
-- `completed` (Bool)
+`PB_ADMIN_EMAIL`/`PB_ADMIN_PASSWORD` dibaca oleh entrypoint image dan membuat
+superuser lewat `pocketbase superuser upsert --dir=/pb_data`. Kalau CLI dijalankan
+manual di container yang sedang jalan, **selalu** sertakan `--dir=/pb_data`; tanpa itu
+CLI menulis ke `/usr/local/bin/pb_data` dan server tidak pernah melihatnya.
 
-## 4. Workspace_Events (Base Collection)
-*Koleksi ini sangat penting untuk jembatan OpenClaw.*
-Field:
-- `user` (Relation: `Profiles`)
-- `event_type` (Text: START_FOCUS, STOP_FOCUS, SESSION_COMPLETE)
-- `payload` (JSON: {task_title, duration})
-- `is_processed` (Bool, default: false)
+## Versi
 
----
+| Komponen | Versi | Status |
+|---|---|---|
+| Server | `ghcr.io/muchobien/pocketbase:0.40.4` (image build dari PocketBase v0.26.6 untuk tag `0.26`) | teruji |
+| SDK aplikasi | `pocketbase@0.26.9` | teruji lawan server 0.26.6 dan 0.40.4, hasil identik |
 
-### API Rules (Security)
-Untuk setiap koleksi di atas, pastikan untuk mengatur **API Rules**:
-- **List/Search**: `user = @request.auth.id`
-- **View**: `user = @request.auth.id`
-- **Create**: `user = @request.auth.id` (atau `@request.auth.id != ""` jika field user otomatis diisi oleh SDK)
-- **Update**: `user = @request.auth.id`
-- **Delete**: `user = @request.auth.id`
+Tidak ada rilis server v0.26.9 (0.26.x = v0.26.1–v0.26.6).
+
+## Koleksi
+
+### 1. `Profiles` (auth)
+| Field | Tipe | Catatan |
+|---|---|---|
+| `full_name` | text | required, max 255 |
+| `role` | select (1) | Student, Professional, Researcher, Creator, Freelancer |
+| `focus_goal` | text | max 500 |
+| `energy_pref` | select (1) | Morning, Afternoon, Night Owl |
+| `avatar_url` | file (1) | png/jpeg/webp, max 5 MiB |
+| `created`, `updated` | autodate | wajib ada, lihat catatan di bawah |
+
+API Rules: `list`/`view`/`update`/`delete` = `@request.auth.id != "" && id = @request.auth.id`,
+`create` = `""` (string kosong = registrasi publik). Nilai `null` berarti hanya superuser yang
+boleh membuat record, dan sign-up dari aplikasi akan gagal.
+
+### 2. `Tasks` (base)
+`user` (relation → Profiles, cascade), `title` (text required), `description` (text),
+`category` (select: Work/Study/Health/Personal/Other), `priority` (select: High/Medium/Low),
+`start_time` (date), `end_time` (date), `duration_minutes` (number 0–1440),
+`is_completed` (bool), `has_alarm` (bool), `alarm_minutes_before` (number 0–1440),
+`created`, `updated` (autodate).
+
+### 3. `Focus_Sessions` (base)
+`user` (relation → Profiles), `task` (relation → Tasks, tanpa cascade),
+`duration_seconds` (number ≥ 0), `completed` (bool), `created`, `updated`.
+
+### 4. `Workspace_Events` (base) — jembatan OpenClaw
+`user` (relation → Profiles), `event_type` (text required: START_FOCUS, STOP_FOCUS,
+PAUSE_FOCUS, RESET_FOCUS, SESSION_COMPLETE), `payload` (json), `is_processed` (bool),
+`created`, `updated`.
+
+API Rules untuk tiga koleksi base: `list`/`view`/`update`/`delete` =
+`@request.auth.id != "" && user = @request.auth.id`, `create` = `@request.auth.id != ""`.
+Aturan ini sudah diverifikasi: user lain mendapat 0 record dan tidak bisa membaca profil
+user lain.
+
+## Tiga jebakan yang sudah ditemukan (jangan diulang)
+
+1. **`created`/`updated` tidak otomatis dibuat saat koleksi dibuat lewat API.** Kalau
+   field `autodate` tidak disertakan di `fields`, filter `created >= "..."` pada koleksi itu
+   balikan HTTP 400 "Something went wrong while processing your request." — ini yang terjadi
+   pada query di `app/(tabs)/insights.tsx`. Setiap koleksi baru wajib menyertakan
+   `{type:"autodate", name:"created", onCreate:true, onUpdate:false}` dan
+   `{type:"autodate", name:"updated", onCreate:true, onUpdate:true}`.
+2. **Tipe field tanggal adalah `date`, bukan `datetime`.** `datetime` ditolak
+   ("Failed to load the submitted data due to invalid formatting") di 0.26.6 maupun 0.40.4.
+   Tipe `date` menyimpan presisi milidetik: kirim `2026-10-02T02:57:12.158Z`,
+   back `2026-10-02 02:57:12.158Z`.
+3. **`@request.ip` bukan aturan yang valid**; ekspresi selalu-benar untuk registrasi publik
+   adalah string kosong `""`.
+
+## Menambah/mengubah koleksi
+
+Ubah lewat Dashboard ATAU API pada server yang menjalankan repo ini, lalu ekspor snapshot:
+
+```bash
+echo y | docker exec -i pickertime-pb /usr/local/bin/pocketbase migrate collections \
+  --dir=/pb_data --migrationsDir=/pb_migrations
+```
+
+Salin file hasilnya ke `pb_migrations/` di repo dan commit. Jangan menaruh
+`pb_data/` (SQLite + upload) ke dalam repo.
+
+## Verifikasi
+
+```bash
+PB_SU_EMAIL=<email-admin> PB_SU_PASSWORD=<password-admin> \
+node tools/pb/pb-schema-verify.mjs http://127.0.0.1:8090 <label>
+```
+
+Skrip itu menandatangani user baru, menjalankan seluruh permukaan API yang dipakai
+aplikasi (`app/(auth)/*`, `store/useStore.ts`, `app/focus.tsx`, `app/(tabs)/insights.tsx`),
+menguji isolasi antar user, dan memeriksa `POST /api/ai/gemini`.
