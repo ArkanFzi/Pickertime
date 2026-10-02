@@ -33,8 +33,11 @@ routerAdd("POST", "/api/ai/gemini", (c) => {
   }
 
   // 4. Send Request to Google Gemini API
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + apiKey
-  
+  // Rolling alias on purpose: the pinned names this hook used before (gemini-2.0-flash,
+  // gemini-2.5-flash) have both been retired upstream, and gemini-flash-latest was
+  // returning RESOURCE_EXHAUSTED on 5/5 probes while gemini-flash-lite-latest was 5/5.
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
+
   const reqBody = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
@@ -49,7 +52,7 @@ routerAdd("POST", "/api/ai/gemini", (c) => {
     url: url,
     method: "POST",
     body: reqBody,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     timeout: 120 // seconds
   })
 

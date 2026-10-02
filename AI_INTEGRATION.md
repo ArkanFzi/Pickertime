@@ -15,7 +15,7 @@ Demi keamanan, API Key Gemini **tidak lagi disimpan di sisi aplikasi mobile**. S
 ## ⚠️ Batasan & Tantangan (Current Issues)
 Saat ini, penggunaan **Google Gemini Free Tier** memiliki beberapa kendala:
 1. **Quota Exceeded (429):** Google memberikan limit ketat pada penggunaan gratis.
-2. **Model Availability:** Beberapa model (seperti `gemini-2.0-flash`) memiliki pembatasan *rate limit* yang tinggi.
+2. **Model Availability:** Model Gemini yang di-pin akan dipensiunkan upstream — `gemini-2.0-flash` dan `gemini-2.5-flash` keduanya sudah mengembalikan 404. Selain itu `gemini-flash-latest` bisa mengembalikan `RESOURCE_EXHAUSTED` (503) saat beban tinggi. Hook ini memakai rolling alias `gemini-flash-lite-latest`, yang terbukti tersedia saat `gemini-flash-latest` sedang penuh.
 
 ---
 

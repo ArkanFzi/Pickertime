@@ -7,9 +7,9 @@ Ekosistem produktivitas AI-powered berbasis **React Native (Expo)** di sisi mobi
 ## 🛠️ Tech Stack & Arsitektur
 
 - **Frontend Mobile**: React Native (0.81.5), Expo SDK 54, Expo Router v6, TypeScript 5.9, NativeWind v4 (Tailwind CSS 3.4), Zustand v5, React Native Reanimated v4.
-- **Backend**: PocketBase (v0.26+) self-hosted via Docker (`ghcr.io/muchobien/pocketbase:latest`) atau Go binary.
-- **Reverse Proxy**: Caddy (SSL termination, CORS header, reverse proxy ke port 8090).
-- **AI Engine**: Google Gemini API (`gemini-2.0-flash`), diproxy secara aman via PocketBase JS Hook (`pb_hooks/ai_proxy.pb.js`).
+- **Backend**: PocketBase 0.40.4 self-hosted via Docker (`ghcr.io/muchobien/pocketbase:0.40.4`) di VM `hermes-openclaw-vm`.
+- **Reverse Proxy**: Cloudflare Tunnel khusus (`pickertime-pb`), SSL termination di edge Cloudflare — tidak ada port publik.
+- **AI Engine**: Google Gemini API (`gemini-flash-lite-latest`), diproxy secara aman via PocketBase JS Hook (`pb_hooks/ai_proxy.pb.js`).
 - **Automation Bridge**: OpenClaw listener via collection `workspace_events`.
 
 ---
