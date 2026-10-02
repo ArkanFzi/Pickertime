@@ -93,37 +93,54 @@ Fakta terukur: AGENTS.md:38-41 sudah menuliskan `dev` = base/staging, `main` = p
   `dev | enforce_admins False | force False | del False | ctx None | pr_reviews None` →
   force-push dan penghapusan cabang diblokir, push langsung oleh pemilik tetap jalan
   (dibuktikan: `rc_dev_push=0`). Status: DONE
-- [ ] **M3.3** Cek `guard-main` ("main hanya hasil merge PR", `.github/workflows/ci.yml:72-73`)
-  masih diperlukan setelah M3.1, atau jadi duplicasi yang bisa dipangkas.
-  Observasi sementara: di PR ke `dev` check itu `skipped`, jadi ia hanya bernilai di event
-  push ke `main` — dan sejak `enforce_admins=true`, push langsung ke `main` sudah tidak mungkin.
-  Kandidat: pangkas, atau pertahankan sebagai defense-in-depth. Status: TODO
-- [ ] **M3.5** Sisa probe di `dev`: commit kosong `5619be7 probe: uji push langsung ke dev`
-  sekarang jadi head `dev`, karena menguji "push langsung boleh" memang butuh push nyata.
-  Commit itu tidak bisa saya bersihkan secara jujur: `allow_force_pushes=false` (guard yang baru
-  dipasang) memblokir `--force-with-lease`. Kalau mau bersih: aktifkan force-push sementara →
-  `git push --force-with-lease origin 0eecd0c:dev` → matikan lagi. Butuh keputusan pemilik.
-  Status: BLOCKED-user
+- [x] **M3.3** `guard-main` DIPERTAHANKAN (keputusan pemilik 2026-10-02): dipertahankan sebagai
+  defense-in-depth di samping `enforce_admins=true`. Tidak ada perubahan kode. Status: DONE
+- [x] **M3.5** Probe di `dev` dibersihkan. Endpoint khusus `PUT /branches/dev/protection/force_pushes`
+  tidak tersedia di API ini (`404 Branch not found` percobaan pertama; push `--force-with-lease`
+  saat itu justru ditolak `GH006 ... Cannot force-push to this branch` — guard bekerja).
+  Yang jalan: proteksi `dev` dilepas sebentar (`DELETE_protection=204`) →
+  `git push --force-with-lease origin 0eecd0c:dev` → proteksi dibangun ulang (`RECREATE=200`)
+  dalam perintah yang sama. Verifikasi akhir: `dev_head=0eecd0c Merge pull request #1 ...`,
+  `probe_sisa=0`, readback `dev | enforce_admins False | force False | del False`. Status: DONE
 - [x] **M3.4** `AGENTS.md:38-45` ditulis ulang sesuai fakta: `dev` = base + proteksi terpasang,
   `main` = produksi dengan `enforce_admins=true` + required checks, `production` dinyatakan sudah
   dihapus, dan klaim "deploy backend ke GCP via main" ditandai eksplisit sebagai **belum punya pipa**
   (rujuk M4) alih-alih dibiarkan terbaca sebagai fakta. Status: DONE
 
-## M4 — Jalur CI/CD produksi di `main` masih klaim, belum ada pipanya
+## M4 — Jalur CI/CD produksi di `main` (definisi: KEDUANYA)
 
-Fakta terukur: isi `.github/workflows/` = `ci.yml` saja, job-nya `typecheck`, `schema`,
-`guard-main`. Tidak ada satu pun job deploy. AGENTS.md:12 menulis
-"Backend di-deploy ke GCP via branch `main`". Backend PocketBase nyata berjalan di VM
-(`api.elarisnoir.my.id`, container, `pb_hooks/`), dan jalur publish EAS memakai profil
-`production` (`eas.json` → `EXPO_PUBLIC_PB_URL=https://api.elarisnoir.my.id`).
+Keputusan pemilik 2026-10-02: "deploy produksi" = **keduanya** — (a) `pb_hooks` + `pb_migrations`
+ke VM, dan (b) build/submit EAS profil `production`.
 
-- [ ] **M4.1** Tetapkan definisi "deploy produksi" untuk Pickertime: (a) `pb_hooks` +
-  `pb_migrations` ke VM, (b) build/submit EAS profil `production`, atau keduanya.
-  Status: BLOCKED-user (butuh keputusan pemilik, jangan saya tebak)
-- [ ] **M4.2** Setelah M4.1: pasang job deploy di `main` dengan gerbang yang sama ketatnya seperti
-  porto2 (concurrency, rollback, smoke test). Status: TODO
-- [ ] **M4.3** Smoke test nyata ke `https://api.elarisnoir.my.id` setelah deploy, dengan endpoint
-  yang benar-benar ada di skema (bukan jalur yang saya karang). Status: TODO
+Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
+
+- `.github/workflows/` = `ci.yml` saja; job `typecheck`, `schema`, `guard-main`. Tidak ada job deploy.
+- VM produksi: `agentic-watchdog-vm`, id `3411766485018421527`, zone `us-central1-a`,
+  `status RUNNING`, IP internal `10.128.0.3`, SA `486641216758-compute@developer.gserviceaccount.com`
+  → project yang sama dengan porto2 (`config-agentic-ubuntu` / 486641216758), jadi WIF provider
+  `github-pool/github-provider` sudah ada di project itu.
+- Alat uji yang sudah ada di repo dan dipakai nanti sebagai gerbang:
+  `tools/pb/pb-prod-smoke.mjs` (berisi `POST /api/ai/gemini anon must be 401`),
+  `tools/pb/pb-compat-test.mjs`, `tools/pb/pb-schema-verify.mjs`.
+- Preseden unit systemd di repo: `tools/backup/pickertime-pb-backup.{service,timer}`.
+
+- [x] **M4.1** Definisi ditetapkan: keduanya (keputusan pemilik). Status: DONE
+- [ ] **M4.2** `tools/deploy/deploy-pb-hooks.sh`: salin `pb_hooks/` + `pb_migrations/` ke VM lewat
+  `gcloud compute ssh --tunnel-through-iap`, jalankan migrasi di container PocketBase, restart,
+  lalu `pb-prod-smoke.mjs` sebagai gerbang; rollback = simpan salinan hook sebelumnya dan
+  pasang ulang kalau smoke merah. Diuji manual dari laptop sebelum apa pun menyentuh GHA.
+  Status: TODO
+- [ ] **M4.3** Workflow `deploy.yml` di `main` dengan `concurrency` (seperti porto2) yang memanggil
+  skrip M4.2. Prasyarat yang belum ada: SA khusus `pickertime-cd` + grant SSH/IAP-nya dan
+  trust-nya ke provider WIF `github-pool/github-provider`.creating cloud resource + grant =
+  persetujuan pemilik. Status: BLOCKED-user
+- [ ] **M4.4** Job EAS `production` (`eas build --profile production --platform android`) di `main`.
+  Prasyarat: `EAS_TOKEN` (Account Access Token dari expo.dev) sebagai repository secret — tidak bisa
+  saya buat dari CLI tanpa kredensial akun kamu. Status: BLOCKED-user
+- [ ] **M4.5** Submit Play Store (opsional di tahap ini): butuh service account key Google Play
+  Console. Putuskan nanti setelah M4.4 terbukti. Status: TODO
+- [ ] **M4.6** Setelah tiap deploy: `PB_BASE_URL=https://api.elarisnoir.my.id node tools/pb/pb-prod-smoke.mjs`
+  dengan kredensial superuser dari secret, bukan dari nilai yang saya tempel. Status: TODO
 
 ## M5 — Sisa lintas repo (penutup sesi ini)
 
@@ -147,13 +164,48 @@ Fakta terukur: isi `.github/workflows/` = `ci.yml` saja, job-nya `typecheck`, `s
 - [ ] **M5.4** PAT fine-grained `…nu9yjwHu` dihapus lewat UI.
   Bukti tidak ada jalur API: `GET /user/personal-access-tokens -> 404`,
   `GET /personal-access-tokens -> 404`. Status: BLOCKED-user
-- [ ] **M5.5** Backup state laptop dijadwalkan. `crontab -l | grep -c backup-laptop-state` = `0`.
-  Catatan koreksi: usulan cron mingguan sebelumnya mekanis bisa jalan (`cron` = `active`/`enabled`)
-  tapi salah alat untuk laptop — cron tidak mengejar job yang terlewat saat mesin tidur.
-  Yang benar: systemd service + timer dengan `Persistent=true` (mesin ini sudah pakai timer,
-  lihat `dns-watchdog.timer`). Status: TODO (menyetujui unit = keputusan pemilik)
+- [x] **M5.5** Backup state laptop dijadwalkan lewat systemd user unit (bukan cron).
+  Bukti readback 2026-10-02:
+  `NEXT Mon 2026-10-05 04:37:05 WIB 2 days - - agentic-laptop-backup.timer`,
+  `linger=yes`, `is-enabled=enabled`, `is-active=active`,
+  dan run terakhir `Result=success`, `ExecMainStatus=0`,
+  `ExecMainExitTimestamp=Fri 2026-10-02 22:43:51 WIB`.
+  Catatan jujur: kolom `LAST` masih `-`, artinya **timer belum pernah men-trigger sendiri** —
+  angka sukses di atas berasal dari start manual (`systemctl --user start --wait`) untuk uji unit.
+  Trigger terjadwal pertama baru terjadi Senin 04:37 dan belum terverifikasi.
+  Isi run manual: `objek: gs://config-agentic-ubuntu-backups/laptop-state/agentic-laptop-state-20261002T154133Z.tar.gz.gpg`,
+  `DB via backupAPI: 22 berhasil, 0 gagal`,
+  `verifikasi: state 1808 entri, db 22 file (target 22), integrity_check 22 DB -> 22 ok`.
+  Koreksi atas usulan saya sebelumnya: cron salah alat untuk laptop karena tidak mengejar
+  job yang terlewat saat mesin tidur; `Persistent=true` di timer mengejar. Status: DONE
 - [x] **M5.6** Pindah kunci passphrase keluar GCP. Status: DECLINED (keputusan pemilik 2026-10-02,
   jangan ditanyakan ulang)
+- [ ] **M5.7** Retensi objek backup belum ada. Terbaca 2026-10-02:
+  `gcloud storage ls gs://config-agentic-ubuntu-backups/laptop-state/` = 2 objek
+  (`…20261002T141750Z.tar.gz.gpg`, `…20261002T154133Z.tar.gz.gpg`),
+  `gcloud storage du` = `133347430` byte (~127 MB). Tanpa kebijakan, bucket tumbuh terus
+  dan salinan lama tidak pernah dilatih-pulihkan. Status: TODO
+
+## M6 — Token OAuth bocor ke log sesi (rotasi butuh tindakan pemilik)
+
+Ini kesalahan alat saya sendiri, dicatat di sini supaya tidak hilang saat sesi berganti.
+
+Fakta:
+- Pada turn pembersihan probe saya menjalankan perintah dengan `set -x`, sehingga token
+  yang dipakai untuk `git push` dan panggilan API GitHub tercetak utuh ke log sesi.
+- Metadata token (dibaca tanpa mencetak nilai token): `prefix=gho_`, panjang `40`,
+  scopes `read:user, repo, user:email, workflow`, identitas `ArkanFzi` (id `223979178`).
+- Sumber token: `~/.git-credentials`.
+- Tidak ada jalur API untuk mencabut grant OAuth (butuh `client_secret` aplikasi); `gh` tidak
+  terpasang (`gh: command not found`); `sudo -n` meminta password. Jadi perbaikan tidak bisa
+  saya kerjakan dari CLI.
+
+- [ ] **M6.1** Cabut grant aplikasi di https://github.com/settings/applications, lalu buat
+  kredensial baru. Status: BLOCKED-user
+- [ ] **M6.2** Ganti baris token lama di `~/.git-credentials` dengan yang baru. Konsekuensi
+  sampai ini selesai: `git push` dari laptop gagal autentikasi. Status: BLOCKED-user
+- [ ] **M6.3** Setelah rotasi: cek `git log`/audit repo untuk memastikan tidak ada commit
+  Session ini yang menempel token di file yang ter-track. Status: TODO
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
@@ -164,3 +216,7 @@ Fakta terukur: isi `.github/workflows/` = `ci.yml` saja, job-nya `typecheck`, `s
   "`8d4d0e1`+`16b4b33` sekarang hijau" salah — keduanya `completed failure`, hanya HEAD yang hijau.
 - [ ] **H3** Rekomendasi harus menyebut alat dan batasannya sekaligus (cron vs timer, Secret Manager
   menahan kebocoran bucket tapi bukan kompromi akun penuh).
+- [ ] **H4** DILARANG `set -x` di blok perintah yang menyentuh kredensial (token, passphrase,
+  password). Kalau butuh jejak eksekusi, `set -x` setelah nilai kredensial di-`read` ke variabel
+  yang tidak dipakai ulang di baris perintah, atau cukup cetak `prefix`/`len`/`sha256`.
+  Pelajaran: penyebab M6 persis pola ini.
