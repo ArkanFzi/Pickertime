@@ -175,6 +175,9 @@ gssh "sudo docker logs --tail 30 $CONTAINER 2>&1 | grep -iE 'migrat|error|panic|
 echo "=== gerbang smoke terhadap $PB_URL ==="
 # Gate memanggil Gemini sungguhan dan menulis + menghapus baris smoke di produksi.
 # Override dengan GATE_CMD kalau tidak diinginkan.
+# CATATAN: GATE_CMD dievaluasi di shell ini. Bikin gate gagal dengan perintah yang
+# KELUAR bukan 0 (mis. `false`), bukan `exit 1` — `exit` membunuh skrip ini lebih
+# dulu sehingga rollback tidak pernah jalan (terjadi saat uji sandbox).
 if ! run_gate; then
   echo "GAGAL: smoke merah setelah deploy." >&2
   restore_snap

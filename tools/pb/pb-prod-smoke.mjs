@@ -13,17 +13,34 @@ const PW = 'SmokeTest123!'
 let bad = 0
 const created = []
 
-async function t(name, fn) {
-  try {
-    const v = await fn()
-    console.log(`OK   ${name} :: ${v}`)
-    return v
-  } catch (e) {
-    bad++
-    const data = e && e.data ? JSON.stringify(e.data).slice(0, 180) : ''
-    console.log(`FAIL ${name} :: status=${e && e.status} msg=${String(e && e.message).slice(0, 90)} ${data}`)
-    return null
+const TRANSIENT = new Set([502, 503, 504, 520, 521, 522, 524])
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// 520/524 di jalur ini biasanya tunnel cloudflared yang ke-drop, bukan PocketBase:
+// terukur 1 dari 75 request GET /api/collections/Tasks balas 520 sedangkan
+// percobaan ulang langsung 200. Tanpa retry, gerbang deploy jadi merah acak
+// dan memicu rollback yang tidak perlu.
+async function t(name, fn, tries = 3) {
+  for (let i = 1; i <= tries; i++) {
+    try {
+      const v = await fn()
+      console.log(`OK   ${name} :: ${v}${i > 1 ? ' (percobaan ' + i + ')' : ''}`)
+      return v
+    } catch (e) {
+      const st = e && e.status
+      if (st && TRANSIENT.has(st) && i < tries) {
+        console.log(`RETRY ${name} :: status=${st} percobaan ${i}/${tries}`)
+        await sleep(i * 700)
+        continue
+      }
+      bad++
+      const data = e && e.data ? JSON.stringify(e.data).slice(0, 180) : ''
+      console.log(`FAIL ${name} :: status=${st} msg=${String(e && e.message).slice(0, 90)} ${data}`)
+      return null
+    }
   }
+  return null
 }
 
 const su = new PocketBase(BASE)
@@ -113,7 +130,11 @@ await t('POST /api/ai/gemini anon must be 401', async () => {
   const r = await fetch(BASE + '/api/ai/gemini', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'ping' }),
   })
-  if (r.status !== 401) throw new Error('expected 401, got ' + r.status)
+  if (r.status !== 401) {
+    const err = new Error('expected 401, got ' + r.status)
+    err.status = r.status
+    throw err
+  }
   return 'HTTP 401'
 })
 
@@ -124,7 +145,11 @@ await t('POST /api/ai/gemini authed (real key, live Gemini)', async () => {
     body: JSON.stringify({ prompt: 'Reply with exactly one short word: ok' }),
   })
   const text = await r.text()
-  if (r.status !== 200) throw new Error('HTTP ' + r.status + ' ' + text.slice(0, 200))
+  if (r.status !== 200) {
+    const err = new Error('HTTP ' + r.status + ' ' + text.slice(0, 200))
+    err.status = r.status
+    throw err
+  }
   let json
   try { json = JSON.parse(text) } catch { throw new Error('non-JSON body: ' + text.slice(0, 160)) }
   const cand = json?.candidates?.[0]

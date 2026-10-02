@@ -159,9 +159,10 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
   menghapus file baru → sekarang karantina + pasang ulang snapshot; (2) `GATE_CMD` dengan `exit 1`
   membunuh shell induk lewat `eval` sebelum rollback sempat jalan — dokumentasikan bahwa gate harus
   berupa perintah yang *keluar* dengan kode bukan 0, bukan `exit`.
-  Belum teruji: jalur `--apply` sungguhan ke `pickertime-pocketbase` (butuh perubahan hook nyata;
-  tidak saya karang cuma demi uji) dan gate smoke asli (butuh `PB_SU_EMAIL`/`PB_SU_PASSWORD` —
-  `~/.config/pickertime/su.env` belum ada).
+  Belum teruji di sandbox: restart container produksi yang sebenarnya (butuh perubahan hook nyata;
+  tidak saya karang cuma demi uji). Gate smoke asli belakangan jalan terpisah — lihat M4.7
+  (`~/.config/pickertime/su.env` dibuat dari `/opt/pickertime/superuser.txt` di VM, 2 baris,
+  `mode=600`, `PB_SU_EMAIL len=29`, `PB_SU_PASSWORD len=24`; tidak pernah dicetak).
   Status: DONE
 - [ ] **M4.3** Workflow `deploy.yml` di `main` dengan `concurrency` (seperti porto2) yang memanggil
   skrip M4.2. Prasyarat yang belum ada: SA khusus `pickertime-cd` + grant SSH/IAP-nya dan
@@ -185,7 +186,24 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
   Konsekuensi yang harus diketahui sebelum ini dijadikan gerbang otomatis: gate memanggil Gemini
   sungguhan (`POST /api/ai/gemini authed (real key, live Gemini)`) dan menulis lalu menghapus baris
   smoke di produksi (`Profiles`/`Tasks`/`Focus_Sessions`/`Workspace_Events`). Simpan kredensial di
-  `~/.config/pickertime/su.env` mode 600, jangan di file yang ter-track. Status: TODO
+  `~/.config/pickertime/su.env` mode 600, jangan di file yang ter-track.
+  Status: DONE
+- [x] **M4.7** Gerbang dijalankan sekali terhadap produksi, dan ditemukan + ditutup cacat di alatnya.
+  Bukti jalankan pertama: `FAIL schema Tasks :: status=520 msg=Something went wrong. {}`
+  sementara `Tasks.create :: id=md6rw5f1j37qzbo` **OK** — jadi skema tidak rusak, 520 datang dari
+  lapisan tunnel. Diuji ulang: 20× GET `/api/collections/Tasks` terautentikasi = `200=20 bukan200=0`;
+  10× `/api/health` = `200=10/10`; sampling gabungan 75 request menghasilkan `520=1`
+  (rinci: tanpa `Accept-Encoding` 1/25, `gzip` 0/25, `br` 0/25 → tidak terkait encoding).
+  Langsung ke container (`http://172.19.0.9:8090`) keempat koleksi balas `200` semua, jadi
+  PocketBase sehat dan 520 berasal dari cloudflared. Log tunnel:
+  `WRN Serve tunnel error error="accept stream listener error: failed to accept QUIC stream: timeout: no recent network activity"`
+  dan `failed to sufficiently increase receive buffer size (was: 208 kiB, wanted: 7168 kiB, got: 416 kiB)`.
+  Perbaikan yang saya buat di repo: `tools/pb/pb-prod-smoke.mjs` sekarang retry (3×, backoff) khusus
+  status transien `502/503/504/520/521/522/524`, dan dua assertion berbasis `fetch` ikut memasang
+  `err.status` supaya bisa di-retry. Setelah itu: `SMOKE PASS`, `gate_rc=0`,
+  `rows left from this run :: 0`.
+  Yang TIDAK saya sentuh: menaikkan `net.core.rmem_max` di VM (akar QUIC buffer) — itu ubahan
+  kernel host, butuh keputusan pemilik. Dicatat di M7.1. Status: DONE
 
 ## M5 — Sisa lintas repo (penutup sesi ini)
 
@@ -251,6 +269,18 @@ Fakta:
   sampai ini selesai: `git push` dari laptop gagal autentikasi. Status: BLOCKED-user
 - [ ] **M6.3** Setelah rotasi: cek `git log`/audit repo untuk memastikan tidak ada commit
   Session ini yang menempel token di file yang ter-track. Status: TODO
+
+## M7 — Keandalan tunnel `api.elarisnoir.my.id`
+
+- [ ] **M7.1** 520 intermiten dari cloudflared (terukur 1/75 request, lihat M4.7). Kandidat akar
+  dari log container `pickertime-cloudflared`: buffer UDP terlalu kecil
+  (`was: 208 kiB, wanted: 7168 kiB, got: 416 kiB`) dan `Serve tunnel error ... no recent network
+  activity`. Perbaikan yang mungkin: `sysctl net.core.rmem_max`/`rmem_default` di `hermes-openclaw-vm`
+  sesuai anjuran quic-go, dan/atau menambah connection tunnel. Ini ubahan kernel pada host yang juga
+  menjalankan openclaw/hermes/litellm/chromadb — tidak saya lakukan tanpa persetujuan.
+  Status: BLOCKED-user
+- [ ] **M7.2** Setelah M7.1: ukur ulang 200 request dan laporkan angka 520 sebelum/sesudah,
+  jangan klaim "selesai" tanpa pengukuran. Status: TODO
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
