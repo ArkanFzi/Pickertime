@@ -115,32 +115,77 @@ ke VM, dan (b) build/submit EAS profil `production`.
 Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
 
 - `.github/workflows/` = `ci.yml` saja; job `typecheck`, `schema`, `guard-main`. Tidak ada job deploy.
-- VM produksi: `agentic-watchdog-vm`, id `3411766485018421527`, zone `us-central1-a`,
-  `status RUNNING`, IP internal `10.128.0.3`, SA `486641216758-compute@developer.gserviceaccount.com`
-  → project yang sama dengan porto2 (`config-agentic-ubuntu` / 486641216758), jadi WIF provider
-  `github-pool/github-provider` sudah ada di project itu.
+- VM penampung PocketBase (dibaca 2026-10-02, `gcloud compute instances list` + `docker ps` via IAP):
+  **`hermes-openclaw-vm`**, zone `us-central1-a`, IP internal `10.128.0.2`, tanpa IP eksternal
+  → satu-satunya jalur masuk yang bekerja adalah `gcloud compute ssh --tunnel-through-iap`
+  (terbukti: `ssh_rc=0`, user `arkan`, `sudo -n=OK`, `rsync`/`tar`/`docker` tersedia).
+  Container `pickertime-pocketbase` image `ghcr.io/muchobien/pocketbase:0.40.4`,
+  `Up 12 hours`, bind mount `/opt/pickertime/app/pb_hooks -> /pb_hooks` dan
+  `/opt/pickertime/app/pb_migrations -> /pb_migrations`, `pb_data` di `/opt/pickertime/pb_data`.
+  Tidak ada label `com.docker.compose.*` → container dibuat dengan `docker run`, jadi reload hook
+  = `docker restart pickertime-pocketbase`.
+  Koreksi atas blok ini versi sebelumnya: `agentic-watchdog-vm` (`10.128.0.3`) adalah VM **relay
+  backup ke GCS** (lihat kepala `tools/backup/pickertime-pb-relay.sh`), bukan host PocketBase.
+- Drift hari ini = nol, terbukti dua arah: sha256 file terpasang sama dengan repo
+  (`68c72075…` ai_proxy, `e3fa230f…` snapshot migrasi).
+- Gerbang kesehatan: `GET $PB_URL/api/health` → `{"message":"API is healthy.","code":200,"data":{}}`,
+  dan reachable dari dalam VM (`via_public=200`).
 - Alat uji yang sudah ada di repo dan dipakai nanti sebagai gerbang:
   `tools/pb/pb-prod-smoke.mjs` (berisi `POST /api/ai/gemini anon must be 401`),
   `tools/pb/pb-compat-test.mjs`, `tools/pb/pb-schema-verify.mjs`.
 - Preseden unit systemd di repo: `tools/backup/pickertime-pb-backup.{service,timer}`.
 
 - [x] **M4.1** Definisi ditetapkan: keduanya (keputusan pemilik). Status: DONE
-- [ ] **M4.2** `tools/deploy/deploy-pb-hooks.sh`: salin `pb_hooks/` + `pb_migrations/` ke VM lewat
-  `gcloud compute ssh --tunnel-through-iap`, jalankan migrasi di container PocketBase, restart,
-  lalu `pb-prod-smoke.mjs` sebagai gerbang; rollback = simpan salinan hook sebelumnya dan
-  pasang ulang kalau smoke merah. Diuji manual dari laptop sebelum apa pun menyentuh GHA.
-  Status: TODO
+- [x] **M4.2** `tools/deploy/deploy-pb-hooks.sh` ditulis dan diuji manual dari laptop — terhadap
+  **sandbox** (`APP_DIR=/tmp/pb-deploy-sandbox`, `CONTAINER=pb-deploy-sandbox`), jadi container
+  produksi tidak pernah disentuh.
+  Bukti yang jalan:
+  · drift mode default: `isi VM sudah sama dengan repo — tidak ada yang di-deploy.` `rc=0`
+  · `--apply` sukses: `unggah terverifikasi: sha256 389fc72c…`, `isi snapshot: 2 berkas`,
+    `=== pasang 2 berkas (additive…) ===`, `pb-deploy-sandbox Up 18 seconds`,
+    `DEPLOY SELESAI DAN TERVERIFIKASI`
+  · deteksi orphan: `ORPHAN pb_hooks/README.sandbox (hanya di VM, tidak disentuh skrip ini)`
+    dan `berkas dikirim : 0 / orphan di VM : 1`
+  · rollback (gate sengaja merah `GATE_CMD=false`): `GAGAL: smoke merah setelah deploy.` →
+    `=== ROLLBACK dari …/.deploy-baseline.tar ===`; verifikasi pasca-rollback
+    `sha256sum app/pb_hooks/ai_proxy.pb.js = 68c72075…` (sama dengan state sebelum deploy) dan
+    `grep -c uji-rollback = 0`; file baru hasil deploy **hilang** dari `app/` karena dipindah ke
+    `pb_migrations.rolledback-20261002T160605Z` (karantina, bukan `rm`).
+  · produksi setelah seluruh uji: `pickertime-pocketbase Up 12 hours` (tidak pernah di-restart),
+    sha hook/migrasi produksi tetap `68c72075…` / `e3fa230f…`, `ls -d /opt/pickertime/releases`
+    → belum ada. Sisa sandbox dibersihkan: `ls -d /tmp/pb-deploy* | wc -l = 0`,
+    `container sandbox: 0`.
+  Dua cacat yang ditemukan uji ini dan sudah ditutup di skrip: (1) rollback `tar -xf` saja tidak
+  menghapus file baru → sekarang karantina + pasang ulang snapshot; (2) `GATE_CMD` dengan `exit 1`
+  membunuh shell induk lewat `eval` sebelum rollback sempat jalan — dokumentasikan bahwa gate harus
+  berupa perintah yang *keluar* dengan kode bukan 0, bukan `exit`.
+  Belum teruji: jalur `--apply` sungguhan ke `pickertime-pocketbase` (butuh perubahan hook nyata;
+  tidak saya karang cuma demi uji) dan gate smoke asli (butuh `PB_SU_EMAIL`/`PB_SU_PASSWORD` —
+  `~/.config/pickertime/su.env` belum ada).
+  Status: DONE
 - [ ] **M4.3** Workflow `deploy.yml` di `main` dengan `concurrency` (seperti porto2) yang memanggil
   skrip M4.2. Prasyarat yang belum ada: SA khusus `pickertime-cd` + grant SSH/IAP-nya dan
-  trust-nya ke provider WIF `github-pool/github-provider`.creating cloud resource + grant =
-  persetujuan pemilik. Status: BLOCKED-user
+  trust-nya ke provider WIF. Temuan 2026-10-02 yang mengubah rencana: provider
+  `projects/486641216758/locations/global/workloadIdentityPools/github-pool/providers/github-provider`
+  sudah ada tapi `attributeCondition`-nya **terkunci** ke
+  `assertion.repository=='ArkanFzi/website-porto2'` → Pickertime tidak bisa ikut pakai tanpa
+  melebarkan kondisi provider (melebarkan = menurunkan batas trust repo porto2; jangan saya lakukan
+  diam-diam). Opsi yang perlu keputusan pemilik: (a) provider baru `pickertime-provider` dengan
+  kondisi sendiri, (b) satu provider multi-repo, (c) deploy PB tetap dari laptop dan `main` hanya
+  validasi. Status: BLOCKED-user
 - [ ] **M4.4** Job EAS `production` (`eas build --profile production --platform android`) di `main`.
   Prasyarat: `EAS_TOKEN` (Account Access Token dari expo.dev) sebagai repository secret — tidak bisa
   saya buat dari CLI tanpa kredensial akun kamu. Status: BLOCKED-user
 - [ ] **M4.5** Submit Play Store (opsional di tahap ini): butuh service account key Google Play
   Console. Putuskan nanti setelah M4.4 terbukti. Status: TODO
-- [ ] **M4.6** Setelah tiap deploy: `PB_BASE_URL=https://api.elarisnoir.my.id node tools/pb/pb-prod-smoke.mjs`
-  dengan kredensial superuser dari secret, bukan dari nilai yang saya tempel. Status: TODO
+- [ ] **M4.6** Gerbang smoke pasca-deploy. Koreksi cara pakai (dibaca dari
+  `tools/pb/pb-prod-smoke.mjs:3-8`): basis URL adalah **argumen posisi**, bukan `PB_BASE_URL`,
+  dan kredensial lewat env —
+  `PB_SU_EMAIL=… PB_SU_PASSWORD=… node tools/pb/pb-prod-smoke.mjs https://api.elarisnoir.my.id`.
+  Konsekuensi yang harus diketahui sebelum ini dijadikan gerbang otomatis: gate memanggil Gemini
+  sungguhan (`POST /api/ai/gemini authed (real key, live Gemini)`) dan menulis lalu menghapus baris
+  smoke di produksi (`Profiles`/`Tasks`/`Focus_Sessions`/`Workspace_Events`). Simpan kredensial di
+  `~/.config/pickertime/su.env` mode 600, jangan di file yang ter-track. Status: TODO
 
 ## M5 — Sisa lintas repo (penutup sesi ini)
 
