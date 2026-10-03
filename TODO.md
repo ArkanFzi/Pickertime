@@ -164,16 +164,35 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
   (`~/.config/pickertime/su.env` dibuat dari `/opt/pickertime/superuser.txt` di VM, 2 baris,
   `mode=600`, `PB_SU_EMAIL len=29`, `PB_SU_PASSWORD len=24`; tidak pernah dicetak).
   Status: DONE
-- [ ] **M4.3** Workflow `deploy.yml` di `main` dengan `concurrency` (seperti porto2) yang memanggil
-  skrip M4.2. Prasyarat yang belum ada: SA khusus `pickertime-cd` + grant SSH/IAP-nya dan
-  trust-nya ke provider WIF. Temuan 2026-10-02 yang mengubah rencana: provider
-  `projects/486641216758/locations/global/workloadIdentityPools/github-pool/providers/github-provider`
-  sudah ada tapi `attributeCondition`-nya **terkunci** ke
-  `assertion.repository=='ArkanFzi/website-porto2'` → Pickertime tidak bisa ikut pakai tanpa
-  melebarkan kondisi provider (melebarkan = menurunkan batas trust repo porto2; jangan saya lakukan
-  diam-diam). Opsi yang perlu keputusan pemilik: (a) provider baru `pickertime-provider` dengan
-  kondisi sendiri, (b) satu provider multi-repo, (c) deploy PB tetap dari laptop dan `main` hanya
-  validasi. Status: BLOCKED-user
+- [ ] **M4.3** Workflow `deploy.yml` di `main`. Sudah dikerjakan 2026-10-03 (additive, tidak
+  menyentuh VM):
+  · SA dibuat: `pickertime-cd@config-agentic-ubuntu.iam.gserviceaccount.com`
+    (`Created service account [pickertime-cd]`)
+  · Provider WIF baru (keputusan pemilik "provider baru saja"):
+    `.../workloadIdentityPools/github-pool/providers/pickertime-provider`, issuer
+    `https://token.actions.githubusercontent.com`, `attributeCondition` =
+    `assertion.repository=='ArkanFzi/Pickertime' && assertion.ref=='refs/heads/main' && assertion.actor=='ArkanFzi'`
+  · Binding terbaca balik: `principalSet://iam.googleapis.com/.../attribute.repository/ArkanFzi/Pickertime`
+    → `roles/iam.workloadIdentityUser`; `roles/iap.tunnelResourceAccessor` di project untuk SA.
+  Yang TERBLOKIR dan terukur (bukan dugaan):
+  · `roles/compute.instanceUser` ditolak di kedua level:
+    `INVALID_ARGUMENT: Role roles/compute.instanceUser is not supported for this resource` (project)
+    dan `HTTPError 400: Role roles/compute.instanceUser is not supported for this resource` (instance).
+  · `roles/iap.tunnelResourceAccessor` juga ditolak di level instance → hanya level project.
+  · Transport SSH-nya tidak ada: metadata project **hanya** berisi kunci `ssh-keys`
+    (`arkan:ssh-rsa AAAA…`, 1 entri, `total items = 1`) dan **tidak ada** `enable-oslogin`;
+    login saya hari ini user lokal `arkan` dari kunci itu. Service account tidak punya
+    jalur login di model kunci-metadata lama, jadi tunnel IAP yang sudah diizinkan pun
+    tidak akan punya identitas shell.
+  Tiga opsi transport (butuh keputusan pemilik, blast radius berbeda):
+  (a) aktifkan OS Login project-wide — mengubah model identitas di host yang juga menjalankan
+      openclaw/hermes/litellm/chromadb, risiko kepemilikan file pada volume yang sudah ada;
+  (b) user lokal khusus CI lewat metadata `ssh-keys` + sudoers terbatas + private key sebagai
+      repository secret — jalan, tapi meninggalkan kredensial standing di GitHub;
+  (c) corba pull-based seperti pola backup yang sudah ada: GHA menerbitkan artefak ke Pub/Sub,
+      agen root di VM menarik, snapshot, pasang, restart, cek `/api/health`, laporkan hasil —
+      tanpa SSH, tanpa OS Login, dan kredensial superuser tidak pernah keluar dari VM.
+  Status: BLOCKED-user
 - [ ] **M4.4** Job EAS `production` (`eas build --profile production --platform android`) di `main`.
   Prasyarat: `EAS_TOKEN` (Account Access Token dari expo.dev) sebagai repository secret — tidak bisa
   saya buat dari CLI tanpa kredensial akun kamu. Status: BLOCKED-user
@@ -272,15 +291,27 @@ Fakta:
 
 ## M7 — Keandalan tunnel `api.elarisnoir.my.id`
 
-- [ ] **M7.1** 520 intermiten dari cloudflared (terukur 1/75 request, lihat M4.7). Kandidat akar
-  dari log container `pickertime-cloudflared`: buffer UDP terlalu kecil
-  (`was: 208 kiB, wanted: 7168 kiB, got: 416 kiB`) dan `Serve tunnel error ... no recent network
-  activity`. Perbaikan yang mungkin: `sysctl net.core.rmem_max`/`rmem_default` di `hermes-openclaw-vm`
-  sesuai anjuran quic-go, dan/atau menambah connection tunnel. Ini ubahan kernel pada host yang juga
-  menjalankan openclaw/hermes/litellm/chromadb — tidak saya lakukan tanpa persetujuan.
-  Status: BLOCKED-user
-- [ ] **M7.2** Setelah M7.1: ukur ulang 200 request dan laporkan angka 520 sebelum/sesudah,
-  jangan klaim "selesai" tanpa pengukuran. Status: TODO
+- [x] **M7.1** Buffer UDP dinaikkan di `hermes-openclaw-vm` (persetujuan pemilik 2026-10-03).
+  Sebelum: `net.core.rmem_max = 212992` (persis "208 kiB" di log cloudflared); probe socket di
+  netns container memohon 64 MiB dan dipangkas ke `425984`. Sesudah: berkas persisten
+  `/etc/sysctl.d/99-cloudflared-quic.conf` berisi `net.core.rmem_max = 16777216`,
+  `net.core.rmem_default = 1048576`, `net.core.wmem_max = 16777216`, dibaca balik sama,
+  dan probe yang sama di netns container → `cap_netns= 33554432`.
+  Temuan alat: `rmem_max` pada kernel `6.1.0-53-cloud-amd64` ternyata **tidak** ter-namespace —
+  nilainya langsung terlihat di netns container, tanpa perlu recreating container.
+  Restart container tunnel dilakukan karena socket QUIC yang sudah hidup dibuat sebelum perubahan:
+  `docker logs` pasca-restart `peringatan_buffer=0` (sebelumnya muncul tiap start),
+  `precheck complete hard_fail=false`, `pickertime-cloudflared Up 24 seconds`.
+  Jendela gangguan nyata: `api.elarisnoir.my.id` tidak melayani selama restart; permintaan
+  pertama setelah restart sudah `200`.
+  Batas jujuur yang harus dibaca bersama angkanya: lihat M7.2. Status: DONE
+- [x] **M7.2** Diukur ulang. Sesudah tambal: `200x GET /api/health` → `200=200 bukan200=0`,
+  lalu gate penuh `SMOKE PASS` / `gate_rc=0` / `rows left from this run :: 0`.
+  KOREKSI ATAS KESAN "SUDAH DIFIX": baseline yang saya ukur 11 menit SEBELUM tambal juga
+  `200=200 bukan200=0`. Artinya pengukuran ini tidak bisa membuktikan perbaikan apa pun.
+  Total 520 yang benar-benar teramati sepanjang sesi = 1 dari ~475 request (0,2%).
+  Yang terbukti berubah hanyalah hilangnya peringatan buffer dari log tunnel (fakta mekanis),
+  bukan hilangnya 520. Status: DONE
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
