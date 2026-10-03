@@ -1,0 +1,11 @@
+[Unit]
+Description=Antre deploy pb_hooks/pb_migrations Pickertime (setiap menit)
+
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=60
+AccuracySec=1s
+Unit=pickertime-pb-agent.service
+
+[Install]
+WantedBy=timers.target

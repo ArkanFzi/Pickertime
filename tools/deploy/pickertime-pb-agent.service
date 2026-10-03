@@ -1,0 +1,14 @@
+[Unit]
+Description=Agen deploy pb_hooks/pb_migrations Pickertime (tarik dari Pub/Sub)
+Documentation=file:/opt/pickertime/pickertime-pb-agent.sh
+After=network-online.target docker.service
+Wants=network-online.target
+# Backup membuat snapshot lewat API lalu membaca pb_data; restart container di tengah
+# proses itu membuat backup gagal. Jangan berjalan bersamaan.
+Conflicts=pickertime-pb-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/pickertime/pickertime-pb-agent.sh
+# Unduh artefak + docker restart + gerbang (retry sampai 60s) masih di bawah 10 menit.
+TimeoutStartSec=600

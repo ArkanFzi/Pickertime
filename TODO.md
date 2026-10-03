@@ -160,12 +160,13 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
   membunuh shell induk lewat `eval` sebelum rollback sempat jalan — dokumentasikan bahwa gate harus
   berupa perintah yang *keluar* dengan kode bukan 0, bukan `exit`.
   Belum teruji di sandbox: restart container produksi yang sebenarnya (butuh perubahan hook nyata;
-  tidak saya karang cuma demi uji). Gate smoke asli belakangan jalan terpisah — lihat M4.7
+  tidak saya karang cuma demi uji). — **sudah teruji di produksi pada 2026-10-03, lihat M4.3.**
+  Gate smoke asli belakangan jalan terpisah — lihat M4.7
   (`~/.config/pickertime/su.env` dibuat dari `/opt/pickertime/superuser.txt` di VM, 2 baris,
   `mode=600`, `PB_SU_EMAIL len=29`, `PB_SU_PASSWORD len=24`; tidak pernah dicetak).
   Status: DONE
-- [ ] **M4.3** Workflow `deploy.yml` di `main`. Sudah dikerjakan 2026-10-03 (additive, tidak
-  menyentuh VM):
+- [x] **M4.3** Workflow `deploy.yml` di `main` + agen di VM. Fondasi IAM terpasang 2026-10-03
+  (additive, tidak menyentuh VM):
   · SA dibuat: `pickertime-cd@config-agentic-ubuntu.iam.gserviceaccount.com`
     (`Created service account [pickertime-cd]`)
   · Provider WIF baru (keputusan pemilik "provider baru saja"):
@@ -184,15 +185,61 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
     login saya hari ini user lokal `arkan` dari kunci itu. Service account tidak punya
     jalur login di model kunci-metadata lama, jadi tunnel IAP yang sudah diizinkan pun
     tidak akan punya identitas shell.
-  Tiga opsi transport (butuh keputusan pemilik, blast radius berbeda):
-  (a) aktifkan OS Login project-wide — mengubah model identitas di host yang juga menjalankan
-      openclaw/hermes/litellm/chromadb, risiko kepemilikan file pada volume yang sudah ada;
-  (b) user lokal khusus CI lewat metadata `ssh-keys` + sudoers terbatas + private key sebagai
-      repository secret — jalan, tapi meninggalkan kredensial standing di GitHub;
-  (c) corba pull-based seperti pola backup yang sudah ada: GHA menerbitkan artefak ke Pub/Sub,
-      agen root di VM menarik, snapshot, pasang, restart, cek `/api/health`, laporkan hasil —
-      tanpa SSH, tanpa OS Login, dan kredensial superuser tidak pernah keluar dari VM.
-  Status: BLOCKED-user
+  Tiga opsi transport sempat ditawarkan; pemilik memilih **(c) corba pull-based** (2026-10-03):
+  GHA menerbitkan artefak ke Pub/Sub, agen root di VM menarik, snapshot, pasang, restart,
+  cek `/api/health`, laporkan hasil — tanpa SSH, tanpa OS Login, kredensial superuser tidak
+  pernah keluar dari VM. (a) OS Login project-wide dan (b) user lokal + standing SSH key ditolak
+  karena blast radius-nya pada host yang juga menjalankan openclaw/hermes/litellm/chromadb.
+  Infra tambahan yang terbaca balik 2026-10-03:
+  · bucket `pickertime-pb-deploys` (`US-CENTRAL1`, uniform bucket-level access) + lifecycle
+    `{"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}` — dibuktikan lewat
+    `GET storage/v1/b/pickertime-pb-deploys?fields=lifecycle`; catatan alat:
+    `gcloud storage buckets describe --format="json(lifecycle)"` mencetak `null` untuk field ini
+  · topic `pickertime-pb-deploy` + `pickertime-pb-deploy-results`; subscription
+    `pickertime-pb-deploy-to-vm` (`ackDeadlineSeconds=600`, retensi `604800s`, `filter` kosong,
+    terikat ke topic perintah) dan `pickertime-pb-deploy-results-to-gha` (`ack 120s`)
+  · IAM: SA `pickertime-cd` = `roles/pubsub.publisher` (topic perintah), `roles/pubsub.subscriber`
+    (sub hasil), `roles/storage.objectCreator` + `roles/storage.objectViewer` (bucket);
+    SA VM `486641216758-compute` = `roles/pubsub.publisher` (topic hasil)
+  · `allowedAudiences` provider ini = **nama sumber dayanya sendiri**
+    (`//iam.googleapis.com/projects/.../providers/pickertime-provider`), bukan `sts.googleapis.com`.
+    Karena itu `deploy.yml` WAJIB mengoper `audience:`; tanpa itu token GitHub ditolak STS.
+  Kode yang masuk repo: `tools/deploy/pickertime-pb-agent.sh` (agen di VM),
+  `pickertime-pb-agent.{service,timer}` (cek antrean 60s, `Conflicts=pickertime-pb-backup.service`),
+  `tools/deploy/publish-pb-deploy.sh` (penerbit + penunggu hasil),
+  `tools/deploy/install-pb-agent.sh` (pasang lewat IAP), `.github/workflows/deploy.yml`.
+  Uji nyata berurutan di produksi:
+  · agen terpasang: `-rwxr-xr-x 1 root root 12183 /opt/pickertime/pickertime-pb-agent.sh`,
+    timer `active` + `enabled`, tick pertama `agent: antrean kosong` (bukti token metadata +
+    hak pull dari VM berjalan)
+  · input hostile ditolak: `agent: ../evil GAGAL deploy_id tidak valid: '../evil'` → hasil terbit,
+    pesan di-ack (`antrean kosong` pada tick berikutnya)
+  · round-trip hasil terbaca di sub GHA:
+    `{"deploy_id":"probe-2","status":"failed","message":"action tak dikenal: lompat"}`
+  · apply #1 MERAH dan agen rollback sendiri: `status=failed message=gerbang merah setelah pasang,
+    state dikembalikan`; sha produksi kembali `68c72075d898`/`e3fa230ff4ff`, karantina
+    `pb_hooks.rolledback-run-manual-144007-a896d22a` terbentuk
+  · penyebabnya alat, bukan produksi: `jq -r .token // empty` tanpa kutip membuat jq membuka
+    `//` (normalisasi → `/`) dan `empty` sebagai berkas (`Input error: Is a directory`,
+    lalu `curl: (23) Failed writing body`) → token selalu kosong. Diperbaiki, dan **gerbang
+    pra-pasang** ditambahkan supaya kegagalan seperti ini membatalkan deploy sebelum VM disentuh —
+    terbukti pada apply berikutnya: `langkah: gerbang pra-pasang (VM belum diubah)` →
+    `GAGAL gerbang merah SEBELUM ada perubahan, deploy dibatalkan` (tanpa restart, tanpa snapshot)
+  · sebab sesungguhnya ada di M8 (kredensial superuser berubah oleh restart itu sendiri)
+  · apply #2 HIJAU: `hasil: deploy_id=run-manual-167929-a896d22a status=applied
+    message=health+anon-401+superuser+4 koleksi hijau`, `rc_publish=0`, lima langkah tercatat:
+    `gerbang pra-pasang` → `snapshot baseline` → `rsync … (aditif, tanpa --delete)` →
+    `restart container` → `gerbang pasca-pasang`
+  · produksi pasca-deploy: sha tetap `68c72075d898`/`e3fa230ff4ff` (isi hari ini identik, jadi
+    yang terbukti adalah mekanismenya: unduh-verifikasi-snapshot-pasang-restart-gerbang),
+    smoke lewat URL publik `SMOKE PASS` dengan `POST /api/ai/gemini authed (real key, live Gemini)
+    :: finishReason=STOP text="Ok"` dan `rows left from this run :: 0`
+  · artefak milik sendiri dibersihkan: `sisa_karantina=0`; bucket hanya berisi objek yang terpasang
+    (`inbox/run-manual-167929-a896d22a.tar`, 51200 byte); `releases` = 2 snapshot
+  Yang BELUM teruji: eksekusi `deploy.yml` di GitHub. Provider mengunci
+  `assertion.ref=='refs/heads/main'`, jadi ujiannya baru bisa jalan setelah ada merge `dev`→`main`,
+  dan itu tindakan pemilik. Status: DONE untuk jalur teruji-endpoint-VM; eksekusi GHA menunggu
+  merge pertama ke `main`
 - [ ] **M4.4** Job EAS `production` (`eas build --profile production --platform android`) di `main`.
   Prasyarat: `EAS_TOKEN` (Account Access Token dari expo.dev) sebagai repository secret — tidak bisa
   saya buat dari CLI tanpa kredensial akun kamu. Status: BLOCKED-user
@@ -262,11 +309,23 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
   job yang terlewat saat mesin tidur; `Persistent=true` di timer mengejar. Status: DONE
 - [x] **M5.6** Pindah kunci passphrase keluar GCP. Status: DECLINED (keputusan pemilik 2026-10-02,
   jangan ditanyakan ulang)
-- [ ] **M5.7** Retensi objek backup belum ada. Terbaca 2026-10-02:
-  `gcloud storage ls gs://config-agentic-ubuntu-backups/laptop-state/` = 2 objek
-  (`…20261002T141750Z.tar.gz.gpg`, `…20261002T154133Z.tar.gz.gpg`),
-  `gcloud storage du` = `133347430` byte (~127 MB). Tanpa kebijakan, bucket tumbuh terus
-  dan salinan lama tidak pernah dilatih-pulihkan. Status: TODO
+- [x] **M5.7** Koreksi total atas item ini. Versi 2026-10-02 menyimpulkan "retensi objek backup
+  belum ada" hanya dari `gcloud storage ls` + `du` — **tidak pernah membaca field lifecycle**,
+  jadi kesimpulannya salah. Dibaca lewat API 2026-10-03
+  (`GET storage/v1/b/<b>?fields=lifecycle`):
+  · `pickertime-pb-backups` → `{"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}`
+  · `config-agentic-ubuntu-backups` → `age:30` **+** `{"action":{"type":"Delete"},"condition":{"isLive":false,"numNewerVersions":5}}`
+  · `pickertime-pb-deploys` → `age:30` (saya tambahkan hari ini; bucket ini hanya berisi artefak
+    deploy milik saya, dan terbaca balik setelah update)
+  Jadi kepala `tools/backup/pickertime-pb-relay.sh` yang menulis "retensi 30 hari di bucket GCS"
+  memang benar, dan saya yang keliru.
+  Bagian yang TETAP terbuka dan bukan soal kebijakan: belum ada ** latihan restore**. Retensi
+  tanpa pemulihan yang pernah dicoba tidak membuktikan apa pun. Dibuat item sendiri (M5.8) karena
+  latihannya menyentuh data produksi dan perlu keputusan pemilik. Status: DONE (koreksi)
+- [ ] **M5.8** Latihan restore backup PocketBase dari bucket GCS ke instance sementara, lalu
+  verifikasi jumlah baris per koleksi terhadap `backup-state.env`. Sampai ini dijalankan,
+  "backup aman" tetap klaim tanpa bukti. Status: TODO (butuh persetujuan pemilik untuk
+  menghidupkan instance + membaca data produksi ke host baru)
 
 ## M6 — Token OAuth bocor ke log sesi (rotasi butuh tindakan pemilik)
 
@@ -313,6 +372,50 @@ Fakta:
   Yang terbukti berubah hanyalah hilangnya peringatan buffer dari log tunnel (fakta mekanis),
   bukan hilangnya 520. Status: DONE
 
+## M8 — Invarian kredensial superuser PocketBase (temuan 2026-10-03, sudah ditutup)
+
+Ini bukan cacat desain agen; ini perilaku image yang belum tercatat di mana pun, dan saya
+picu sendiri. Terbukur:
+
+- image `ghcr.io/muchobien/pocketbase:0.40.4` mencetak `Successfully saved superuser "…"!`
+  pada **setiap** start (`docker logs` menunjukkan baris itu di tiap blok "Server started"),
+  dan sumber nilainya adalah env **container**, bukan `/opt/pickertime/.env`:
+  `docker inspect -f '{{range .Config.Env}}'` → `PB_ADMIN_EMAIL` len 29, `PB_ADMIN_PASSWORD` **len 48**.
+- File `.env` dan `superuser.txt` berisi nilai lain: `PB_ADMIN_PASSWORD` **len 24**,
+  `password_sama=TIDAK`, `email_sama=ya`. `mtime superuser.txt = Oct 2 11:37` sedangkan container
+  terakhir start `Oct 2 04:34` → nilai 24 itu dipasang **lewat API setelah** start, jadi yang
+  menang hanya sampai restart berikutnya.
+- Yang saya salah tuduh lebih dulu: saya mengira ini artefak nested-quoting lewat
+  `gcloud compute ssh --command`. Dibantah dengan probe berbasis berkas yang memakai **fungsi
+  `envval` yang sama** dengan `tools/backup/pickertime-pb-backup.sh`:
+  `pakai_.env: http=400 token_len=0` dan `pakai_superuser.txt: http=400 token_len=0`
+  (`message` = `Failed to authenticate.`), sementara `pakai_container_env: http=200 token_len=223`.
+
+Akibat yang saya timbulkan: `docker restart pickertime-pocketbase` — yang justru **diperintahkan**
+oleh desain reload hook — mengembalikan password ke nilai env container, sehingga kredensial yang
+dipakai `tools/backup/pickertime-pb-backup.sh` (via `PB_ADMIN_PASSWORD` di `.env`) dan
+`~/.config/pickertime/su.env` berhenti login. Backup terakhir sebelum rusak:
+`LAST_OK=2026-10-03T03:22:15Z`. Jalur backup putus secara diam-diam pada hari itu juga.
+
+Perbaikan yang saya pilih: samakan **file** dengan env container, bukan sebaliknya — mengubah env
+container berarti membuat ulang container (blast radius jauh lebih besar, dan env itulah yang tetap
+menang di setiap restart).
+- cadangan sebelum ubah: `/root/pickertime-env.bak-20261003T145151Z` (+ `pickertime-superuser.bak-…`)
+- hasil tulis: `hasil_baca_.env: email_len=29 pw_len=48` → `auth_dengan_.env: http=200 token_len=223`
+- bukti jalur backup pulih (dijalankan sekali): `backup_rc=0`,
+  `LAST_OK=2026-10-03T14:56:25Z`, `LAST_KEY=pb_backup_acme_20261003145622.zip`, `LAST_SIZE=307282`
+- `~/.config/pickertime/su.env` laptop diselaraskan ulang dari VM lewat stdout ssh (nilai tidak
+  pernah dicetak): 2 baris, `mode=600`, `PB_SU_EMAIL len=29`, `PB_SU_PASSWORD len=48`
+- probe sementara dihapus: `probe_lokal_dihapus` (laptop) dan `sudo rm -f /tmp/probe-auth*.sh` (VM)
+
+**Invariant yang harus diingat: setelah `docker restart`, kredensial superuser = env container.**
+Implikasi untuk rotasi password di kemudian hari: nilai baru harus masuk ke `--env-file` sebelum
+`docker run` ulang; kalau hanya diubah lewat API/dashboard, restart berikutnya akan menimpanya dan
+sekalian memutus backup.
+
+- [ ] **M8.1** Tuliskan invariant ini ke tempat yang dibaca agen lain (AGENTS.md atau
+  `docs/02_migration/`), supaya tidak perlu ditemukan ulang lewat gerbang merah. Status: TODO
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan
@@ -326,3 +429,22 @@ Fakta:
   password). Kalau butuh jejak eksekusi, `set -x` setelah nilai kredensial di-`read` ke variabel
   yang tidak dipakai ulang di baris perintah, atau cukup cetak `prefix`/`len`/`sha256`.
   Pelajaran: penyebab M6 persis pola ini.
+- [ ] **H5** Program `jq` yang dipakai di shell WAJIB dikutip penuh, termasuk operator `//`.
+  Pelajaran terukur: `jq -r .token // empty` (tanpa kutip) membuat jq membuka `//` — yaitu direktori
+  `/` — sebagai file input, sehingga gerbang M4.3 merah dengan `Input error: Is a directory` +
+  `curl: (23) Failed writing body`, bukan karena produksi rusak. Perbaikan:
+  `jq -r '.token // empty'`. Aturan turunannya: setiap baris shell yang memanggil jq
+  di-`bash -n`-kan dan dijalan sekali dalam mode baca-saja sebelum dijadikan gerbang.
+- [ ] **H6** Langkah deploy yang mengubah state WAJIB didahului gerbang baca-saja (pra-pasang)
+  terhadap state saat ini. Pelajaran terukur: run #2 diblokir SEBELUM ada perubahan (`gerbang
+  pra-pasang (VM belum diubah)` → `gerbang merah SEBELUM ada perubahan, deploy dibatalkan`), dan
+  justru dari blokir itu diketahui akar sebenarnya (invarian M8), bukan bug jq. Tanpa gerbang ini,
+  run #2 sudah me-restart container produksi dan hasil akhirnya tetap merah.
+  Diterapkan di `tools/deploy/pickertime-pb-agent.sh` (`apply_deploy`).
+- [ ] **H7** `gcloud pubsub subscriptions pull` sudah melakukan base64-decode sendiri, dan
+  `--auto-ack` menghapus message begitu dibaca. Pelajaran: saya kehilangan 2 message hasil
+  deploy (run #1 dan #3) karena mengalirkan keluaran `pull --auto-ack` ke `base64 -d`.
+  Aturan: untuk inspeksi manual, `pull` TANPA `--auto-ack` (ack hanya setelah isi diparsing) dan tanpa
+  pipe dekode. Publisher `publish-pb-deploy.sh` sudah memakai pola ack-after-result: poll REST
+  `${RESULTS_SUB}:pull` dengan `maxMessages` (baris 139), cocokkan `deploy_id`, baru
+  `${RESULTS_SUB}:acknowledge` (baris 152); message milik run lain dibiarkan tidak di-ack.
