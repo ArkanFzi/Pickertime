@@ -341,6 +341,29 @@ Fakta:
   terpasang (`gh: command not found`); `sudo -n` meminta password. Jadi perbaikan tidak bisa
   saya kerjakan dari CLI.
 
+Permukaan bocor yang DIUKUR (2026-10-04, hanya hash/panjang/kode HTTP yang dicetak; nilai token
+tidak pernah kukeluar-liskan):
+
+- Nilai token: `len=40 prefix=gho_`, `sha256[0:16]=61de3d3f5721850d`. **Satu-satunya nilai unik**
+  di log sesi (`grep -rhoE 'gho_[A-Za-z0-9]{20,}' | sort -u | wc -l` = 1) dan hash-nya SAMA dengan
+  kredensial aktif di `~/.git-credentials` → token yang bocor adalah token yang masih dipakai,
+  termasuk untuk push `7c051e9` hari ini.
+- Di mana: **1 berkas**, `~/.qoder/projects/-home-arkan/470a5e4c-….jsonl` (transkrip sesi aktif),
+  **10 kemunculan** di 3 baris. Bentuknya jejak `set -x`: `grep -o '+ gho_' | wc -l` = 10
+  (= semua kemunculan token penuh). 14 berkas lain di `~/.qoder` hanya memuat prefiks `gho_`
+  sebagai prosa, tanpa nilai penuh.
+- Di mana TIDAK: `.config` 0, `.cache` 0, `Documents` 0, `.local` 0, `.ssh` 0, `.bash_history` 0,
+  `.hermes`/`.openclaw`/`openclaw-docker` 0. Riwayat git bersih (`log_matches=0`,
+  `worktree_matches=0`). Backup state laptop ke GCS tidak ikut membawa ini:
+  `backup-laptop-state.sh:106-109` memakai daftar include eksplisit
+  (`.openclaw .hermes openclaw-docker/...`) tanpa `.qoder`.
+- **VEKTOR BARU yang saya buat sendiri saat mengukur:** `sudo grep -F "$TOKEN"` di VM
+  menulis token ke `/var/log/auth.log` (sudo mencatat `COMMAND=` lengkap ke syslog).
+  Terbukur: `auth.log occ=5` (barisan lain di journal `user-1001.journal`), timestamp
+  `2026-10-04T07:20:13`–`07:21:12` = persis saat probe tadi, bukan dari kejadian asli.
+  Belum kuscrub — mengubah `auth.log` = merusak jejak audit di host produksi, butuh keputusan
+  pemilik. Catatan: setelah token direvokasi, salinan ini jadi tidak berguna bagi siapa pun.
+
 - [ ] **M6.1** Cabut grant aplikasi di https://github.com/settings/applications, lalu buat
   kredensial baru. Status: BLOCKED-user
 - [ ] **M6.2** Ganti baris token lama di `~/.git-credentials` dengan yang baru. Konsekuensi
@@ -448,3 +471,9 @@ sekalian memutus backup.
   pipe dekode. Publisher `publish-pb-deploy.sh` sudah memakai pola ack-after-result: poll REST
   `${RESULTS_SUB}:pull` dengan `maxMessages` (baris 139), cocokkan `deploy_id`, baru
   `${RESULTS_SUB}:acknowledge` (baris 152); message milik run lain dibiarkan tidak di-ack.
+- [ ] **H8** JANGAN pernah menyerahkan rahasia sebagai **argumen** perintah, termasuk `sudo`.
+  `sudo` mencatat `COMMAND=` lengkap ke syslog → `sudo grep -F "$TOKEN" /var/log/auth.log` di VM
+  menulis token itu sendiri ke `/var/log/auth.log` (terukur 2026-10-04, lihat M6). Aturan:
+  rahasiakan lewat **stdin/pipe** ke `grep -f -` (bukan `-F "$VAL"`), atau bandingkan
+  `sha256sum` nilai lokal dengan hash yang sudah tercatat. Aturan ini juga berlaku untuk
+  `set -x` (H4) — dua-duanya adalah cara "mengukur" yang justru menggandakan kebocoran.
