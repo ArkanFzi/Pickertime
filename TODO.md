@@ -327,7 +327,7 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
   "backup aman" tetap klaim tanpa bukti. Status: TODO (butuh persetujuan pemilik untuk
   menghidupkan instance + membaca data produksi ke host baru)
 
-## M6 — Token OAuth bocor ke log sesi (rotasi butuh tindakan pemilik)
+## M6 — Token OAuth bocor ke log sesi (DITUTUP 2026-10-04 sebagai risiko diterima, bukan diperbaiki)
 
 Ini kesalahan alat saya sendiri, dicatat di sini supaya tidak hilang saat sesi berganti.
 
@@ -364,12 +364,30 @@ tidak pernah kukeluar-liskan):
   Belum kuscrub — mengubah `auth.log` = merusak jejak audit di host produksi, butuh keputusan
   pemilik. Catatan: setelah token direvokasi, salinan ini jadi tidak berguna bagi siapa pun.
 
-- [ ] **M6.1** Cabut grant aplikasi di https://github.com/settings/applications, lalu buat
-  kredensial baru. Status: BLOCKED-user
-- [ ] **M6.2** Ganti baris token lama di `~/.git-credentials` dengan yang baru. Konsekuensi
-  sampai ini selesai: `git push` dari laptop gagal autentikasi. Status: BLOCKED-user
-- [ ] **M6.3** Setelah rotasi: cek `git log`/audit repo untuk memastikan tidak ada commit
-  Session ini yang menempel token di file yang ter-track. Status: TODO
+- [x] **M6.1** Cabut grant aplikasi di https://github.com/settings/applications, lalu buat
+  kredensial baru. **Keputusan pemilik 2026-10-04: tidak dirotasi** ("kalau gitu tidak perlu
+  diganti lagi ya, jadi silahkan di tutup progress tersebut"). Ditutup sebagai **risiko diterima**,
+  bukan sebagai item yang selesai diperbaiki. Konsekuensi yang harus diingat sesi berikutnya:
+  nilai token `sha256[0:16]=61de3d3f5721850d` **masih valid** dan masih tersimpan plaintext di
+  (a) transkrip sesi `~/.qoder/projects/-home-arkan/470a5e4c-….jsonl` (10 kemunculan) dan
+  (b) `/var/log/auth.log` VM `hermes-openclaw-vm` (5 kemunculan, buat `sudo` H8).
+  **Pemicu buka lagi (reopener):** token ini dipakai untuk operasi tulis apa pun selain `dev`
+  (mis. merge ke `main`, ubah branch protection/secret repo), transkrip/`auth.log` ikut
+  dibackup-kan ke luar laptop atau ke GCS, ada aktivitas tak dikenal di
+  https://github.com/settings/security-log , atau aplikasi PocketBase di-publish ke Play Store.
+  Semua salinan itu baru menjadi tidak berguna **setelah** grant dicabut — bukan karena waktu.
+  Status: CLOSED-BY-OWNER-DECISION
+- [x] **M6.2** Ganti baris token lama di `~/.git-credentials` dengan yang baru. Ikut ditutup oleh
+  keputusan M6.1: `~/.git-credentials` masih berisi `prefix=gho_ len=40` (token yang sama), dan
+  `git push` tetap jalan dengannya (bukti: `push=OK 8c38739`, `CI :: completed/success`).
+  Status: CLOSED-BY-OWNER-DECISION
+- [x] **M6.3** Audit repo: tidak ada commit/file ter-track yang menempel token.
+  Bukti (dijalankan 2026-10-04):
+  `git log --all --oneline -G'(gho_[A-Za-z0-9]|github_pat_[A-Za-z0-9]|ghp_[A-Za-z0-9])' | wc -l` →
+  `log_matches=0`; `git grep -I -l -E '(gho_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|ghp_[A-Za-z0-9]{20})' HEAD`
+  → `worktree_matches=0`. Yang tersisa di file ter-track hanya **prefiks** (`gho_`) dan 8 karakter
+  terakhir PAT (`…nu9yjwHu`) — keduanya bukan kredensial utuh. Item ini DONE terlepas dari M6.1.
+  Status: DONE
 
 ## M7 — Keandalan tunnel `api.elarisnoir.my.id`
 
