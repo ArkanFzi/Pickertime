@@ -14,21 +14,18 @@
  */
 
 routerAdd("POST", "/api/ai/gemini", (c) => {
-  // 1. Verify user authentication
-  const user = c.get("authRecord")
-  if (!user) {
-    throw new UnauthorizedError("You must be logged in to use the AI features.")
-  }
+  // Authenticated record is guaranteed by $apis.requireAuth() below (c.auth works
+  // on both PB 0.26 and 0.40; c.authRecord / c.get("authRecord") are nil there).
 
-  // 2. Fetch API Key securely from Server Environment Variables
+  // 1. Fetch API Key securely from Server Environment Variables
   const apiKey = $os.getenv("GEMINI_API_KEY")
   if (!apiKey) {
     throw new BadRequestError("GEMINI_API_KEY is not configured on the server.")
   }
 
-  // 3. Parse the Request Body
-  const body = new DynamicModel({ prompt: "" })
-  c.bind(body)
+  // 2. Parse the Request Body (requestInfo() is the form that works on PB 0.26 and 0.40;
+  //    c.bind()/DynamicModel throws "Object has no member 'bind'" on 0.40)
+  const body = c.requestInfo().body || {}
   const prompt = body.prompt
 
   if (!prompt) {
@@ -36,8 +33,11 @@ routerAdd("POST", "/api/ai/gemini", (c) => {
   }
 
   // 4. Send Request to Google Gemini API
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + apiKey
-  
+  // Rolling alias on purpose: the pinned names this hook used before (gemini-2.0-flash,
+  // gemini-2.5-flash) have both been retired upstream, and gemini-flash-latest was
+  // returning RESOURCE_EXHAUSTED on 5/5 probes while gemini-flash-lite-latest was 5/5.
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
+
   const reqBody = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
@@ -52,7 +52,7 @@ routerAdd("POST", "/api/ai/gemini", (c) => {
     url: url,
     method: "POST",
     body: reqBody,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     timeout: 120 // seconds
   })
 
@@ -62,4 +62,4 @@ routerAdd("POST", "/api/ai/gemini", (c) => {
 
   // 5. Return the JSON response to the client
   return c.json(200, JSON.parse(res.raw))
-})
+}, $apis.requireAuth())

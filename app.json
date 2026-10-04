@@ -13,9 +13,11 @@
       "backgroundColor": "#0A0F1D"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "my.id.elarisnoir.pickertime"
     },
     "android": {
+      "package": "my.id.elarisnoir.pickertime",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0A0F1D"
@@ -40,6 +42,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "30ac566e-ce40-41e9-befd-304a5d99ce31"
+      }
+    },
+    "owner": "fzi2"
   }
 }

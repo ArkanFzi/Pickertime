@@ -1,0 +1,33 @@
+{
+  "cli": {
+    "version": ">= 24.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_PB_URL": "http://10.0.2.2:8090"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_PB_URL": "http://10.0.2.2:8090"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_PB_URL": "https://api.elarisnoir.my.id"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

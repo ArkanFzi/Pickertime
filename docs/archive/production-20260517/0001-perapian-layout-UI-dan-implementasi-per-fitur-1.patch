@@ -1,0 +1,2019 @@
+From a867b4b8c4ef6cbce7b065165befd7f2b043e72d Mon Sep 17 00:00:00 2001
+From: ArkanFzi <muhammadarkanfauzi9@gmail.com>
+Date: Sun, 17 May 2026 12:51:30 +0700
+Subject: [PATCH 1/3] perapian layout UI dan implementasi per fitur 1
+
+---
+ .env.example                              |  12 +-
+ .gitignore                                |   2 +
+ AI_INTEGRATION.md                         |  64 ++-----
+ README.md                                 |  14 +-
+ app/(auth)/context-setup.tsx              |   6 +-
+ app/(auth)/permissions.tsx                |   2 +-
+ app/(auth)/sign-in.tsx                    | 195 +++++++++++++++++++++-
+ app/(auth)/sign-up.tsx                    |  10 +-
+ app/(auth)/welcome.tsx                    |   2 +-
+ app/(tabs)/_layout.tsx                    |  15 +-
+ app/(tabs)/index.tsx                      |  65 +++++---
+ app/(tabs)/insights.tsx                   |  24 ++-
+ app/(tabs)/profile.tsx                    |  91 ++++++++++
+ app/(tabs)/schedule.tsx                   |  42 +++--
+ app/(tabs)/timeline.tsx                   | 101 ++++++++---
+ app/index.tsx                             |   2 +-
+ app/smart-alarm.tsx                       |  63 +++++--
+ docs/01_architecture/ai_strategy.md       |   4 +-
+ docs/02_migration/supabase_to_appwrite.md |  29 ----
+ docs/PROJECT_ROADMAP.md                   |  24 +--
+ lib/database.sql                          |  99 -----------
+ lib/gemini.ts                             |  39 ++---
+ lib/pocketbase.ts                         |  23 ++-
+ package-lock.json                         |  30 +---
+ package.json                              |   1 +
+ pb_hooks/ai_proxy.pb.js                   |  65 ++++++++
+ store/useStore.ts                         | 175 ++++++++++++++++++-
+ 27 files changed, 839 insertions(+), 360 deletions(-)
+ create mode 100644 app/(tabs)/profile.tsx
+ delete mode 100644 docs/02_migration/supabase_to_appwrite.md
+ delete mode 100644 lib/database.sql
+ create mode 100644 pb_hooks/ai_proxy.pb.js
+
+diff --git a/.env.example b/.env.example
+index 07aeec3..dcba847 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,2 +1,10 @@
+-# Gemini API Key from https://aistudio.google.com/
+-EXPO_PUBLIC_GEMINI_API_KEY=your_gemini_api_key_here
++# URL PocketBase server Anda 
++# (Gunakan alamat IP lokal komputer Anda jika mengakses via HP, misal: http://192.168.1.15:8090)
++EXPO_PUBLIC_PB_URL=http://127.0.0.1:8090
++
++# =========================================================================
++# PENTING: JANGAN PERNAH MENYIMPAN API KEY RAHASIA DI SINI (seperti Gemini)
++# =========================================================================
++# Aplikasi ini menggunakan arsitektur proxy yang aman.
++# GEMINI_API_KEY harus dipasang di sisi server (OS environment variables) 
++# tempat PocketBase berjalan, BUKAN di file .env frontend ini.
+diff --git a/.gitignore b/.gitignore
+index d160dbc..fd4383c 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,5 +1,7 @@
+ # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+ 
++
++.claude
+ # dependencies
+ node_modules/
+ .env
+diff --git a/AI_INTEGRATION.md b/AI_INTEGRATION.md
+index c1b0037..ceb0696 100644
+--- a/AI_INTEGRATION.md
++++ b/AI_INTEGRATION.md
+@@ -1,22 +1,21 @@
+ # 🧠 Dokumentasi Integrasi AI (Pickertime)
+ 
+-Dokumentasi ini menjelaskan arsitektur AI yang digunakan dalam Pickertime, batasan saat ini, dan panduan untuk migrasi ke penyedia lain seperti Groq.
++Dokumentasi ini menjelaskan arsitektur AI yang digunakan dalam Pickertime, batasan saat ini, dan panduan untuk mengelola API secara mandiri.
+ 
+-## 🛠️ Arsitektur Saat Ini: Supabase Edge Functions
+-Demi keamanan, API Key Gemini **tidak lagi disimpan di sisi aplikasi mobile**. Semua permintaan AI dijembatani melalui **Supabase Edge Functions** (`gemini-ai`).
++## 🛠️ Arsitektur Saat Ini: PocketBase JS Hooks
++Demi keamanan, API Key Gemini **tidak lagi disimpan di sisi aplikasi mobile**. Semua permintaan AI dijembatani melalui **PocketBase JS Hooks** (`pb_hooks/ai_proxy.pb.js`).
+ 
+ ### Keuntungan:
+-1. **Keamanan:** API Key tersimpan aman di server (Supabase Secrets).
+-2. **Abstraksi:** Kita bisa mengganti model AI tanpa harus merilis ulang aplikasi mobile.
+-3. **Control:** Memungkinkan penambahan limitasi akses atau filter konten di server.
++1. **Keamanan:** API Key tersimpan aman di environment variable server. Tidak ada di source code client.
++2. **Abstraksi:** Kita bisa mengganti model AI (misalnya dari Gemini ke Groq atau Ollama) hanya dengan mengubah file hook tanpa harus merilis ulang aplikasi mobile.
++3. **Control:** Akses endpoint ini diproteksi oleh PocketBase auth, jadi hanya user login yang bisa menggunakan AI.
+ 
+ ---
+ 
+ ## ⚠️ Batasan & Tantangan (Current Issues)
+ Saat ini, penggunaan **Google Gemini Free Tier** memiliki beberapa kendala:
+-1. **Quota Exceeded (429):** Google memberikan limit ketat pada penggunaan gratis. Terlalu banyak percobaan dalam waktu singkat akan menyebabkan error `Quota exceeded`.
+-2. **Model Availability:** Beberapa model (seperti `gemini-2.0-flash`) mungkin memiliki ketersediaan yang berbeda-beda tergantung region atau status project.
+-3. **Cold Start:** Fungsi Edge pertama kali dipanggil mungkin butuh beberapa detik untuk inisialisasi.
++1. **Quota Exceeded (429):** Google memberikan limit ketat pada penggunaan gratis.
++2. **Model Availability:** Beberapa model (seperti `gemini-2.0-flash`) memiliki pembatasan *rate limit* yang tinggi.
+ 
+ ---
+ 
+@@ -27,48 +26,19 @@ Jika kamu ingin performa yang lebih cepat dan limit yang lebih longgar, kamu bis
+ 1. Daftar di [console.groq.com](https://console.groq.com/).
+ 2. Buat API Key baru.
+ 
+-### Langkah 2: Update Secrets di Supabase
++### Langkah 2: Update Environment Variables
+ ```bash
+-# Hapus secret lama (Opsional)
+-supabase secrets set GROQ_API_KEY=gsk_your_key_here
++export GROQ_API_KEY=gsk_your_key_here
++./pocketbase serve
+ ```
+ 
+-### Langkah 3: Update Kode Edge Function
+-Ubah `supabase/functions/gemini-ai/index.ts` menjadi seperti ini:
+-
+-```typescript
+-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+-
+-serve(async (req) => {
+-  const { action, payload } = await req.json()
+-  const apiKey = Deno.env.get('GROQ_API_KEY')
+-
+-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+-    method: "POST",
+-    headers: {
+-      "Authorization": `Bearer ${apiKey}`,
+-      "Content-Type": "application/json",
+-    },
+-    body: JSON.stringify({
+-      model: "llama-3.1-8b-instant",
+-      messages: [
+-        { role: "system", content: "You are the AI engine for Pickertime productivity app." },
+-        { role: "user", content: JSON.stringify({ action, payload }) }
+-      ],
+-      response_format: { type: "json_object" }
+-    }),
+-  })
+-
+-  const data = await response.json()
+-  return new Response(JSON.stringify(data.choices[0].message.content), {
+-    headers: { "Content-Type": "application/json" }
+-  })
+-})
+-```
++### Langkah 3: Update Kode Hook PocketBase
++Ubah `pb_hooks/ai_proxy.pb.js` agar menembak URL API Groq (`https://api.groq.com/openai/v1/chat/completions`) menggunakan Authorization header `Bearer ${apiKey}`.
+ 
+ ---
+ 
+ ## 📂 Lokasi File Relevan
+-- **Frontend Logic:** `lib/gemini.ts` (Tempat aplikasi memanggil fungsi).
+-- **Backend Logic:** `supabase/functions/gemini-ai/index.ts` (Tempat API AI dipanggil).
+-- **Secrets:** Dikelola via CLI `supabase secrets`.
++- **Frontend Logic:** `lib/gemini.ts` (Tempat aplikasi mobile memanggil proxy lokal).
++- **Backend Logic:** `pb_hooks/ai_proxy.pb.js` (Custom route PocketBase yang menembak API AI sesungguhnya).
++- **Secrets:** Dikelola via OS Environment Variables (`export GEMINI_API_KEY=...`).
++
+diff --git a/README.md b/README.md
+index fd046be..1e11ddf 100644
+--- a/README.md
++++ b/README.md
+@@ -53,16 +53,16 @@ npm install
+ ```
+ 
+ 5. Konfigurasi Environment Variables
+-Buat file `.env` di root direktori untuk koneksi aplikasi ke Supabase:
++Buat file `.env` di root direktori untuk koneksi aplikasi ke PocketBase:
+ ```env
+-EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
+-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
++EXPO_PUBLIC_PB_URL=your_pocketbase_url
+ ```
+ 
+-6. Konfigurasi AI (Supabase Edge Functions)
+-Gemini API Key sekarang diamankan di server (Supabase). Untuk mengaturnya, jalankan perintah ini di Supabase CLI:
++6. Konfigurasi AI (PocketBase JS Hooks)
++Gemini API Key sekarang diamankan di server (PocketBase). Atur *environment variable* sebelum menjalankan PocketBase:
+ ```bash
+-supabase secrets set GEMINI_API_KEY=your_gemini_api_key
++export GEMINI_API_KEY=your_gemini_api_key
++./pocketbase serve
+ ```
+ 
+ ### 4. Jalankan Aplikasi
+@@ -73,7 +73,7 @@ Gunakan aplikasi **Expo Go** di HP Anda atau jalankan di emulator.
+ 
+ ---
+ 
+-## 📊 Struktur Database (Supabase)
++## 📊 Struktur Database (PocketBase)
+ 
+ Aplikasi ini menggunakan skema database berikut untuk sinkronisasi data:
+ 
+diff --git a/app/(auth)/context-setup.tsx b/app/(auth)/context-setup.tsx
+index 8c00adb..2579030 100644
+--- a/app/(auth)/context-setup.tsx
++++ b/app/(auth)/context-setup.tsx
+@@ -38,9 +38,9 @@ export default function ContextSetupScreen() {
+     if (user) {
+       try {
+         const data = await pb.collection('Profiles').update(user.id, {
+-          role,
+-          focus_goal: focusGoal,
+-          energy_pref: energy
++          role: role.trim(),
++          focus_goal: focusGoal.trim(),
++          energy_pref: energy.trim(),
+         });
+         if (data) setProfile(data as any);
+       } catch (error) {
+diff --git a/app/(auth)/permissions.tsx b/app/(auth)/permissions.tsx
+index 9eef359..e04002a 100644
+--- a/app/(auth)/permissions.tsx
++++ b/app/(auth)/permissions.tsx
+@@ -78,7 +78,7 @@ export default function PermissionsScreen() {
+     if (enabled.dnd) {
+       await requestDNDPermissions();
+     }
+-    // Update profile in supabase with permissions if needed
++    // Update profile with permissions if needed
+     router.replace('/');
+   }
+ 
+diff --git a/app/(auth)/sign-in.tsx b/app/(auth)/sign-in.tsx
+index 50b57d0..ab45173 100644
+--- a/app/(auth)/sign-in.tsx
++++ b/app/(auth)/sign-in.tsx
+@@ -2,23 +2,33 @@ import React, { useState } from 'react';
+ import {
+   View, Text, TextInput, TouchableOpacity, ScrollView,
+   StyleSheet, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
++  Modal, Pressable,
+ } from 'react-native';
+ import { useRouter } from 'expo-router';
+ import { Ionicons } from '@expo/vector-icons';
+ import { pb } from '@/lib/pocketbase';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ 
+ export default function SignInScreen() {
+   const router = useRouter();
++  const insets = useSafeAreaInsets();
+   const [email, setEmail] = useState('');
+   const [password, setPassword] = useState('');
+   const [showPass, setShowPass] = useState(false);
+   const [loading, setLoading] = useState(false);
+ 
++  // --- Forgot Password State ---
++  const [forgotVisible, setForgotVisible] = useState(false);
++  const [forgotEmail, setForgotEmail] = useState('');
++  const [forgotLoading, setForgotLoading] = useState(false);
++  const [forgotSent, setForgotSent] = useState(false);
++
+   async function handleSignIn() {
+     if (!email || !password) {
+       Alert.alert('Missing Fields', 'Enter your email and password.');
+       return;
+     }
++    setLoading(true);
+     try {
+       await pb.collection('Profiles').authWithPassword(email, password);
+       router.replace('/');
+@@ -29,11 +39,42 @@ export default function SignInScreen() {
+     }
+   }
+ 
++  async function handleForgotPassword() {
++    if (!forgotEmail.trim()) {
++      Alert.alert('Email Required', 'Please enter your registered email address.');
++      return;
++    }
++    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
++    if (!emailRegex.test(forgotEmail.trim())) {
++      Alert.alert('Invalid Email', 'Please enter a valid email address.');
++      return;
++    }
++
++    setForgotLoading(true);
++    try {
++      await pb.collection('Profiles').requestPasswordReset(forgotEmail.trim());
++      setForgotSent(true);
++    } catch (error: any) {
++      // PocketBase mengembalikan sukses bahkan jika email tidak terdaftar
++      // (mencegah email enumeration attack) — tampilkan sukses tetap
++      setForgotSent(true);
++    } finally {
++      setForgotLoading(false);
++    }
++  }
++
++  function closeForgotModal() {
++    setForgotVisible(false);
++    setForgotEmail('');
++    setForgotSent(false);
++    setForgotLoading(false);
++  }
++
+   return (
+     <View style={styles.container}>
+       <View style={styles.glow} />
+       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
++        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 48) + 20 }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+           <View style={styles.header}>
+             <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+               <Ionicons name="chevron-back" size={18} color="rgba(255,255,255,0.7)" />
+@@ -52,6 +93,7 @@ export default function SignInScreen() {
+                   value={email} onChangeText={setEmail}
+                   placeholder="you@example.com"
+                   placeholderTextColor="rgba(255,255,255,0.25)"
++                  cursorColor="#00D4FF"
+                   style={styles.input} keyboardType="email-address" autoCapitalize="none"
+                 />
+               </View>
+@@ -60,7 +102,8 @@ export default function SignInScreen() {
+             <View style={styles.inputGroup}>
+               <View style={styles.labelRow}>
+                 <Text style={styles.label}>Password</Text>
+-                <TouchableOpacity>
++                {/* ✅ FIXED: Tombol Forgot? membuka modal reset password */}
++                <TouchableOpacity onPress={() => { setForgotEmail(email); setForgotVisible(true); }}>
+                   <Text style={styles.forgot}>Forgot?</Text>
+                 </TouchableOpacity>
+               </View>
+@@ -70,6 +113,7 @@ export default function SignInScreen() {
+                   value={password} onChangeText={setPassword}
+                   placeholder="••••••••"
+                   placeholderTextColor="rgba(255,255,255,0.25)"
++                  cursorColor="#00D4FF"
+                   style={styles.input} secureTextEntry={!showPass}
+                 />
+                 <TouchableOpacity onPress={() => setShowPass(!showPass)}>
+@@ -99,6 +143,92 @@ export default function SignInScreen() {
+           </TouchableOpacity>
+         </ScrollView>
+       </KeyboardAvoidingView>
++
++      {/* ✅ Forgot Password Modal */}
++      <Modal
++        visible={forgotVisible}
++        transparent
++        animationType="fade"
++        onRequestClose={closeForgotModal}
++        statusBarTranslucent
++      >
++        <Pressable style={styles.modalOverlay} onPress={closeForgotModal}>
++          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
++            <View style={styles.modalGlow} />
++
++            {/* Modal Header */}
++            <View style={styles.modalHeader}>
++              <View style={styles.modalIconWrap}>
++                <Ionicons name="key-outline" size={22} color="#00D4FF" />
++              </View>
++              <TouchableOpacity style={styles.modalCloseBtn} onPress={closeForgotModal}>
++                <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
++              </TouchableOpacity>
++            </View>
++
++            {forgotSent ? (
++              /* Success State */
++              <View style={styles.successWrap}>
++                <View style={styles.successIcon}>
++                  <Ionicons name="checkmark-circle" size={48} color="#34D399" />
++                </View>
++                <Text style={styles.modalTitle}>Check Your Inbox</Text>
++                <Text style={styles.modalSubtitle}>
++                  If an account with{'\n'}
++                  <Text style={styles.emailHighlight}>{forgotEmail}</Text>
++                  {'\n'}exists, a reset link has been sent.
++                </Text>
++                <TouchableOpacity style={styles.doneBtn} onPress={closeForgotModal} activeOpacity={0.85}>
++                  <Text style={styles.doneBtnText}>Got it</Text>
++                </TouchableOpacity>
++              </View>
++            ) : (
++              /* Input State */
++              <>
++                <Text style={styles.modalTitle}>Reset Password</Text>
++                <Text style={styles.modalSubtitle}>
++                  Enter your registered email and we'll send you a reset link.
++                </Text>
++
++                <View style={styles.modalInputWrap}>
++                  <Ionicons name="mail-outline" size={16} color="rgba(255,255,255,0.3)" style={styles.icon} />
++                  <TextInput
++                    value={forgotEmail}
++                    onChangeText={setForgotEmail}
++                    placeholder="you@example.com"
++                    placeholderTextColor="rgba(255,255,255,0.25)"
++                    cursorColor="#00D4FF"
++                    style={styles.input}
++                    keyboardType="email-address"
++                    autoCapitalize="none"
++                    autoFocus
++                  />
++                </View>
++
++                <TouchableOpacity
++                  style={[styles.sendBtn, forgotLoading && { opacity: 0.6 }]}
++                  onPress={handleForgotPassword}
++                  disabled={forgotLoading}
++                  activeOpacity={0.85}
++                >
++                  {forgotLoading ? (
++                    <ActivityIndicator color="#0A0F1D" size="small" />
++                  ) : (
++                    <>
++                      <Ionicons name="send-outline" size={15} color="#0A0F1D" />
++                      <Text style={styles.sendBtnText}>Send Reset Link</Text>
++                    </>
++                  )}
++                </TouchableOpacity>
++
++                <TouchableOpacity style={styles.cancelLink} onPress={closeForgotModal}>
++                  <Text style={styles.cancelLinkText}>Cancel</Text>
++                </TouchableOpacity>
++              </>
++            )}
++          </Pressable>
++        </Pressable>
++      </Modal>
+     </View>
+   );
+ }
+@@ -146,4 +276,65 @@ const styles = StyleSheet.create({
+   signUpLink: { alignItems: 'center', paddingVertical: 8 },
+   signUpLinkText: { fontSize: 13, color: 'rgba(255,255,255,0.5)' },
+   accent: { color: '#00D4FF', fontWeight: '600' },
++
++  // ─── Modal styles ───────────────────────────────────────────────
++  modalOverlay: {
++    flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
++    justifyContent: 'center', alignItems: 'center',
++    paddingHorizontal: 24,
++  },
++  modalCard: {
++    width: '100%', maxWidth: 380,
++    backgroundColor: '#0E1526',
++    borderWidth: 1, borderColor: 'rgba(0,212,255,0.2)',
++    borderRadius: 28, padding: 28, overflow: 'hidden',
++  },
++  modalGlow: {
++    position: 'absolute', top: -40, right: -40, width: 150, height: 150,
++    borderRadius: 75, backgroundColor: 'rgba(0,212,255,0.08)',
++  },
++  modalHeader: {
++    flexDirection: 'row', justifyContent: 'space-between',
++    alignItems: 'center', marginBottom: 20,
++  },
++  modalIconWrap: {
++    width: 44, height: 44, borderRadius: 22,
++    backgroundColor: 'rgba(0,212,255,0.12)',
++    borderWidth: 1, borderColor: 'rgba(0,212,255,0.25)',
++    alignItems: 'center', justifyContent: 'center',
++  },
++  modalCloseBtn: {
++    width: 34, height: 34, borderRadius: 17,
++    backgroundColor: 'rgba(255,255,255,0.06)',
++    alignItems: 'center', justifyContent: 'center',
++  },
++  modalTitle: { fontSize: 22, fontWeight: '800', color: '#fff', letterSpacing: -0.5, marginBottom: 8 },
++  modalSubtitle: { fontSize: 14, color: 'rgba(255,255,255,0.5)', lineHeight: 22, marginBottom: 20, textAlign: 'center' },
++  modalInputWrap: {
++    flexDirection: 'row', alignItems: 'center',
++    backgroundColor: 'rgba(10,15,29,0.8)',
++    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
++    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 14,
++  },
++  sendBtn: {
++    backgroundColor: '#00D4FF', borderRadius: 16, paddingVertical: 16,
++    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
++    shadowColor: '#00D4FF', shadowOffset: { width: 0, height: 0 },
++    shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
++  },
++  sendBtnText: { fontSize: 14, fontWeight: '700', color: '#0A0F1D' },
++  cancelLink: { alignItems: 'center', paddingVertical: 12 },
++  cancelLinkText: { fontSize: 13, color: 'rgba(255,255,255,0.4)', fontWeight: '500' },
++
++  // ─── Success state ───────────────────────────────────────────────
++  successWrap: { alignItems: 'center', paddingVertical: 8 },
++  successIcon: { marginBottom: 16 },
++  emailHighlight: { color: '#00D4FF', fontWeight: '600' },
++  doneBtn: {
++    backgroundColor: 'rgba(52,211,153,0.15)',
++    borderWidth: 1, borderColor: 'rgba(52,211,153,0.35)',
++    borderRadius: 16, paddingVertical: 14, paddingHorizontal: 40,
++    marginTop: 20,
++  },
++  doneBtnText: { fontSize: 14, fontWeight: '700', color: '#34D399' },
+ });
+diff --git a/app/(auth)/sign-up.tsx b/app/(auth)/sign-up.tsx
+index 89077cc..51d9893 100644
+--- a/app/(auth)/sign-up.tsx
++++ b/app/(auth)/sign-up.tsx
+@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
+ import { Ionicons } from '@expo/vector-icons';
+ import { pb } from '@/lib/pocketbase';
+ import { useStore } from '@/store/useStore';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ 
+ const ROLES = [
+   { id: 'Student', icon: 'school', label: 'Student' },
+@@ -26,6 +27,7 @@ const ROLES = [
+ 
+ export default function SignUpScreen() {
+   const router = useRouter();
++  const insets = useSafeAreaInsets();
+   const { setUser } = useStore();
+   const [email, setEmail] = useState('');
+   const [password, setPassword] = useState('');
+@@ -47,7 +49,7 @@ export default function SignUpScreen() {
+         password,
+         passwordConfirm: password,
+         full_name: name,   // Custom field as seen in Admin UI
+-        role,
++        role: role.trim(),
+         emailVisibility: true,
+       });
+ 
+@@ -90,8 +92,9 @@ export default function SignUpScreen() {
+       >
+         <ScrollView
+           style={styles.scroll}
+-          contentContainerStyle={styles.scrollContent}
++          contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 48) + 20 }]}
+           showsVerticalScrollIndicator={false}
++          keyboardShouldPersistTaps="handled"
+         >
+           {/* Header */}
+           <View style={styles.header}>
+@@ -120,6 +123,7 @@ export default function SignUpScreen() {
+                   onChangeText={setEmail}
+                   placeholder="you@example.com"
+                   placeholderTextColor="rgba(255,255,255,0.25)"
++                  cursorColor="#00D4FF"
+                   style={styles.input}
+                   keyboardType="email-address"
+                   autoCapitalize="none"
+@@ -137,6 +141,7 @@ export default function SignUpScreen() {
+                   onChangeText={setPassword}
+                   placeholder="••••••••"
+                   placeholderTextColor="rgba(255,255,255,0.25)"
++                  cursorColor="#00D4FF"
+                   style={styles.input}
+                   secureTextEntry={!showPass}
+                 />
+@@ -166,6 +171,7 @@ export default function SignUpScreen() {
+                 onChangeText={setName}
+                 placeholder="Your Name"
+                 placeholderTextColor="rgba(255,255,255,0.25)"
++                cursorColor="#00D4FF"
+                 style={styles.input}
+               />
+             </View>
+diff --git a/app/(auth)/welcome.tsx b/app/(auth)/welcome.tsx
+index c100908..b6c0174 100644
+--- a/app/(auth)/welcome.tsx
++++ b/app/(auth)/welcome.tsx
+@@ -24,7 +24,7 @@ export default function WelcomeScreen() {
+ 
+   useEffect(() => {
+     if (user) {
+-      router.replace('/');
++      router.replace('/(tabs)');
+       return;
+     }
+ 
+diff --git a/app/(tabs)/_layout.tsx b/app/(tabs)/_layout.tsx
+index 4a5b124..931aa9e 100644
+--- a/app/(tabs)/_layout.tsx
++++ b/app/(tabs)/_layout.tsx
+@@ -1,7 +1,10 @@
+ import { Tabs } from 'expo-router';
+ import { Ionicons } from '@expo/vector-icons';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ 
+ export default function TabsLayout() {
++  const insets = useSafeAreaInsets();
++  
+   return (
+     <Tabs
+       screenOptions={{
+@@ -11,8 +14,8 @@ export default function TabsLayout() {
+           borderTopColor: 'rgba(255,255,255,0.08)',
+           borderTopWidth: 1,
+           paddingTop: 8,
+-          paddingBottom: 20,
+-          height: 78,
++          paddingBottom: Math.max(insets.bottom, 12),
++          height: 60 + Math.max(insets.bottom, 12),
+         },
+         tabBarActiveTintColor: '#00D4FF',
+         tabBarInactiveTintColor: 'rgba(255,255,255,0.3)',
+@@ -52,6 +55,14 @@ export default function TabsLayout() {
+           ),
+         }}
+       />
++      <Tabs.Screen
++        name="profile"
++        options={{
++          tabBarIcon: ({ color, focused }) => (
++            <Ionicons name={focused ? 'person' : 'person-outline'} size={24} color={color} />
++          ),
++        }}
++      />
+     </Tabs>
+   );
+ }
+diff --git a/app/(tabs)/index.tsx b/app/(tabs)/index.tsx
+index d154c77..2205fad 100644
+--- a/app/(tabs)/index.tsx
++++ b/app/(tabs)/index.tsx
+@@ -35,7 +35,7 @@ function getEnergyStatus(energyPref: string): string {
+ 
+ export default function DashboardScreen() {
+   const router = useRouter();
+-  const { profile, tasks, setTasks, user } = useStore();
++  const { profile, tasks, setTasks, user, syncFetchTasks } = useStore();
+   const pulseAnim = useRef(new Animated.Value(1)).current;
+   const [completedCount, setCompletedCount] = useState(0);
+ 
+@@ -64,23 +64,17 @@ export default function DashboardScreen() {
+       ])
+     ).start();
+ 
+-    if (user) loadTasks();
++    if (user) {
++      loadTasks();
++    }
+   }, [user]);
+ 
+   async function loadTasks() {
+     if (!user) return;
+-    const today = new Date().toISOString().split('T')[0];
+     try {
+-      const records = await pb.collection('Tasks').getFullList({
+-        filter: `user = "${user.id}" && start_time >= "${today}"`,
+-        sort: 'start_time',
+-      });
+-      
+-      if (records) {
+-        setTasks(records as any);
+-        // Fetch AI Suggestion
+-        fetchAISuggestion(records);
+-      }
++      await syncFetchTasks();
++      const currentTasks = useStore.getState().tasks;
++      fetchAISuggestion(currentTasks);
+     } catch (error) {
+       console.error('Load tasks error:', error);
+     }
+@@ -120,7 +114,7 @@ export default function DashboardScreen() {
+             </View>
+             <View>
+               <Text style={styles.greeting}>{greeting}, {profile?.full_name?.split(' ')[0] || 'there'}</Text>
+-              <Text style={styles.greetingSub}>Ready for deep focus?</Text>
++              <Text style={styles.greetingSub}>Your Focus Operating System</Text>
+             </View>
+           </View>
+           <View style={styles.energyBadge}>
+@@ -196,21 +190,27 @@ export default function DashboardScreen() {
+             </View>
+ 
+             {/* Upcoming Alarm Tile */}
+-            <View style={styles.halfCard}>
+-              <View style={styles.upcomingTop}>
+-                <Text style={styles.halfCardLabel}>UPCOMING</Text>
++            <TouchableOpacity 
++              style={styles.upcomingCard}
++              onPress={() => router.push('/smart-alarm')}
++              activeOpacity={0.8}
++            >
++              <View style={styles.upcomingTopRow}>
++                <Text style={styles.upcomingLabel}>UPCOMING</Text>
+                 <Animated.View style={[styles.bellWrap, { transform: [{ scale: pulseAnim }] }]}>
+                   <Ionicons name="notifications" size={12} color="#00D4FF" />
+                 </Animated.View>
+               </View>
+-              <Text style={styles.upcomingTitle}>
+-                {nextTask ? nextTask.title : 'Team Sync'}
+-              </Text>
+-              <Text style={styles.upcomingTime}>Starts in 45m</Text>
+-              <View style={styles.progressBar}>
+-                <View style={styles.progressFill} />
++              <View>
++                <Text style={styles.upcomingTitle} numberOfLines={1}>
++                  {nextTask ? nextTask.title : 'Team Sync'}
++                </Text>
++                <Text style={styles.upcomingTime}>Starts in 45m</Text>
++                <View style={styles.progressBar}>
++                  <View style={styles.progressFill} />
++                </View>
+               </View>
+-            </View>
++            </TouchableOpacity>
+           </View>
+ 
+           {/* Quick Actions */}
+@@ -346,14 +346,25 @@ const styles = StyleSheet.create({
+   ringCenter: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+   ringPct: { fontSize: 18, fontWeight: '800', color: '#fff' },
+   ringSubText: { fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 8, textAlign: 'center' },
+-  upcomingTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' },
++  upcomingCard: {
++    flex: 1, backgroundColor: 'rgba(255,255,255,0.04)',
++    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
++    borderRadius: 24, padding: 18, minHeight: 160,
++    justifyContent: 'space-between',
++  },
++  upcomingTopRow: {
++    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%',
++  },
++  upcomingLabel: {
++    fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.4)', letterSpacing: 1.2,
++  },
+   bellWrap: {
+     width: 26, height: 26, borderRadius: 13,
+     backgroundColor: 'rgba(0,212,255,0.15)',
+     alignItems: 'center', justifyContent: 'center',
+   },
+-  upcomingTitle: { fontSize: 14, fontWeight: '700', color: '#fff', marginTop: 12, marginBottom: 4, alignSelf: 'flex-start' },
+-  upcomingTime: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 12, alignSelf: 'flex-start' },
++  upcomingTitle: { fontSize: 14, fontWeight: '700', color: '#fff', marginTop: 12, marginBottom: 4 },
++  upcomingTime: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 12 },
+   progressBar: { width: '100%', height: 4, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 2 },
+   progressFill: { width: '33%', height: 4, backgroundColor: '#00D4FF', borderRadius: 2 },
+   quickActionsLabel: {
+diff --git a/app/(tabs)/insights.tsx b/app/(tabs)/insights.tsx
+index e53613e..6486e39 100644
+--- a/app/(tabs)/insights.tsx
++++ b/app/(tabs)/insights.tsx
+@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
+ import {
+   View, Text, ScrollView, TouchableOpacity, StyleSheet, Animated, Dimensions,
+ } from 'react-native';
++import { useRouter } from 'expo-router';
+ import { Ionicons } from '@expo/vector-icons';
+ import { LineChart } from 'react-native-chart-kit';
+ import { useStore } from '@/store/useStore';
+@@ -14,7 +15,8 @@ const WEEK_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+ 
+ 
+ export default function InsightsScreen() {
+-  const { profile, user } = useStore();
++  const router = useRouter();
++  const { profile, user, snoozeCount, syncFetchTasks } = useStore();
+   const [aiInsight, setAiInsight] = useState<string | null>(null);
+ 
+   const [loadingAI, setLoadingAI] = useState(false);
+@@ -36,6 +38,7 @@ export default function InsightsScreen() {
+ 
+   const totalFocusMins = stats.totalMins;
+   const completionRate = stats.completionRate;
++  const snoozeRate = stats.totalCount > 0 ? Math.min(100, Math.round((snoozeCount / stats.totalCount) * 100)) : (snoozeCount > 0 ? 15 : 0);
+ 
+ 
+   const slideAnims = useRef(
+@@ -56,7 +59,10 @@ export default function InsightsScreen() {
+       ]).start();
+     });
+ 
+-    if (user) loadRealData();
++    if (user) {
++      syncFetchTasks();
++      loadRealData();
++    }
+   }, [user]);
+ 
+   async function loadRealData() {
+@@ -274,10 +280,10 @@ export default function InsightsScreen() {
+ 
+             </View>
+             <View style={styles.suggestionActions}>
+-              <TouchableOpacity style={styles.adjustBtn}>
++              <TouchableOpacity style={styles.adjustBtn} onPress={() => router.push('/schedule')} activeOpacity={0.8}>
+                 <Text style={styles.adjustBtnText}>Adjust Schedule</Text>
+               </TouchableOpacity>
+-              <TouchableOpacity style={styles.dismissBtn}>
++              <TouchableOpacity style={styles.dismissBtn} onPress={() => setAiInsight(null)} activeOpacity={0.8}>
+                 <Text style={styles.dismissBtnText}>Dismiss</Text>
+               </TouchableOpacity>
+             </View>
+@@ -295,15 +301,19 @@ export default function InsightsScreen() {
+               </View>
+             </View>
+             <View style={styles.alarmEffRight}>
+-              <Text style={styles.alarmEffValue}>28%</Text>
+-              <Text style={styles.alarmEffTrend}>High snooze rate</Text>
++              <Text style={styles.alarmEffValue}>{snoozeRate}%</Text>
++              <Text style={styles.alarmEffTrend}>{snoozeRate > 20 ? 'High snooze rate' : 'Excellent consistency'}</Text>
+             </View>
+           </View>
+         </Animated.View>
+ 
+         {/* Goals Button */}
+         <Animated.View style={Animated_(4)}>
+-          <TouchableOpacity style={styles.goalsBtn}>
++          <TouchableOpacity 
++            style={styles.goalsBtn} 
++            onPress={() => router.push('/(auth)/context-setup')}
++            activeOpacity={0.8}
++          >
+             <View style={styles.goalsBtnLeft}>
+               <Ionicons name="options-outline" size={18} color="rgba(255,255,255,0.5)" />
+               <Text style={styles.goalsBtnText}>Adjust Goals & Notifications</Text>
+diff --git a/app/(tabs)/profile.tsx b/app/(tabs)/profile.tsx
+new file mode 100644
+index 0000000..1eaea09
+--- /dev/null
++++ b/app/(tabs)/profile.tsx
+@@ -0,0 +1,91 @@
++import React from 'react';
++import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
++import { useRouter } from 'expo-router';
++import { Ionicons } from '@expo/vector-icons';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useStore } from '@/store/useStore';
++import { pb } from '@/lib/pocketbase';
++
++export default function ProfileScreen() {
++  const router = useRouter();
++  const { user, profile, setUser, setProfile } = useStore();
++  const insets = useSafeAreaInsets();
++
++  function handleLogout() {
++    pb.authStore.clear();
++    setUser(null);
++    setProfile(null);
++    router.replace('/(auth)/welcome');
++  }
++
++  return (
++    <View style={styles.container}>
++      <View style={styles.glow} />
++      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 120) }]} showsVerticalScrollIndicator={false}>
++        <View style={styles.header}>
++          <Text style={styles.title}>Profile</Text>
++          <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
++            <Ionicons name="log-out-outline" size={18} color="#F87171" />
++            <Text style={styles.logoutText}>Log Out</Text>
++          </TouchableOpacity>
++        </View>
++
++        <View style={styles.card}>
++          <View style={styles.avatarWrap}>
++            <Ionicons name="person" size={40} color="rgba(255,255,255,0.8)" />
++          </View>
++          <Text style={styles.name}>{profile?.full_name || 'User'}</Text>
++          <Text style={styles.email}>{user?.email}</Text>
++          <View style={styles.roleBadge}>
++            <Text style={styles.roleText}>{profile?.role || 'Professional'}</Text>
++          </View>
++        </View>
++
++        <Text style={styles.sectionTitle}>PREFERENCES</Text>
++        <View style={styles.settingsCard}>
++          <View style={styles.settingRow}>
++            <View style={styles.settingLeft}>
++              <Ionicons name="flag-outline" size={20} color="#00D4FF" />
++              <Text style={styles.settingLabel}>Focus Goal</Text>
++            </View>
++            <Text style={styles.settingValue}>{profile?.focus_goal || 'Not set'}</Text>
++          </View>
++          <View style={styles.divider} />
++          <View style={styles.settingRow}>
++            <View style={styles.settingLeft}>
++              <Ionicons name="flash-outline" size={20} color="#00D4FF" />
++              <Text style={styles.settingLabel}>Energy Preference</Text>
++            </View>
++            <Text style={styles.settingValue}>{profile?.energy_pref || 'Morning'}</Text>
++          </View>
++        </View>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: { flex: 1, backgroundColor: '#0A0F1D' },
++  glow: {
++    position: 'absolute', top: -100, left: 0, right: 0, height: 350,
++    borderRadius: 300, backgroundColor: 'rgba(0,212,255,0.05)',
++  },
++  content: { padding: 24, paddingTop: 60, maxWidth: 420, alignSelf: 'center', width: '100%' },
++  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 },
++  title: { fontSize: 32, fontWeight: '800', color: '#fff', letterSpacing: -1 },
++  logoutBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(248,113,113,0.1)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
++  logoutText: { color: '#F87171', fontWeight: '600', fontSize: 13 },
++  card: { backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)', borderRadius: 24, padding: 24, alignItems: 'center', marginBottom: 32 },
++  avatarWrap: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
++  name: { fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 4 },
++  email: { fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 12 },
++  roleBadge: { backgroundColor: 'rgba(0,212,255,0.1)', borderWidth: 1, borderColor: 'rgba(0,212,255,0.3)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 16 },
++  roleText: { color: '#00D4FF', fontSize: 12, fontWeight: '600' },
++  sectionTitle: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.4)', letterSpacing: 1.5, marginBottom: 12, marginLeft: 4 },
++  settingsCard: { backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)', borderRadius: 24, padding: 16 },
++  settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
++  settingLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
++  settingLabel: { fontSize: 15, color: '#fff', fontWeight: '500' },
++  settingValue: { fontSize: 13, color: 'rgba(255,255,255,0.5)' },
++  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginVertical: 12 },
++});
+diff --git a/app/(tabs)/schedule.tsx b/app/(tabs)/schedule.tsx
+index 809154a..02b7fd5 100644
+--- a/app/(tabs)/schedule.tsx
++++ b/app/(tabs)/schedule.tsx
+@@ -6,9 +6,8 @@ import {
+ import { useRouter } from 'expo-router';
+ import { Ionicons } from '@expo/vector-icons';
+ import Svg, { Circle, Path, G, Line } from 'react-native-svg';
+-import { pb } from '@/lib/pocketbase';
+ import { useStore } from '@/store/useStore';
+-import { scheduleTaskNotification } from '@/lib/notifications';
++// pb & scheduleTaskNotification kini dikelola di dalam syncAddTask (useStore)
+ 
+ const CATEGORIES = [
+ 
+@@ -95,7 +94,8 @@ function RadialTimePicker({ value, onChange }: { value: number; onChange: (v: nu
+ 
+ export default function ScheduleScreen() {
+   const router = useRouter();
+-  const { user, profile, tasks, addTask } = useStore();
++  // ✅ Gunakan syncAddTask — operasi API + state dikelola terpusat di store
++  const { user, profile, tasks, syncAddTask, setActiveTask } = useStore();
+   const [title, setTitle] = useState('');
+   const [category, setCategory] = useState('Work');
+   const [priority, setPriority] = useState('High');
+@@ -178,33 +178,31 @@ export default function ScheduleScreen() {
+     const startDt = new Date();
+     const endDt = new Date(startDt.getTime() + duration * 60000);
+ 
+-    const taskData = {
+-      user: user.id,
+-      title: title.trim(),
+-      category,
+-      priority,
+-      duration_minutes: duration,
+-      start_time: startDt.toISOString(),
+-      end_time: endDt.toISOString(),
+-      is_completed: false,
+-      has_alarm: true,
+-      alarm_minutes_before: 10,
+-    };
+-
+     try {
+-      const data = await pb.collection('Tasks').create(taskData);
+-      addTask(data as any);
+-      // Schedule local notification
+-      scheduleTaskNotification(data as any);
++      // ✅ syncAddTask menangani: PocketBase create + addTask state + scheduleNotification
++      const newTask = await syncAddTask({
++        user: user.id,
++        title: title.trim(),
++        category,
++        priority: priority as 'High' | 'Medium' | 'Low',
++        duration_minutes: duration,
++        start_time: startDt.toISOString(),
++        end_time: endDt.toISOString(),
++        is_completed: false,
++        has_alarm: true,
++        alarm_minutes_before: 10,
++      });
+ 
+       if (startNow) {
++        setActiveTask(newTask);
+         router.push('/focus');
+       } else {
+-        Alert.alert('✅ Saved', 'Task added to your timeline.');
++        Alert.alert('✅ Tersimpan', 'Tugas ditambahkan ke timeline Anda.');
+         setTitle('');
++        router.push('/(tabs)/timeline');
+       }
+     } catch (error: any) {
+-      Alert.alert('Error', error.message || 'Failed to save task.');
++      Alert.alert('Gagal Menyimpan', error.message || 'Tidak dapat menyimpan tugas. Periksa koneksi internet.');
+     } finally {
+       setLoading(false);
+     }
+diff --git a/app/(tabs)/timeline.tsx b/app/(tabs)/timeline.tsx
+index d4da845..166b8e1 100644
+--- a/app/(tabs)/timeline.tsx
++++ b/app/(tabs)/timeline.tsx
+@@ -34,7 +34,7 @@ const MOCK_TIMELINE: Array<{
+   { time: '16:00', type: 'task', task: { title: 'Strategy Review', timeLabel: '16:00 – 17:30', priority: 'Medium', category: 'Work' } },
+ ];
+ 
+-function TimelineTask({ item, onPress }: { item: typeof MOCK_TIMELINE[0]; onPress?: () => void }) {
++function TimelineTask({ item, onPress, onSmartAlarmPress }: { item: typeof MOCK_TIMELINE[0]; onPress?: () => void; onSmartAlarmPress?: () => void }) {
+   const color = CATEGORY_COLORS[item.task?.category || 'General'];
+ 
+   if (item.type === 'done') {
+@@ -87,11 +87,15 @@ function TimelineTask({ item, onPress }: { item: typeof MOCK_TIMELINE[0]; onPres
+           </View>
+         </View>
+         {/* Smart Alarm chip */}
+-        <View style={styles.alarmChip}>
++        <TouchableOpacity 
++          style={styles.alarmChip}
++          onPress={onSmartAlarmPress}
++          activeOpacity={0.8}
++        >
+           <Ionicons name="notifications-outline" size={11} color="#00D4FF" />
+           <Text style={styles.alarmChipText}>Smart Alarm set · 10 min before</Text>
+           <Ionicons name="chevron-forward" size={11} color="rgba(255,255,255,0.3)" />
+-        </View>
++        </TouchableOpacity>
+       </View>
+     </View>
+   );
+@@ -99,7 +103,7 @@ function TimelineTask({ item, onPress }: { item: typeof MOCK_TIMELINE[0]; onPres
+ 
+ export default function TimelineScreen() {
+   const router = useRouter();
+-  const { tasks, user } = useStore();
++  const { tasks, user, syncFetchTasks, setActiveTask } = useStore();
+   const [filter, setFilter] = useState('All Tasks');
+   const pulseAnim = useRef(new Animated.Value(1)).current;
+ 
+@@ -115,14 +119,24 @@ export default function TimelineScreen() {
+         Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+       ])
+     ).start();
+-  }, []);
++
++    if (user) {
++      syncFetchTasks();
++    }
++  }, [user]);
+ 
+   const displayTimeline = React.useMemo(() => {
+-    if (tasks.length === 0) return MOCK_TIMELINE;
++    if (tasks.length === 0) return [];
++
++    const filtered = tasks.filter(t => {
++      if (!t.start_time) return false;
++      if (filter === 'All Tasks') return true;
++      return t.category === filter;
++    });
++
++    if (filtered.length === 0) return [];
+ 
+-    const sorted = [...tasks]
+-      .filter(t => t.start_time)
+-      .sort((a,b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime());
++    const sorted = [...filtered].sort((a,b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime());
+     
+     const items: typeof MOCK_TIMELINE = [];
+     let lastEnd = new Date(sorted[0].start_time!);
+@@ -134,7 +148,7 @@ export default function TimelineScreen() {
+ 
+       // Check for gap
+       if (start.getTime() > lastEnd.getTime() + 15 * 60000) {
+-        const gapMins = (start.getTime() - lastEnd.getTime()) / 60000;
++        const gapMins = Math.round((start.getTime() - lastEnd.getTime()) / 60000);
+         items.push({
+           time: lastEnd.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+           type: 'free',
+@@ -157,7 +171,7 @@ export default function TimelineScreen() {
+     });
+ 
+     return items;
+-  }, [tasks]);
++  }, [tasks, filter]);
+ 
+ 
+   const freeSlots = displayTimeline.filter((d) => d.type === 'free').length;
+@@ -174,7 +188,7 @@ export default function TimelineScreen() {
+           <Text style={styles.dateText}>{dateStr}</Text>
+         </View>
+         <View style={styles.headerRight}>
+-          <TouchableOpacity style={styles.iconBtn}>
++          <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/smart-alarm')} activeOpacity={0.8}>
+             <Ionicons name="notifications-outline" size={20} color="rgba(255,255,255,0.7)" />
+             <View style={styles.notifDot} />
+           </TouchableOpacity>
+@@ -205,12 +219,24 @@ export default function TimelineScreen() {
+               <Animated.View style={[styles.freeSlotsIcon, { transform: [{ scale: pulseAnim }] }]}>
+                 <Ionicons name="flash" size={13} color="#00D4FF" />
+               </Animated.View>
+-              <View>
+-                <Text style={styles.freeSlotsTitle}>{freeSlots} Free Slot{freeSlots > 1 ? 's' : ''} Available</Text>
+-                <Text style={styles.freeSlotsSub}>Take advantage of open focus time</Text>
++              <View style={{ flex: 1, flexShrink: 1, paddingRight: 8 }}>
++                <Text style={styles.freeSlotsTitle} numberOfLines={1}>{freeSlots} Free Slot{freeSlots > 1 ? 's' : ''} Available</Text>
++                <Text style={styles.freeSlotsSub} numberOfLines={2} ellipsizeMode="tail">Take advantage of open focus time</Text>
+               </View>
+             </View>
+-            <TouchableOpacity style={styles.jumpBtn}>
++            <TouchableOpacity 
++              style={styles.jumpBtn}
++              onPress={() => {
++                const nextTask = tasks.find(t => !t.is_completed);
++                if (nextTask) {
++                  setActiveTask(nextTask);
++                  router.push('/focus');
++                } else {
++                  router.push('/schedule');
++                }
++              }}
++              activeOpacity={0.8}
++            >
+               <Text style={styles.jumpBtnText}>Jump to Next</Text>
+             </TouchableOpacity>
+           </View>
+@@ -227,13 +253,26 @@ export default function TimelineScreen() {
+             <Text style={styles.currentTimeLabel}>{`${String(currentHour).padStart(2,'0')}:${String(currentMinute).padStart(2,'0')}`}</Text>
+           </View>
+ 
+-          {displayTimeline.map((item, i) => (
+-            <TimelineTask
+-              key={i}
+-              item={item}
+-              onPress={() => router.push('/schedule')}
+-            />
+-          ))}
++          {displayTimeline.length === 0 ? (
++            <View style={styles.emptyStateCard}>
++              <Ionicons name="calendar-clear-outline" size={48} color="rgba(255,255,255,0.2)" />
++              <Text style={styles.emptyStateTitle}>No Tasks Today</Text>
++              <Text style={styles.emptyStateSub}>Schedule a focus block or study session to build your timeline.</Text>
++              <TouchableOpacity style={styles.createTaskBtn} onPress={() => router.push('/schedule')}>
++                <Ionicons name="add" size={16} color="#0A0F1D" />
++                <Text style={styles.createTaskBtnText}>Create Task</Text>
++              </TouchableOpacity>
++            </View>
++          ) : (
++            displayTimeline.map((item, i) => (
++              <TimelineTask
++                key={i}
++                item={item}
++                onPress={() => router.push('/schedule')}
++                onSmartAlarmPress={() => router.push('/smart-alarm')}
++              />
++            ))
++          )}
+         </View>
+       </ScrollView>
+     </View>
+@@ -292,7 +331,7 @@ const styles = StyleSheet.create({
+     borderRadius: 20, padding: 14,
+     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+   },
+-  freeSlotsLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
++  freeSlotsLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, flexShrink: 1 },
+   freeSlotsIcon: {
+     width: 34, height: 34, borderRadius: 17,
+     backgroundColor: 'rgba(0,212,255,0.12)',
+@@ -377,4 +416,18 @@ const styles = StyleSheet.create({
+     alignItems: 'center', justifyContent: 'center',
+     shadowColor: '#00D4FF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 8,
+   },
++  emptyStateCard: {
++    backgroundColor: 'rgba(255,255,255,0.03)',
++    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
++    borderRadius: 24, padding: 32, alignItems: 'center',
++    marginTop: 40, marginHorizontal: 20,
++  },
++  emptyStateTitle: { fontSize: 20, fontWeight: '700', color: '#fff', marginTop: 16, marginBottom: 8 },
++  emptyStateSub: { fontSize: 13, color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginBottom: 24, lineHeight: 20 },
++  createTaskBtn: {
++    backgroundColor: '#00D4FF', borderRadius: 18, paddingVertical: 14, paddingHorizontal: 24,
++    flexDirection: 'row', alignItems: 'center', gap: 8,
++    shadowColor: '#00D4FF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
++  },
++  createTaskBtnText: { fontSize: 15, fontWeight: '700', color: '#0A0F1D' },
+ });
+diff --git a/app/index.tsx b/app/index.tsx
+index 582cb01..6913ecc 100644
+--- a/app/index.tsx
++++ b/app/index.tsx
+@@ -7,7 +7,7 @@ export default function Index() {
+   // If user is authenticated, send to Dashboard (tabs index)
+   // Otherwise, send to the Welcome/Onboarding flow
+   if (user) {
+-    return <Redirect href="/" />;
++    return <Redirect href="/(tabs)" />;
+   }
+ 
+   return <Redirect href="/(auth)/welcome" />;
+diff --git a/app/smart-alarm.tsx b/app/smart-alarm.tsx
+index b0edba8..ac42c7a 100644
+--- a/app/smart-alarm.tsx
++++ b/app/smart-alarm.tsx
+@@ -1,13 +1,13 @@
+-import React, { useEffect, useRef } from 'react';
++import React, { useEffect, useRef, useState } from 'react';
+ import {
+-  View, Text, TouchableOpacity, ScrollView, StyleSheet, Animated,
++  View, Text, TouchableOpacity, ScrollView, StyleSheet, Animated, Alert,
+ } from 'react-native';
+ import { useRouter } from 'expo-router';
+ import { Ionicons } from '@expo/vector-icons';
+ import { useStore, Task } from '@/store/useStore';
+-import { pb } from '@/lib/pocketbase';
+ import { getSmartAlarmPrep, getAIInsight } from '@/lib/gemini';
+-import { useState } from 'react';
++
++const SNOOZE_MINUTES = 5;
+ 
+ 
+ const PREP_STEPS: Record<string, Array<{ icon: string; text: string }>> = {
+@@ -40,10 +40,17 @@ const PREP_STEPS: Record<string, Array<{ icon: string; text: string }>> = {
+ 
+ export default function SmartAlarmScreen() {
+   const router = useRouter();
+-  const { profile, tasks, toggleTask } = useStore();
++  const { profile, tasks, syncToggleTask, syncSnoozeTask, syncFetchTasks, user, setActiveTask } = useStore();
+   const [prepSteps, setPrepSteps] = useState<Array<{ icon: string; text: string }>>([]);
+   const [loadingSteps, setLoadingSteps] = useState(false);
+   const [completing, setCompleting] = useState(false);
++  const [snoozing, setSnoozing] = useState(false);
++
++  useEffect(() => {
++    if (user) {
++      syncFetchTasks();
++    }
++  }, [user]);
+ 
+   // Find THE next task (first one in future that is not done)
+   const now = new Date();
+@@ -104,13 +111,35 @@ export default function SmartAlarmScreen() {
+     if (!nextTask) return;
+     setCompleting(true);
+     try {
+-      await pb.collection('Tasks').update(nextTask.id, { is_completed: true });
+-      toggleTask(nextTask.id);
++      // ✅ Menggunakan syncToggleTask — API + state diperbarui secara atomik
++      await syncToggleTask(nextTask.id);
+       router.back();
+-    } catch (error) {
+-      console.error('Update error:', error);
++    } catch (error: any) {
++      console.error('[handleMarkDone] Error:', error);
++      Alert.alert('Gagal', error?.message || 'Tidak dapat menandai tugas selesai. Coba lagi.');
++    } finally {
++      setCompleting(false);
++    }
++  }
++
++  async function handleSnooze() {
++    if (!nextTask) return;
++    setSnoozing(true);
++    try {
++      // ✅ Menggunakan syncSnoozeTask — menggeser start_time & end_time di server + state
++      await syncSnoozeTask(nextTask.id, SNOOZE_MINUTES);
++      Alert.alert(
++        `Ditunda ${SNOOZE_MINUTES} menit ⏰`,
++        `"${nextTask.title}" sekarang dijadwalkan mulai pukul ${new Date(
++          new Date(nextTask.start_time!).getTime() + SNOOZE_MINUTES * 60000
++        ).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}.`
++      );
++    } catch (error: any) {
++      console.error('[handleSnooze] Error:', error);
++      Alert.alert('Gagal Snooze', error?.message || 'Tidak dapat menunda tugas. Coba lagi.');
++    } finally {
++      setSnoozing(false);
+     }
+-    setCompleting(false);
+   }
+ 
+ 
+@@ -225,7 +254,7 @@ export default function SmartAlarmScreen() {
+         <Animated.View style={[styles.actionsWrap, Anim(3)]}>
+           <TouchableOpacity
+             style={[styles.startNowBtn, !nextTask && { opacity: 0.5 }]}
+-            onPress={() => { if (nextTask) { router.back(); router.push('/focus'); } }}
++            onPress={() => { if (nextTask) { setActiveTask(nextTask); router.back(); router.push('/focus'); } }}
+             activeOpacity={0.85}
+             disabled={!nextTask}
+           >
+@@ -234,9 +263,15 @@ export default function SmartAlarmScreen() {
+           </TouchableOpacity>
+ 
+           <View style={styles.secondaryActions}>
+-            <TouchableOpacity style={styles.secBtn} activeOpacity={0.75} onPress={() => alert('Snoozed!')}>
+-              <Ionicons name="notifications-off-outline" size={16} color="rgba(255,255,255,0.5)" />
+-              <Text style={styles.secBtnText}>Snooze 5m</Text>
++            {/* ✅ FIXED: Snooze sekarang menggeser jadwal +5 menit di server & state */}
++            <TouchableOpacity
++              style={[styles.secBtn, (snoozing || !nextTask) && { opacity: 0.5 }]}
++              activeOpacity={0.75}
++              onPress={handleSnooze}
++              disabled={snoozing || !nextTask}
++            >
++              <Ionicons name="notifications-off-outline" size={16} color={snoozing ? '#00D4FF' : 'rgba(255,255,255,0.5)'} />
++              <Text style={styles.secBtnText}>{snoozing ? 'Menunda...' : 'Snooze 5m'}</Text>
+             </TouchableOpacity>
+ 
+             <TouchableOpacity style={styles.secBtn} activeOpacity={0.75} onPress={() => router.push('/(tabs)/timeline')}>
+diff --git a/docs/01_architecture/ai_strategy.md b/docs/01_architecture/ai_strategy.md
+index b5decbf..60d148d 100644
+--- a/docs/01_architecture/ai_strategy.md
++++ b/docs/01_architecture/ai_strategy.md
+@@ -16,8 +16,8 @@ Pickertime menggunakan pendekatan **Hybrid AI** di mana kecerdasan dibagi menjad
+     *   Membuka VS Code.
+     *   Memutar musik Lofi di Spotify.
+ 
+-## 3. Integrasi Gemini (Cloud Functions)
+-Logika Gemini tidak lagi ditaruh di Supabase Edge Functions, melainkan dideploy sebagai **Appwrite Functions**. Hal ini memudahkan pengelolaan API Key secara terpusat di satu server pribadi Anda.
++## 3. Integrasi Gemini (Local Proxy)
++Logika Gemini tidak lagi diekspos di aplikasi mobile, melainkan diproxy melalui **PocketBase JS Hooks** (`pb_hooks`). Hal ini memudahkan pengelolaan API Key secara terpusat dan aman di satu server pribadi Anda tanpa mengeksposnya ke publik.
+ 
+ ## 4. Masa Depan: Local LLM
+ Dengan RAM 32GB, ke depannya Anda bahkan bisa menjalankan model bahasa lokal (seperti **Llama 3 via Ollama**) langsung di server Anda, sehingga Anda benar-benar tidak butuh API Key dari Google lagi untuk tugas-tugas analisis data jadwal.
+diff --git a/docs/02_migration/supabase_to_appwrite.md b/docs/02_migration/supabase_to_appwrite.md
+deleted file mode 100644
+index 942f277..0000000
+--- a/docs/02_migration/supabase_to_appwrite.md
++++ /dev/null
+@@ -1,29 +0,0 @@
+-# Migration Guide: Supabase to Appwrite
+-
+-## 1. Persiapan SDK
+-Ganti dependensi di `package.json`:
+-*   *Hapus:* `@supabase/supabase-js`
+-*   *Tambah:* `react-native-appwrite`
+-
+-## 2. Inisialisasi Project
+-Ubah file `lib/supabase.ts` (atau buat file baru `lib/appwrite.ts`):
+-```typescript
+-import { Client, Account, Databases } from 'react-native-appwrite';
+-
+-const client = new Client()
+-    .setEndpoint('https://api.server-anda.com/v1')
+-    .setProject('PROJECT_ID_ANDA');
+-
+-export const account = new Account(client);
+-export const databases = new Databases(client);
+-```
+-
+-## 3. Perubahan Logika Auth
+-Supabase menggunakan `auth.signIn()`, sedangkan Appwrite menggunakan `account.createEmailSession()`. Skema data user tetap bisa dipertahankan di dalam koleksi `Profiles`.
+-
+-## 4. Perubahan Query Database
+-*   **Supabase:** `supabase.from('tasks').select('*')`
+-*   **Appwrite:** `databases.listDocuments('DB_ID', 'COLLECTION_ID')`
+-
+-## 5. Webhooks & Realtime
+-Appwrite memiliki fitur "Events" yang sangat kuat. Setiap ada perubahan di koleksi `Tasks`, server bisa mengirimkan sinyal ke OpenClaw secara otomatis tanpa perlu *polling* manual yang berat.
+diff --git a/docs/PROJECT_ROADMAP.md b/docs/PROJECT_ROADMAP.md
+index fc1797c..c4edf5e 100644
+--- a/docs/PROJECT_ROADMAP.md
++++ b/docs/PROJECT_ROADMAP.md
+@@ -7,37 +7,37 @@
+ Saat ini, proyek berada dalam fase transisi dari infrastruktur Cloud pihak ketiga.
+ *   **Frontend:** React Native (Expo)
+ *   **Styling:** NativeWind (Tailwind CSS)
+-*   **Backend (Lama):** Supabase Cloud (Database, Auth, Edge Functions)
+-*   **AI Engine:** Google Gemini AI Studio
+-*   **Database:** PostgreSQL (Managed by Supabase)
++*   **Backend:** PocketBase (Self-hosted)
++*   **AI Engine:** Google Gemini AI Studio (Proxied securely)
++*   **Database:** SQLite (Managed by PocketBase)
+ 
+ ## 3. Future Vision (Self-Hosted Architecture)
+ Target utama adalah kemandirian penuh infrastruktur untuk menghindari batasan platform dan memiliki kontrol 100% atas data pribadi.
+ 
+ *   **Infrastruktur:** Self-hosted di server pribadi (RAM 32GB).
+-*   **Backend Baru:** **Appwrite** (Berjalan via Docker).
++*   **Backend Baru:** **PocketBase** (Berjalan via Docker / Binary).
+ *   **Otomasi:** Integrasi **OpenClaw** sebagai jembatan antara aplikasi HP dan sistem komputer lokal.
+-*   **AI Strategy:** Hybrid (Gemini API untuk tugas ringan, OpenClaw untuk otomasi sistem berat).
++*   **AI Strategy:** Hybrid (Gemini API melalui proxy PocketBase untuk tugas ringan, OpenClaw untuk otomasi sistem berat).
+ 
+ ## 4. Migration Plan (Langkah Berikutnya)
+ 
+ ### Fase 1: Setup Infrastructure (Server Side)
+-- [ ] Instal Docker & Docker Compose di server pribadi.
+-- [ ] Deploy **Appwrite** menggunakan perintah resmi.
++- [x] Instal Docker / siapkan environment di server pribadi.
++- [x] Deploy **PocketBase**.
+ - [ ] Konfigurasi domain/IP publik untuk akses remote dari aplikasi HP.
+ 
+ ### Fase 2: Database Migration
+-- [ ] Mapping ulang skema PostgreSQL Supabase (Profi, Tasks, Sessions) ke dalam struktur Database Appwrite.
++- [x] Selesaikan mapping skema Profil, Tasks, Sessions ke dalam struktur PocketBase.
+ - [ ] Migrasi data (jika sudah ada data pengguna).
+ 
+ ### Fase 3: Code Refactoring
+-- [ ] Ganti library `@supabase/supabase-js` dengan `appwrite` SDK di dalam proyek Expo.
+-- [ ] Update `.env` dengan URL server baru dan Project ID Appwrite.
+-- [ ] Pindahkan logika Gemini AI dari Supabase Edge Functions ke Appwrite Functions.
++- [x] Gunakan `pocketbase` SDK di dalam proyek Expo.
++- [x] Update `.env` dengan URL server baru PocketBase.
++- [x] Pindahkan logika Gemini AI ke PocketBase JS Hooks (`pb_hooks`).
+ 
+ ### Fase 4: OpenClaw Bridge Optimization
+ - [ ] Pastikan tabel `workspace_events` aktif di backend baru.
+-- [ ] Hubungkan OpenClaw di PC lokal ke server Appwrite pribadi.
++- [ ] Hubungkan OpenClaw di PC lokal ke server PocketBase pribadi.
+ 
+ ## 5. System Requirements (Confirmed)
+ *   **Server RAM:** 32GB (Sangat mencukupi untuk Appwrite + OpenClaw + Monitoring tools).
+diff --git a/lib/database.sql b/lib/database.sql
+deleted file mode 100644
+index 0957d90..0000000
+--- a/lib/database.sql
++++ /dev/null
+@@ -1,99 +0,0 @@
+--- ============================================================
+--- Pickertime Database Schema
+--- Run this in Supabase Dashboard > SQL Editor
+--- ============================================================
+-
+--- Profiles table (extends auth.users)
+-create table if not exists public.profiles (
+-  id uuid references auth.users(id) on delete cascade primary key,
+-  email text,
+-  full_name text,
+-  avatar_url text,
+-  role text default 'Professional',  -- Student, Professional, Freelancer, Creator, etc.
+-  focus_goal text,                   -- e.g. "Ship product", "Study for finals"
+-  energy_pref text default 'Morning', -- Morning, Afternoon, Night Owl
+-  created_at timestamptz default now(),
+-  updated_at timestamptz default now()
+-);
+-
+--- Tasks table
+-create table if not exists public.tasks (
+-  id uuid default gen_random_uuid() primary key,
+-  user_id uuid references public.profiles(id) on delete cascade not null,
+-  title text not null,
+-  description text,
+-  category text default 'General',   -- School, Study, Personal, Work, Health, etc.
+-  priority text default 'Medium',    -- High, Medium, Low
+-  start_time timestamptz,
+-  end_time timestamptz,
+-  duration_minutes int default 60,
+-  is_completed boolean default false,
+-  has_alarm boolean default false,
+-  alarm_minutes_before int default 10,
+-  created_at timestamptz default now(),
+-  updated_at timestamptz default now()
+-);
+-
+--- Focus sessions table
+-create table if not exists public.focus_sessions (
+-  id uuid default gen_random_uuid() primary key,
+-  user_id uuid references public.profiles(id) on delete cascade not null,
+-  task_id uuid references public.tasks(id) on delete set null,
+-  duration_seconds int not null,
+-  completed boolean default false,
+-  timestamp timestamptz default now()
+-);
+-
+--- ============================================================
+--- Row Level Security
+--- ============================================================
+-alter table public.profiles enable row level security;
+-alter table public.tasks enable row level security;
+-alter table public.focus_sessions enable row level security;
+-
+--- Profiles policies
+-create policy "Users can view own profile" on public.profiles
+-  for select using (auth.uid() = id);
+-create policy "Users can update own profile" on public.profiles
+-  for update using (auth.uid() = id);
+-create policy "Users can insert own profile" on public.profiles
+-  for insert with check (auth.uid() = id);
+-
+--- Tasks policies
+-create policy "Users can CRUD own tasks" on public.tasks
+-  for all using (auth.uid() = user_id);
+-
+--- Focus sessions policies
+-create policy "Users can CRUD own sessions" on public.focus_sessions
+-  for all using (auth.uid() = user_id);
+-
+--- ============================================================
+--- Workspace Events (Bridge to OpenClaw)
+--- ============================================================
+-create table if not exists public.workspace_events (
+-  id uuid default gen_random_uuid() primary key,
+-  user_id uuid references public.profiles(id) on delete cascade not null,
+-  event_type text not null,       -- START_FOCUS, STOP_FOCUS, PAUSE_FOCUS, RESET_FOCUS
+-  payload jsonb default '{}',     -- Extra info: { task_title: "...", duration: 60 }
+-  is_processed boolean default false,
+-  created_at timestamptz default now()
+-);
+-
+-alter table public.workspace_events enable row level security;
+-
+-create policy "Users can CRUD own workspace events" on public.workspace_events
+-  for all using (auth.uid() = user_id);
+-
+--- Trigger: auto-create profile on auth signup
+-create or replace function public.handle_new_user()
+-returns trigger as $$
+-begin
+-  insert into public.profiles (id, email, full_name)
+-  values (new.id, new.email, new.raw_user_meta_data->>'full_name');
+-  return new;
+-end;
+-$$ language plpgsql security definer;
+-
+-create or replace trigger on_auth_user_created
+-  after insert on auth.users
+-  for each row execute procedure public.handle_new_user();
+diff --git a/lib/gemini.ts b/lib/gemini.ts
+index 0fa2a3b..faa865f 100644
+--- a/lib/gemini.ts
++++ b/lib/gemini.ts
+@@ -1,12 +1,10 @@
+ /**
+  * Pickertime Gemini AI Engine
+  * 
+- * This module was refactored from Supabase Edge Functions to direct 
+- * Gemini API calls for better autonomy in the PocketBase ecosystem.
++ * This module uses the secure PocketBase proxy endpoint
++ * to ensure API keys are never exposed to the client app.
+  */
+-
+-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
+-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
++import { pb } from '@/lib/pocketbase';
+ 
+ export type GeminiSuggestion = {
+   task: string;
+@@ -16,27 +14,18 @@ export type GeminiSuggestion = {
+ };
+ 
+ async function callGemini(prompt: string) {
+-  if (!GEMINI_API_KEY) {
+-    console.warn("Gemini API Key is missing. Fitur AI akan menggunakan fallback.");
+-    throw new Error("Missing API Key");
++  try {
++    // Call the secure custom proxy endpoint hosted on PocketBase
++    const response = await pb.send('/api/ai/gemini', {
++      method: 'POST',
++      body: { prompt },
++    });
++    
++    return response.candidates?.[0]?.content?.parts?.[0]?.text || '';
++  } catch (error) {
++    console.warn("AI Proxy Error:", error);
++    throw new Error("Failed to fetch AI suggestion from backend proxy.");
+   }
+-
+-  const response = await fetch(GEMINI_ENDPOINT, {
+-    method: 'POST',
+-    headers: { 'Content-Type': 'application/json' },
+-    body: JSON.stringify({
+-      contents: [{ parts: [{ text: prompt }] }],
+-      generationConfig: {
+-        temperature: 0.7,
+-        topP: 1,
+-        topK: 1,
+-        maxOutputTokens: 1000,
+-      },
+-    }),
+-  });
+-
+-  const data = await response.json();
+-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+ }
+ 
+ export async function getNextBestAction(
+diff --git a/lib/pocketbase.ts b/lib/pocketbase.ts
+index 2fb3120..0cfdf56 100644
+--- a/lib/pocketbase.ts
++++ b/lib/pocketbase.ts
+@@ -1,9 +1,22 @@
+-import PocketBase from 'pocketbase';
++import 'react-native-url-polyfill/auto';
++import PocketBase, { AsyncAuthStore } from 'pocketbase';
++import AsyncStorage from '@react-native-async-storage/async-storage';
++import EventSource from 'react-native-sse';
+ 
+-// The URL of your self-hosted PocketBase instance
+-export const PB_URL = 'https://api.elarisnoir.my.id';
++// Polyfill EventSource for React Native Realtime Subscriptions
++if (!global.EventSource) {
++  (global as any).EventSource = EventSource;
++}
+ 
+-export const pb = new PocketBase(PB_URL);
++export const PB_URL = process.env.EXPO_PUBLIC_POCKETBASE_URL || 'https://api.elarisnoir.my.id';
+ 
+-// Setting up auto-cancellation to false to prevent issues with React concurrency
++const authStore = new AsyncAuthStore({
++  save: async (serialized) => await AsyncStorage.setItem('pb_auth', serialized),
++  initial: AsyncStorage.getItem('pb_auth'),
++  clear: async () => await AsyncStorage.removeItem('pb_auth'),
++});
++
++export const pb = new PocketBase(PB_URL, authStore);
++
++// Disable auto-cancellation to prevent issues with React concurrency
+ pb.autoCancellation(false);
+diff --git a/package-lock.json b/package-lock.json
+index 476a6c7..2f02b58 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -30,6 +30,7 @@
+         "react-native-reanimated": "~4.1.1",
+         "react-native-safe-area-context": "~5.6.0",
+         "react-native-screens": "~4.16.0",
++        "react-native-sse": "^1.2.1",
+         "react-native-svg": "15.12.1",
+         "react-native-url-polyfill": "^3.0.0",
+         "react-native-web": "~0.21.0",
+@@ -6498,9 +6499,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -6521,9 +6519,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -6544,9 +6539,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -6567,9 +6559,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -8500,9 +8489,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -8523,9 +8509,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -8546,9 +8529,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -8569,9 +8549,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -8699,6 +8676,11 @@
+         "react-native": "*"
+       }
+     },
++    "node_modules/react-native-sse": {
++      "version": "1.2.1",
++      "resolved": "https://registry.npmjs.org/react-native-sse/-/react-native-sse-1.2.1.tgz",
++      "integrity": "sha512-zejanlScF+IB9tYnbdry0MT34qjBXbiV/E72qGz33W/tX1bx8MXsbB4lxiuPETc9v/008vYZ60yjIstW22VlVg=="
++    },
+     "node_modules/react-native-svg": {
+       "version": "15.12.1",
+       "resolved": "https://registry.npmjs.org/react-native-svg/-/react-native-svg-15.12.1.tgz",
+diff --git a/package.json b/package.json
+index 62bd0e0..e0f2d96 100644
+--- a/package.json
++++ b/package.json
+@@ -31,6 +31,7 @@
+     "react-native-reanimated": "~4.1.1",
+     "react-native-safe-area-context": "~5.6.0",
+     "react-native-screens": "~4.16.0",
++    "react-native-sse": "^1.2.1",
+     "react-native-svg": "15.12.1",
+     "react-native-url-polyfill": "^3.0.0",
+     "react-native-web": "~0.21.0",
+diff --git a/pb_hooks/ai_proxy.pb.js b/pb_hooks/ai_proxy.pb.js
+new file mode 100644
+index 0000000..f3404bc
+--- /dev/null
++++ b/pb_hooks/ai_proxy.pb.js
+@@ -0,0 +1,65 @@
++// pb_hooks/ai_proxy.pb.js
++
++/**
++ * PocketBase JS Hook to securely proxy requests to Google's Gemini API.
++ * 
++ * This ensures that the GEMINI_API_KEY is never exposed to the client (mobile app).
++ * Only authenticated users can access this endpoint.
++ * 
++ * Setup:
++ * 1. Place this file inside the `pb_hooks` directory of your PocketBase server.
++ * 2. Set the GEMINI_API_KEY environment variable on your server before starting PocketBase:
++ *    export GEMINI_API_KEY="your_actual_key_here"
++ *    ./pocketbase serve
++ */
++
++routerAdd("POST", "/api/ai/gemini", (c) => {
++  // 1. Verify user authentication
++  const user = c.get("authRecord")
++  if (!user) {
++    throw new UnauthorizedError("You must be logged in to use the AI features.")
++  }
++
++  // 2. Fetch API Key securely from Server Environment Variables
++  const apiKey = $os.getenv("GEMINI_API_KEY")
++  if (!apiKey) {
++    throw new BadRequestError("GEMINI_API_KEY is not configured on the server.")
++  }
++
++  // 3. Parse the Request Body
++  const body = new DynamicModel({ prompt: "" })
++  c.bind(body)
++  const prompt = body.prompt
++
++  if (!prompt) {
++    throw new BadRequestError("Prompt is required.")
++  }
++
++  // 4. Send Request to Google Gemini API
++  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + apiKey
++  
++  const reqBody = JSON.stringify({
++    contents: [{ parts: [{ text: prompt }] }],
++    generationConfig: {
++      temperature: 0.7,
++      topP: 1,
++      topK: 1,
++      maxOutputTokens: 1000,
++    },
++  })
++
++  const res = $http.send({
++    url: url,
++    method: "POST",
++    body: reqBody,
++    headers: { "Content-Type": "application/json" },
++    timeout: 120 // seconds
++  })
++
++  if (res.statusCode !== 200) {
++    throw new BadRequestError("Failed to communicate with Gemini API: " + res.raw)
++  }
++
++  // 5. Return the JSON response to the client
++  return c.json(200, JSON.parse(res.raw))
++})
+diff --git a/store/useStore.ts b/store/useStore.ts
+index f8102d2..136c788 100644
+--- a/store/useStore.ts
++++ b/store/useStore.ts
+@@ -1,5 +1,7 @@
+ import { create } from 'zustand';
+ import { AuthModel } from 'pocketbase';
++import { pb } from '@/lib/pocketbase';
++import { scheduleTaskNotification } from '@/lib/notifications';
+ 
+ export type UserRole = 'Student' | 'Professional' | 'Freelancer' | 'Creator' | 'Researcher' | string;
+ export type EnergyPref = 'Morning' | 'Afternoon' | 'Night Owl';
+@@ -29,6 +31,21 @@ export interface Task {
+   alarm_minutes_before: number;
+ }
+ 
++// ─── Payload types untuk fungsi sinkronisasi ────────────────────────────────
++export interface CreateTaskPayload {
++  user: string;
++  title: string;
++  description?: string;
++  category: string;
++  priority: 'High' | 'Medium' | 'Low';
++  start_time?: string;
++  end_time?: string;
++  duration_minutes: number;
++  is_completed?: boolean;
++  has_alarm?: boolean;
++  alarm_minutes_before?: number;
++}
++
+ interface AppState {
+   // Auth
+   user: AuthModel | null;
+@@ -36,13 +53,44 @@ interface AppState {
+   setUser: (user: AuthModel | null) => void;
+   setProfile: (profile: Profile | null) => void;
+ 
+-  // Tasks
++  // Tasks — operasi lokal (digunakan oleh realtime subscription)
+   tasks: Task[];
+   setTasks: (tasks: Task[]) => void;
+   addTask: (task: Task) => void;
+   updateTask: (id: string, updates: Partial<Task>) => void;
+   toggleTask: (id: string) => void;
+ 
++  // ─── Fungsi Sinkronisasi Terpusat ────────────────────────────────────────
++  // Setiap fungsi sync_ melakukan pemanggilan API PocketBase + update state
++  // Zustand secara atomik dalam satu transaksi, mencegah desinkronisasi data.
++
++  /**
++   * Membuat task baru di PocketBase, lalu menambahkannya ke state lokal.
++   * Juga otomatis menjadwalkan notifikasi lokal.
++   * @throws Error jika gagal (jaringan, validasi, dll)
++   */
++  syncAddTask: (payload: CreateTaskPayload) => Promise<Task>;
++
++  /**
++   * Memperbarui field tertentu sebuah task di PocketBase,
++   * lalu merefleksikannya ke state lokal.
++   * @throws Error jika gagal
++   */
++  syncUpdateTask: (id: string, updates: Partial<Task>) => Promise<Task>;
++
++  /**
++   * Toggle is_completed sebuah task di PocketBase + state lokal.
++   * @throws Error jika gagal
++   */
++  syncToggleTask: (id: string) => Promise<void>;
++
++  /**
++   * Menunda task berikutnya dengan menggeser start_time dan end_time
++   * sebesar `minutesToAdd` menit di PocketBase + state lokal.
++   * @throws Error jika gagal
++   */
++  syncSnoozeTask: (id: string, minutesToAdd: number) => Promise<void>;
++
+   // Focus Session
+   activeTask: Task | null;
+   timerSeconds: number;
+@@ -51,17 +99,28 @@ interface AppState {
+   setTimerSeconds: (seconds: number) => void;
+   setIsRunning: (val: boolean) => void;
+ 
++  /**
++   * Mengambil daftar task dari PocketBase untuk hari ini dan menyimpannya di Zustand
++   */
++  syncFetchTasks: () => Promise<void>;
++
++  // Snooze analytics
++  snoozeCount: number;
++  incrementSnooze: () => void;
++
+   // Onboarding
+   onboardingComplete: boolean;
+   setOnboardingComplete: (val: boolean) => void;
+ }
+ 
+-export const useStore = create<AppState>((set) => ({
++export const useStore = create<AppState>((set, get) => ({
++  // ─── Auth ──────────────────────────────────────────────────────────────────
+   user: null,
+   profile: null,
+   setUser: (user) => set({ user }),
+   setProfile: (profile) => set({ profile }),
+ 
++  // ─── Tasks (operasi lokal) ──────────────────────────────────────────────────
+   tasks: [],
+   setTasks: (tasks) => set({ tasks }),
+   addTask: (task) => set((state) => ({ tasks: [task, ...state.tasks] })),
+@@ -76,6 +135,117 @@ export const useStore = create<AppState>((set) => ({
+       ),
+     })),
+ 
++  // ─── syncAddTask ────────────────────────────────────────────────────────────
++  syncAddTask: async (payload) => {
++    // 1. Kirim ke server terlebih dahulu
++    const data = await pb.collection('Tasks').create({
++      ...payload,
++      is_completed: payload.is_completed ?? false,
++      has_alarm: payload.has_alarm ?? true,
++      alarm_minutes_before: payload.alarm_minutes_before ?? 10,
++    });
++
++    const newTask = data as unknown as Task;
++
++    // 2. Hanya jika server berhasil, perbarui state lokal
++    set((state) => ({ tasks: [newTask, ...state.tasks] }));
++
++    // 3. Jadwalkan notifikasi lokal
++    try {
++      scheduleTaskNotification(newTask);
++    } catch (notifErr) {
++      // Notifikasi gagal bukan alasan untuk gagalkan seluruh operasi
++      console.warn('[syncAddTask] Failed to schedule notification:', notifErr);
++    }
++
++    return newTask;
++  },
++
++  // ─── syncUpdateTask ─────────────────────────────────────────────────────────
++  syncUpdateTask: async (id, updates) => {
++    // 1. Kirim ke server
++    const data = await pb.collection('Tasks').update(id, updates);
++    const updatedTask = data as unknown as Task;
++
++    // 2. Hanya jika server berhasil, perbarui state lokal
++    set((state) => ({
++      tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
++    }));
++
++    return updatedTask;
++  },
++
++  // ─── syncToggleTask ─────────────────────────────────────────────────────────
++  syncToggleTask: async (id) => {
++    const task = get().tasks.find((t) => t.id === id);
++    if (!task) throw new Error(`Task dengan id "${id}" tidak ditemukan di state.`);
++
++    const newValue = !task.is_completed;
++
++    // 1. Kirim ke server
++    await pb.collection('Tasks').update(id, { is_completed: newValue });
++
++    // 2. Hanya jika server berhasil, perbarui state lokal
++    set((state) => ({
++      tasks: state.tasks.map((t) =>
++        t.id === id ? { ...t, is_completed: newValue } : t
++      ),
++    }));
++  },
++
++  // ─── syncSnoozeTask ─────────────────────────────────────────────────────────
++  syncSnoozeTask: async (id, minutesToAdd) => {
++    const task = get().tasks.find((t) => t.id === id);
++    if (!task) throw new Error(`Task dengan id "${id}" tidak ditemukan di state.`);
++
++    if (!task.start_time || !task.end_time) {
++      throw new Error('Task tidak memiliki start_time atau end_time untuk di-snooze.');
++    }
++
++    const newStart = new Date(
++      new Date(task.start_time).getTime() + minutesToAdd * 60 * 1000
++    ).toISOString();
++
++    const newEnd = new Date(
++      new Date(task.end_time).getTime() + minutesToAdd * 60 * 1000
++    ).toISOString();
++
++    const updates = { start_time: newStart, end_time: newEnd };
++
++    // 1. Kirim ke server
++    await pb.collection('Tasks').update(id, updates);
++
++    // 2. Hanya jika server berhasil, perbarui state lokal
++    set((state) => ({
++      tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
++    }));
++
++    get().incrementSnooze();
++  },
++
++  // ─── syncFetchTasks ─────────────────────────────────────────────────────────
++  syncFetchTasks: async () => {
++    const user = get().user || pb.authStore.model;
++    if (!user) return;
++    try {
++      const today = new Date().toISOString().split('T')[0];
++      const records = await pb.collection('Tasks').getFullList({
++        filter: `user = "${user.id}" && start_time >= "${today}"`,
++        sort: 'start_time',
++      });
++      if (records) {
++        set({ tasks: records as any });
++      }
++    } catch (err) {
++      console.error('Fetch tasks error:', err);
++    }
++  },
++
++  // ─── Snooze Analytics ───────────────────────────────────────────────────────
++  snoozeCount: 0,
++  incrementSnooze: () => set((state) => ({ snoozeCount: state.snoozeCount + 1 })),
++
++  // ─── Focus Session ──────────────────────────────────────────────────────────
+   activeTask: null,
+   timerSeconds: 0,
+   isRunning: false,
+@@ -83,6 +253,7 @@ export const useStore = create<AppState>((set) => ({
+   setTimerSeconds: (timerSeconds) => set({ timerSeconds }),
+   setIsRunning: (val) => set({ isRunning: val }),
+ 
++  // ─── Onboarding ─────────────────────────────────────────────────────────────
+   onboardingComplete: false,
+   setOnboardingComplete: (val) => set({ onboardingComplete: val }),
+ }));
+-- 
+2.54.0
+

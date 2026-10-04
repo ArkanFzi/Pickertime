@@ -1,0 +1,10 @@
+[Unit]
+Description=Salin backup PocketBase dari Pub/Sub ke GCS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/pickertime-backups/pickertime-pb-relay.sh
+TimeoutStartSec=600
+Nice=10

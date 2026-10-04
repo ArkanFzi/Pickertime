@@ -72,6 +72,8 @@ export default function InsightsScreen() {
     monday.setDate(now.getDate() - (now.getDay() === 0 ? 6 : now.getDay() - 1));
     monday.setHours(0, 0, 0, 0);
 
+    let latestTrend = focusTrend;
+
     // 1. Fetch Focus Sessions
     try {
       const sessions = await pb.collection('Focus_Sessions').getFullList({
@@ -104,6 +106,7 @@ export default function InsightsScreen() {
         setFocusTrend(newTrend);
         setHeatmap(newHeat);
         setStats(prev => ({ ...prev, totalMins: Math.round(totalS / 60) }));
+        latestTrend = newTrend;
       }
 
       // 2. Fetch Weekly Completion
@@ -126,16 +129,16 @@ export default function InsightsScreen() {
     }
 
     setLoadingData(false);
-    fetchAIInsight(); // Call after real data is loaded
+    fetchAIInsight(latestTrend); // Call after real data is loaded with fresh trend
   }
 
-  async function fetchAIInsight() {
+  async function fetchAIInsight(trendData?: number[]) {
     if (!profile) return;
     setLoadingAI(true);
     const insight = await getAIInsight(
       profile.role || 'Professional',
       profile.focus_goal || 'Productivity',
-      { trend: focusTrend } // Simplified context
+      { trend: trendData || focusTrend } // Use fresh data if provided
     );
     setAiInsight(insight);
     setLoadingAI(false);
@@ -160,7 +163,7 @@ export default function InsightsScreen() {
           <Text style={styles.pageTitle}>Weekly Insights</Text>
           <Text style={styles.weekRange}>{getWeekRange()}</Text>
         </View>
-        <TouchableOpacity style={styles.calBtn}>
+        <TouchableOpacity style={styles.calBtn} onPress={() => router.push('/timeline')}>
           <Ionicons name="calendar-outline" size={18} color="rgba(255,255,255,0.7)" />
         </TouchableOpacity>
       </View>

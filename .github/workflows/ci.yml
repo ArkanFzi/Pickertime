@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Auto-Verify (AGENTS.md mewajibkan tsc --noEmit)
+        run: npm run typecheck
+
+  tool-lint:
+    name: Lint perkakas shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Syntax check semua skrip ter-track
+        run: |
+          n=0; bad=0
+          while IFS= read -r f; do
+            n=$((n+1)); bash -n "$f" || { echo "SINTAKS_BURUK $f"; bad=$((bad+1)); }
+          done < <(git ls-files '*.sh')
+          echo "shell_files=$n syntax_bad=$bad"
+          [ "$bad" -eq 0 ] || exit 1
+
+      - name: Gerbang H4 - tidak ada xtrace yang bisa mencetak kredensial
+        run: |
+          files=$(git ls-files '*.sh' | xargs -r grep -lE \
+            '^[[:space:]]*set[[:space:]]+-[a-z]*x|set[[:space:]]+-o[[:space:]]+xtrace' || true)
+          hits=$(printf '%s' "$files" | grep -c . || true)
+          echo "xtrace_files=$hits"
+          [ "$hits" -eq 0 ] || { echo "DILARANG: set -x di blok yang menyentuh kredensial (TODO.md H4)"; exit 1; }
+
+  secret-scan:
+    name: Scan rahasia di file ter-track
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cari pola kredensial nyata (nama file saja, isi tidak dicetak)
+        run: |
+          pat='AIza[0-9A-Za-z_-]{20,}|gsk_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|gho_[A-Za-z0-9]{30,}|cfut_[A-Za-z0-9_-]{10,}'
+          hits=$(git grep -I -l -E "$pat" -- . | wc -l)
+          echo "secret_hits=$hits"
+          [ "$hits" -eq 0 ] || { git grep -I -l -E "$pat" -- .; echo "DITEMUKAN kandidat rahasia di file ter-track"; exit 1; }
+
+  schema:
+    name: Skema PocketBase + hook AI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Bangkitkan PocketBase dari pb_migrations
+        run: |
+          docker run -d --name pb -p 127.0.0.1:8090:8090 \
+            -e PB_ADMIN_EMAIL=ci@local.test \
+            -e PB_ADMIN_PASSWORD=ci-only-password-123 \
+            -v "$PWD/pb_migrations:/pb_migrations" \
+            -v "$PWD/pb_hooks:/pb_hooks" \
+            ghcr.io/muchobien/pocketbase:0.40.4
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8090/api/health >/dev/null; then echo "sehat setelah $i percobaan"; exit 0; fi
+            sleep 2
+          done
+          echo "PocketBase tidak sehat"; docker logs pb; exit 1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Verifikasi skema, API rules, isolasi user, dan proxy Gemini
+        env:
+          PB_SU_EMAIL: ci@local.test
+          PB_SU_PASSWORD: ci-only-password-123
+          CI_SHA: ${{ github.sha }}
+        run: node tools/pb/pb-schema-verify.mjs http://127.0.0.1:8090 "ci-$CI_SHA"
+
+      - name: Log PocketBase saat gagal
+        if: failure()
+        run: docker logs pb
+
+  guard-main:
+    name: main hanya hasil merge PR
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const commits = (context.payload.commits || []).map(c => c.id)
+            if (!commits.length) { core.setFailed('tidak ada commit di push ini'); return }
+            const orphan = []
+            for (const sha of commits) {
+              const { data } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner, repo: context.repo.repo, commit_sha: sha,
+              })
+              if (!data.some(pr => pr.merged_at)) orphan.push(sha.slice(0, 8))
+            }
+            if (orphan.length) {
+              core.setFailed(`Push langsung ke main terdeteksi (tanpa PR yang di-merge): ${orphan.join(', ')}. ` +
+                `AGENTS.md: branch main khusus hasil merge dari dev.`)
+            }

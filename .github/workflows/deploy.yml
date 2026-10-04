@@ -1,0 +1,79 @@
+name: Deploy backend PocketBase
+
+# Jalur produksi `main`. Kenapa bukan SSH: VM PocketBase (hermes-openclaw-vm) memakai
+# kunci SSH metadata lama tanpa OS Login, jadi service account CI tidak punya jalur
+# login. Arahnya dibalik — workflow ini hanya menerbitkan perintah ke Pub/Sub, lalu
+# agen root di VM yang menariknya, memasang, restart, dan membalas hasil.
+# Kredensial superuser PocketBase tidak pernah keluar dari VM.
+#
+# Gerbang masuknya: `main` dilindungi branch protection dengan required checks
+# `Type-check` + `Skema PocketBase + hook AI` dan `enforce_admins=true`, jadi setiap
+# commit yang sampai ke sini sudah lewat keduanya lewat PR yang di-merge.
+# Lihat TODO.md M3/M4 dan tools/deploy/pickertime-pb-agent.sh.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pb_hooks/**'
+      - 'pb_migrations/**'
+      - 'tools/deploy/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'apply = pasang HEAD; rollback = kembalikan ke snapshot deploy_id'
+        required: true
+        type: choice
+        options: [apply, rollback]
+        default: apply
+      snapshot:
+        description: 'deploy_id snapshot yang dipakai untuk rollback (kosongkan jika apply)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-pb
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: config-agentic-ubuntu
+  BUCKET_NAME: pickertime-pb-deploys
+  WIF_PROVIDER: projects/486641216758/locations/global/workloadIdentityPools/github-pool/providers/pickertime-provider
+  SERVICE_ACCOUNT: pickertime-cd@config-agentic-ubuntu.iam.gserviceaccount.com
+
+jobs:
+  deploy:
+    name: pb_hooks + pb_migrations ke VM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Autentikasi ke GCP lewat WIF
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+          token_format: access_token
+          # Provider ini mengunci allowedAudiences ke nama sumber dayanya sendiri, bukan
+          # sts.googleapis.com. Tanpa baris ini token GitHub ditolak STS.
+          audience: ${{ env.WIF_PROVIDER }}
+
+      - name: Terbitkan perintah dan tunggu hasil agen
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          ACTION: ${{ inputs.action || 'apply' }}
+          SNAPSHOT: ${{ inputs.snapshot }}
+        run: |
+          if [ "$ACTION" = "rollback" ]; then
+            [ -n "$SNAPSHOT" ] || { echo "rollback butuh input snapshot (deploy_id)"; exit 2; }
+            bash tools/deploy/publish-pb-deploy.sh --apply --rollback "$SNAPSHOT"
+          else
+            bash tools/deploy/publish-pb-deploy.sh --apply
+          fi

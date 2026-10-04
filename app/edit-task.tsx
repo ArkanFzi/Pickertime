@@ -3,14 +3,12 @@ import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, Alert, Animated, PanResponder, Dimensions,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Circle, Path, G, Line } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { useStore } from '@/store/useStore';
-// pb & scheduleTaskNotification kini dikelola di dalam syncAddTask (useStore)
 
 const CATEGORIES = [
-
   { id: 'Work', color: '#00D4FF' },
   { id: 'Study', color: '#A78BFA' },
   { id: 'Health', color: '#34D399' },
@@ -32,7 +30,7 @@ function RadialTimePicker({ value, onChange }: { value: number; onChange: (v: nu
   const size = 220;
   const center = size / 2;
   const radius = size / 2 - 20;
-  const maxMin = 240; // max 4h
+  const maxMin = 240; 
   const angleDeg = (value / maxMin) * 360;
   const angleRad = ((angleDeg - 90) * Math.PI) / 180;
   const handleX = center + radius * Math.cos(angleRad);
@@ -40,8 +38,6 @@ function RadialTimePicker({ value, onChange }: { value: number; onChange: (v: nu
   const largeArc = angleDeg > 180 ? 1 : 0;
   const arcEndX = center + radius * Math.cos(((angleDeg - 90) * Math.PI) / 180);
   const arcEndY = center + radius * Math.sin(((angleDeg - 90) * Math.PI) / 180);
-
-  const panRef = useRef<any>(null);
 
   const panResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -63,9 +59,7 @@ function RadialTimePicker({ value, onChange }: { value: number; onChange: (v: nu
   return (
     <View {...panResponder.panHandlers} style={{ width: size, height: size }}>
       <Svg width={size} height={size}>
-        {/* Background circle */}
         <Circle cx={center} cy={center} r={radius} stroke="rgba(255,255,255,0.06)" strokeWidth={14} fill="transparent" />
-        {/* Progress arc */}
         {angleDeg > 5 && (
           <Path
             d={`M ${startX} ${startY} A ${radius} ${radius} 0 ${largeArc} 1 ${arcEndX} ${arcEndY}`}
@@ -75,11 +69,9 @@ function RadialTimePicker({ value, onChange }: { value: number; onChange: (v: nu
             strokeLinecap="round"
           />
         )}
-        {/* Handle dot */}
         <Circle cx={handleX} cy={handleY} r={10} fill="#00D4FF" />
         <Circle cx={handleX} cy={handleY} r={6} fill="#0A0F1D" />
       </Svg>
-      {/* Center display */}
       <View style={StyleSheet.absoluteFillObject}>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ fontSize: 36, fontWeight: '800', color: '#fff' }}>
@@ -92,20 +84,17 @@ function RadialTimePicker({ value, onChange }: { value: number; onChange: (v: nu
   );
 }
 
-export default function ScheduleScreen() {
+export default function EditTaskScreen() {
   const router = useRouter();
-  // ✅ Gunakan syncAddTask — operasi API + state dikelola terpusat di store
-  const { user, profile, tasks, syncAddTask, setActiveTask } = useStore();
+  const { id } = useLocalSearchParams();
+  
+  const { user, profile, tasks, syncUpdateTask, syncDeleteTask, setActiveTask } = useStore();
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Work');
   const [priority, setPriority] = useState('High');
   const [duration, setDuration] = useState(60);
   const [loading, setLoading] = useState(false);
   const [conflictTask, setConflictTask] = useState<any>(null);
-  const [nextSlot, setNextSlot] = useState<{ start: Date; end: Date } | null>(null);
-
-  const suggestions = SUGGESTIONS[profile?.role || 'Professional'];
-
 
   const [startTime, setStartTime] = useState(() => {
     const d = new Date();
@@ -113,101 +102,98 @@ export default function ScheduleScreen() {
     return d;
   });
 
-  const now = new Date();
+  const suggestions = SUGGESTIONS[profile?.role || 'Professional'];
+
+  useEffect(() => {
+    const task = tasks.find((t) => t.id === id);
+    if (task) {
+      setTitle(task.title);
+      setCategory(task.category);
+      setPriority(task.priority);
+      setDuration(task.duration_minutes);
+      if (task.start_time) {
+        setStartTime(new Date(task.start_time));
+      }
+    }
+  }, [id, tasks]);
+
   const startTimeStr = startTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
   const endTime = new Date(startTime.getTime() + duration * 60000);
   const endTimeStr = endTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-  // Conflict Detection Effect
   useEffect(() => {
     checkConflicts();
-    findNextAvailableSlot();
-  }, [duration, tasks]);
+  }, [duration, tasks, startTime]);
 
   function checkConflicts() {
     const startDt = startTime;
     const endDt = new Date(startDt.getTime() + duration * 60000);
 
     const conflict = tasks.find(t => {
+      if (t.id === id) return false; // Don't conflict with itself
       if (t.is_completed || !t.start_time || !t.end_time) return false;
       const ts = new Date(t.start_time);
       const te = new Date(t.end_time);
-      // Overlap logic: (StartA < EndB) and (EndA > StartB)
       return (startDt < te) && (endDt > ts);
     });
     setConflictTask(conflict || null);
   }
 
-  function findNextAvailableSlot() {
-    // Collect all future non-completed tasks sorted
-    const sorted = tasks
-      .filter(t => !t.is_completed && t.start_time && new Date(t.end_time!) > now)
-      .sort((a, b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime());
-
-    let proposedStart = new Date(startTime);
-    proposedStart.setSeconds(0, 0);
-    
-    // Find first gap wide enough
-    for (const t of sorted) {
-      const ts = new Date(t.start_time!);
-      const te = new Date(t.end_time!);
-      
-      const gapMins = (ts.getTime() - proposedStart.getTime()) / 60000;
-      if (gapMins >= duration) {
-        break; // Found it!
-      }
-      proposedStart = te > proposedStart ? te : proposedStart;
-    }
-
-    setNextSlot({
-      start: proposedStart,
-      end: new Date(proposedStart.getTime() + duration * 60000)
-    });
-  }
-
-
-  async function handleSave(startNow: boolean) {
+  async function handleUpdate(startNow: boolean) {
     if (!title.trim()) {
       Alert.alert('Task name required', 'Please enter a task name.');
       return;
     }
-    if (!user) {
-      Alert.alert('Not signed in');
-      return;
-    }
+    if (!user || !id) return;
 
     setLoading(true);
     const startDt = startTime;
     const endDt = new Date(startDt.getTime() + duration * 60000);
 
     try {
-      // ✅ syncAddTask menangani: PocketBase create + addTask state + scheduleNotification
-      const newTask = await syncAddTask({
-        user: user.id,
+      const updatedTask = await syncUpdateTask(id as string, {
         title: title.trim(),
         category,
         priority: priority as 'High' | 'Medium' | 'Low',
         duration_minutes: duration,
         start_time: startDt.toISOString(),
         end_time: endDt.toISOString(),
-        is_completed: false,
-        has_alarm: true,
-        alarm_minutes_before: 10,
       });
 
       if (startNow) {
-        setActiveTask(newTask);
+        setActiveTask(updatedTask);
         router.push('/focus');
       } else {
-        Alert.alert('✅ Tersimpan', 'Tugas ditambahkan ke timeline Anda.');
-        setTitle('');
-        router.push('/(tabs)/timeline');
+        Alert.alert('✅ Diperbarui', 'Tugas berhasil diperbarui.');
+        router.back();
       }
     } catch (error: any) {
-      Alert.alert('Gagal Menyimpan', error.message || 'Tidak dapat menyimpan tugas. Periksa koneksi internet.');
+      Alert.alert('Gagal Memperbarui', error.message || 'Tidak dapat memperbarui tugas. Periksa koneksi internet.');
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleDelete() {
+    Alert.alert('Hapus Tugas', 'Apakah Anda yakin ingin menghapus tugas ini?', [
+      { text: 'Batal', style: 'cancel' },
+      {
+        text: 'Hapus',
+        style: 'destructive',
+        onPress: async () => {
+          if (!id) return;
+          setLoading(true);
+          try {
+            await syncDeleteTask(id as string);
+            router.back();
+          } catch (error: any) {
+            Alert.alert('Gagal Menghapus', error.message);
+          } finally {
+            setLoading(false);
+          }
+        },
+      },
+    ]);
   }
 
   return (
@@ -217,7 +203,11 @@ export default function ScheduleScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Create Task</Text>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Edit Task</Text>
+          <View style={{ width: 24 }} />
         </View>
 
         {/* Task Input */}
@@ -309,55 +299,10 @@ export default function ScheduleScreen() {
           </View>
         )}
 
-
-        {/* Smart Recommendation */}
-        <View style={[styles.smartCard, conflictTask && { borderColor: 'rgba(248, 113, 113, 0.3)' }]}>
-          <View style={styles.smartGlow} />
-          <View style={styles.smartTop}>
-            <View>
-              <View style={styles.smartTitleRow}>
-                <Ionicons name={conflictTask ? "alert-circle" : "flash"} size={13} color={conflictTask ? "#F87171" : "#00D4FF"} />
-                <Text style={styles.smartTitle}>{conflictTask ? "Schedule Busy" : "Best Energy Match"}</Text>
-              </View>
-              <Text style={styles.smartDesc}>
-                {conflictTask ? "The current slot is occupied." : "Aligns perfectly with your peak focus window."}
-              </Text>
-            </View>
-            <View style={[styles.matchBadge, conflictTask && { backgroundColor: 'rgba(248, 113, 113, 0.15)', borderColor: 'rgba(248, 113, 113, 0.3)' }]}>
-              <Text style={[styles.matchText, conflictTask && { color: '#F87171' }]}>
-                {conflictTask ? "Busy" : "98% Match"}
-              </Text>
-            </View>
-          </View>
-          {nextSlot && (
-            <View style={styles.smartSlot}>
-              <View>
-                <Text style={styles.smartSlotTime}>
-                  {nextSlot.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – 
-                  {nextSlot.end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                </Text>
-                <Text style={[styles.smartSlotSub, conflictTask && { color: '#F87171' }]}>
-                  {conflictTask ? "Next Available Slot" : "Auto-calculated Optima"}
-                </Text>
-              </View>
-              <TouchableOpacity 
-                style={styles.smartApplyBtn}
-                onPress={() => {
-                   setStartTime(nextSlot.start);
-                   Alert.alert('✅ Slot Applied', 'Task start time has been updated to the suggested optimal slot.');
-                }}
-              >
-                <Ionicons name="sparkles" size={16} color="rgba(255,255,255,0.7)" />
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-
-
         {/* Actions */}
         <TouchableOpacity 
           style={[styles.primaryBtn, conflictTask && { backgroundColor: '#F87171' }]} 
-          onPress={() => handleSave(true)} 
+          onPress={() => handleUpdate(true)} 
           disabled={loading} 
           activeOpacity={0.85}
         >
@@ -367,9 +312,13 @@ export default function ScheduleScreen() {
           </Text>
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.ghostBtn} onPress={() => handleUpdate(false)} disabled={loading} activeOpacity={0.8}>
+          <Text style={styles.ghostBtnText}>Update Task</Text>
+        </TouchableOpacity>
 
-        <TouchableOpacity style={styles.ghostBtn} onPress={() => handleSave(false)} disabled={loading} activeOpacity={0.8}>
-          <Text style={styles.ghostBtnText}>Save for Later</Text>
+        <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete} disabled={loading} activeOpacity={0.8}>
+          <Ionicons name="trash-outline" size={16} color="#F87171" />
+          <Text style={styles.deleteBtnText}>Delete Task</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -383,8 +332,9 @@ const styles = StyleSheet.create({
     borderRadius: 300, backgroundColor: 'rgba(0,212,255,0.05)',
   },
   content: { maxWidth: 420, alignSelf: 'center', width: '100%', paddingHorizontal: 20, paddingTop: 60, paddingBottom: 100 },
-  header: { marginBottom: 20 },
-  title: { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: -0.8 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  backBtn: { padding: 4 },
+  title: { fontSize: 24, fontWeight: '800', color: '#fff', letterSpacing: -0.8 },
   inputCard: {
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
@@ -432,37 +382,6 @@ const styles = StyleSheet.create({
   timeItem: { alignItems: 'center', gap: 4 },
   timeItemLabel: { fontSize: 11, color: 'rgba(255,255,255,0.4)' },
   timeItemValue: { fontSize: 15, fontWeight: '700', color: '#fff' },
-  smartCard: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1, borderColor: 'rgba(0,212,255,0.25)',
-    borderRadius: 24, padding: 18, marginBottom: 20, overflow: 'hidden',
-    shadowColor: '#00D4FF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.06, shadowRadius: 15,
-  },
-  smartGlow: {
-    position: 'absolute', top: -30, right: -30, width: 100, height: 100,
-    borderRadius: 50, backgroundColor: 'rgba(0,212,255,0.08)',
-  },
-  smartTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
-  smartTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  smartTitle: { fontSize: 14, fontWeight: '700', color: '#fff' },
-  smartDesc: { fontSize: 12, color: 'rgba(255,255,255,0.5)' },
-  matchBadge: {
-    backgroundColor: 'rgba(0,212,255,0.15)', borderRadius: 10,
-    paddingHorizontal: 8, paddingVertical: 4,
-    borderWidth: 1, borderColor: 'rgba(0,212,255,0.3)',
-  },
-  matchText: { fontSize: 11, fontWeight: '700', color: '#00D4FF' },
-  smartSlot: {
-    backgroundColor: 'rgba(10,15,29,0.6)', borderRadius: 14, padding: 14,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
-  },
-  smartSlotTime: { fontSize: 14, fontWeight: '700', color: '#fff', marginBottom: 3 },
-  smartSlotSub: { fontSize: 11, color: '#00D4FF' },
-  smartApplyBtn: {
-    width: 34, height: 34, borderRadius: 17,
-    backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center',
-  },
   primaryBtn: {
     backgroundColor: '#00D4FF', borderRadius: 18, paddingVertical: 17,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
@@ -474,8 +393,16 @@ const styles = StyleSheet.create({
     paddingVertical: 16, borderRadius: 18, alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    marginBottom: 12,
   },
   ghostBtnText: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.7)' },
+  deleteBtn: {
+    paddingVertical: 16, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
+    flexDirection: 'row', gap: 8,
+    backgroundColor: 'rgba(248, 113, 113, 0.08)',
+    borderWidth: 1, borderColor: 'rgba(248, 113, 113, 0.25)',
+  },
+  deleteBtnText: { fontSize: 14, fontWeight: '600', color: '#F87171' },
   conflictBanner: {
     backgroundColor: 'rgba(248, 113, 113, 0.12)', 
     borderWidth: 1, borderColor: 'rgba(248, 113, 113, 0.25)',
@@ -484,4 +411,3 @@ const styles = StyleSheet.create({
   },
   conflictBannerText: { fontSize: 13, color: '#F87171', fontWeight: '500' },
 });
-
