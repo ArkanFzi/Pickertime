@@ -231,7 +231,7 @@ rollback_deploy() {
     '' | *[!A-Za-z0-9._-]*) die "snapshot tidak valid: '$target'" ;;
   esac
   [ -f "$RELEASES/$target/.deploy-baseline.tar" ] || die "snapshot tidak ada: $target"
-  ID="$target-rollback"
+  # ID sudah di-set dari pesan (rb-<snapshot>), jangan override
   mv "$REMOTE_APP/pb_hooks" "$REMOTE_APP/pb_hooks.rolledback-$ID" 2>/dev/null || true
   mv "$REMOTE_APP/pb_migrations" "$REMOTE_APP/pb_migrations.rolledback-$ID" 2>/dev/null || true
   tar -xf "$RELEASES/$target/.deploy-baseline.tar" -C "$REMOTE_APP"

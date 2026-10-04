@@ -90,8 +90,8 @@ if [ "$APPLY" != "1" ]; then
   exit 0
 fi
 
-CMD=$(jq -cn --arg id "$DEPLOY_ID" --arg act "$ACTION" --arg obj "$OBJECT" --arg sha "$SHA" --arg sz "$SIZE" \
-  '{deploy_id:$id, action:$act, object:$obj, sha256:$sha, size:($sz|tonumber? // null)}')
+CMD=$(jq -cn --arg id "$DEPLOY_ID" --arg act "$ACTION" --arg obj "$OBJECT" --arg sha "$SHA" --arg sz "$SIZE" --arg snap "$ROLLBACK_TO" \
+  '{deploy_id:$id, action:$act, object:$obj, sha256:$sha, size:($sz|tonumber? // null), snapshot:$snap}')
 
 api() { # api <metode> <path> <body> -> body; gagal kalau http != 200
   local method=$1 path=$2 payload=$3 out code body
