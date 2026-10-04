@@ -660,7 +660,15 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   - [x] Runbook 9.6 sudah ada dan memadai. Status: DONE
   - [ ] Hapus binding `roles/iap.tunnelResourceAccessor` pada `pickertime-cd` — butuh persetujuan pemilik (perubahan IAM). Status: BLOCKED-user
   - [ ] Keputusan M5.4 (delete fine-grained PAT) — butuh keputusan pemilik. Status: BLOCKED-user
-- [ ] **P8** Bukti 8 hari bersih (T-14). Status: TODO (mulai setelah P4)
+- [ ] **P8** Bukti 8 hari bersih (T-14). Alat: `tools/deploy/pb-stability-check.sh`
+  (ukur `backup_umur_jam` < 26, `hasil_terendap` = 0, `health_http` = 200; append harian ke
+  `~/.local/state/pickertime-stability/p8.log`). Cron laptop `5 8 * * *` aktif 2026-10-04.
+  Day-0 (2026-10-04T14:08Z): `backup_umur_jam=0 hasil_terendap=0 health_http=200 STATUS=HIJAU`.
+  **Temuan di Day-0**: timer backup men-elapse Oct 4 03:25:45 UTC tanpa pernah men-start service
+  (nol jejak journal; satu-satunya perubahan sebelumnya = manual `systemctl start` Oct 3 14:56).
+  Mitigasi: timer di-`restart` (re-arm, 2026-10-04 14:06Z), backup manual menyegarkan `LAST_OK`,
+  dan gerbang umur-26-jam di alat deteksi otomatis kalau terulang Oct 5. Status: RUNNING
+  (selesai = 8 baris HIJAU berurutan di p8.log, target 2026-10-12)
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
