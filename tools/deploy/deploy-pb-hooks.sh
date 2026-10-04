@@ -46,8 +46,8 @@ manifest_local() {
     | xargs -0 sha256sum | awk '{print $1"\t"$2}')
 }
 manifest_remote() {
-  gssh "cd $REMOTE_APP && find pb_hooks pb_migrations -type f -print0 | sort -z \
-        | xargs -0 sha256sum | awk '{print \$1\"\\t\"\$2}'"
+  gssh "sudo sh -c 'cd $REMOTE_APP && find pb_hooks pb_migrations -type f -print0 | sort -z \
+        | xargs -0 sha256sum'" | awk '{print $1"\t"$2}'
 }
 
 MAN_L="$(mktemp)"; MAN_R="$(mktemp)"

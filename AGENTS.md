@@ -31,6 +31,29 @@ Sebelum memulai pengerjaan kode/bug:
 3. Gunakan PocketBase migrations (`pb_migrations/`) untuk migrasi skema yang reproduktif.
 4. Terapkan API Rules ketat berbasis `@request.auth.id` pada seluruh koleksi.
 
+### ⚠️ Invarian Kredensial Superuser PocketBase (M8.1)
+
+**Setelah `docker restart pickertime-pocketbase`, kredensial superuser = nilai env container.**
+
+Image `ghcr.io/muchobien/pocketbase:0.40.4` mencetak `Successfully saved superuser "…"!` pada
+**setiap** start, dan sumber nilainya adalah env **container** (`PB_ADMIN_EMAIL`, `PB_ADMIN_PASSWORD`),
+bukan file `.env` atau `superuser.txt` di host.
+
+**Implikasi untuk rotasi password**:
+- Nilai baru **WAJIB** masuk ke `--env-file` sebelum `docker run` ulang (atau update systemd service).
+- Kalau hanya diubah lewat API/dashboard PocketBase, restart berikutnya akan **menimpanya** dan
+  memutus semua alat yang memakai kredensial lama (backup script, smoke test, deploy hooks).
+
+**Bukti terukur** (temuan 2026-10-03):
+- Container env: `PB_ADMIN_PASSWORD len=48`
+- File `.env` + `superuser.txt`: `PB_ADMIN_PASSWORD len=24` (nilai lama, dipasang via API setelah start)
+- `mtime superuser.txt = Oct 2 11:37`, container start terakhir `Oct 2 04:34` → nilai 24 itu dipasang
+  **setelah** start, jadi hanya menang sampai restart berikutnya.
+- Backup putus secara diam-diam pada 2026-10-03 karena password kembali ke nilai env container.
+
+**Aturan**: Jangan pernah `docker restart` manual tanpa membaca invariant ini. Kalau perlu rotasi
+password, ubah env container dulu, baru restart.
+
 ---
 
 ## 🦊 Git & GitHub Workflow (Pola Inafood)

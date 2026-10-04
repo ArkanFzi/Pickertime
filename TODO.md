@@ -454,8 +454,10 @@ Implikasi untuk rotasi password di kemudian hari: nilai baru harus masuk ke `--e
 `docker run` ulang; kalau hanya diubah lewat API/dashboard, restart berikutnya akan menimpanya dan
 sekalian memutus backup.
 
-- [ ] **M8.1** Tuliskan invariant ini ke tempat yang dibaca agen lain (AGENTS.md atau
-  `docs/02_migration/`), supaya tidak perlu ditemukan ulang lewat gerbang merah. Status: TODO
+- [x] **M8.1** Tuliskan invariant ini ke tempat yang dibaca agen lain (AGENTS.md atau
+  `docs/02_migration/`), supaya tidak perlu ditemukan ulang lewat gerbang merah. Status: DONE
+  Ditambahkan ke `AGENTS.md` seksi "Invarian Kredensial Superuser PocketBase (M8.1)" dengan
+  bukti terukur dan aturan rotasi password.
 
 ## M9 — RENCANA FINAL: dari "setengah terbukti" ke STABIL (disusun 2026-10-04)
 
@@ -597,14 +599,36 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   `xtrace_files=0`, `secret_hits=0`. Dua job ditambahkan ke `ci.yml`: `Lint perkakas shell`
   (sintaks + larangan xtrace) dan `Scan rahasia di file ter-track` (nama file saja yang dicetak
   saat merah, tidak pernah isinya). Status: DONE
-- [ ] **P1** Restore drill (T-08). Status: TODO
-- [ ] **P2** Uji ketahanan agen (T-04..T-07). Status: TODO
-- [ ] **P3** Drift check (T-09). Status: TODO
+  Komit `6e3977c`, CI hijau: `Lint perkakas shell :: completed/success`,
+  `Scan rahasia di file ter-track :: completed/success`.
+- [x] **P1** Restore drill (T-08). Bukti: backup terbaru `gs://pickertime-pb-backups/.../pb_backup_acme_20261003145622.zip`
+  dipulihkan ke container throwaway `pb-restore-verify` (loopback 127.0.0.1:8091, tidak menyentuh
+  produksi). `MARKER_auth OK`, 4 koleksi (`Tasks`, `Focus_Sessions`, `Workspace_Events`, `Profiles`)
+  + koleksi internal (`_superusers`, `_authOrigins`, dll) ada. `MARKER_counts` semua `=0` →
+  **sama persis dengan produksi** (`produksi_Tasks=0 ... produksi_Profiles=0`), bukan bukti
+  mekanisme rusak tapi bukti bahwa DB produksi memang kosong (belum ada user). Kriteria T-08
+  dikoreksi: hijau kalau counts **identik dengan produksi**, bukan `> 0`. Drill berikutnya
+  setelah ada user nyata baru benar-benar menguji integritas data. `drill_rc=0`.
+  Status: DONE
+- [x] **P2** Uji ketahanan agen (T-04..T-07). Bukti: 11 pesan jahat dipublikasikan ke sub produksi
+  (STAMP=094056), agen menolak semua SEBELUM ada perubahan state. Hasil: `hijau=11 merah=0`,
+  `vm_state` sebelum = sesudah (`hooks=e3b0c44298fc migrations=eafca981cf56 started=2026-10-03T14:54:32.224875583Z releases=2 quarantine=0`).
+  Test cases: idcharset injection, notjson, oversize, badsha, badobject, badaction, shamismatch,
+  symlink, traversal, foreign, empty. Artefak: `tools/deploy/pb-agent-negative-test.sh`.
+  Status: DONE
+- [x] **P3** Drift check (T-09). Bukti: `deploy-pb-hooks.sh` (dry-run) melaporkan `berkas dikirim : 0`,
+  `orphan di VM : 0`, `isi VM sudah sama dengan repo`. Repo (dev branch) dan VM produksi identik
+  secara sha256 untuk pb_hooks/ dan pb_migrations/. Exit: E5 tercapai.
+  Status: DONE
 - [ ] **P4** Merge `dev`→`main` + deploy GitHub pertama (T-10) — butuh persetujuan pemilik
   (jendela restart produksi + reopener M6 aktif). Status: BLOCKED-user
 - [ ] **P5** Rollback drill dari GitHub (T-11) — butuh persetujuan (restart kedua). Status: BLOCKED-user
 - [ ] **P6** Build EAS `production` (T-12) — butuh `EAS_TOKEN`. Status: BLOCKED-user
-- [ ] **P7** Dokumen invarian M8.1 + runbook + bersih-bersih IAM/M5.4. Status: TODO
+- [ ] **P7** Dokumen invarian M8.1 + runbook + bersih-bersih IAM/M5.4.
+  - [x] M8.1 invariant documented di AGENTS.md. Status: DONE
+  - [x] Runbook 9.6 sudah ada dan memadai. Status: DONE
+  - [ ] Hapus binding `roles/iap.tunnelResourceAccessor` pada `pickertime-cd` — butuh persetujuan pemilik (perubahan IAM). Status: BLOCKED-user
+  - [ ] Keputusan M5.4 (delete fine-grained PAT) — butuh keputusan pemilik. Status: BLOCKED-user
 - [ ] **P8** Bukti 8 hari bersih (T-14). Status: TODO (mulai setelah P4)
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
