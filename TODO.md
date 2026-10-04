@@ -669,6 +669,25 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   Mitigasi: timer di-`restart` (re-arm, 2026-10-04 14:06Z), backup manual menyegarkan `LAST_OK`,
   dan gerbang umur-26-jam di alat deteksi otomatis kalau terulang Oct 5. Status: RUNNING
   (selesai = 8 baris HIJAU berurutan di p8.log, target 2026-10-12)
+- [x] **P9** E1 ditutup nyata: `deploy.yml` tereksekusi otomatis di GitHub pada `main`
+  dan agen membalas `applied`. Bukti dari log job run `37209210419` (event=push, run_number=4,
+  `completed/success`, 14:25:31Z→14:26:49Z = 78 s):
+  - `deploy_id=run-37209210419-5788455b action=apply object=inbox/run-37209210419-5788455b.tar
+    sha256=0faf99d2bb6c1443f1f7b2082678713800359ac35820915c3cf68d9035e4026e size=51200 byte`
+  - `terunggah gs://pickertime-pb-deploys/inbox/run-37209210419-5788455b.tar (md5+size terverifikasi)`
+  - `pesan perintah: 22252339652764166` → `hasil: deploy_id=run-37209210419-5788455b
+    status=applied message=health+anon-401+superuser+4 koleksi hijau` (61 s sesudah publish,
+    sesuai siklus timer agen 60 s)
+  Dua iterasi perbaikan diperlukan, dan keduanya kegagalan nyata di pipa (bukan drama):
+  1. run `37208528460` (PR #3): `invalid_grant` — workflow mengirim `audience: <nama resource>`
+     tanpa prefiks, provider hanya menerima bentuk `//iam.googleapis.com/<nama resource>`.
+  2. run `37209048585` (PR #4): `invalid_grant` — default `google-github-actions/auth` mengirim
+     `https://iam.googleapis.com/...` (satu garis + skema), yang oleh STS dianggap berbeda dari
+     nilai `//iam.googleapis.com/...` di `allowedAudiences`. Penutup di PR #5: audience ditulis
+     eksplisit `//iam.googleapis.com/${{ env.WIF_PROVIDER }}`; tidak ada perubahan IAM GCP.
+  Catatan: run ini menyentuh produksi (restart container + gerbang), artefaknya identik isi
+  dengan yang sudah terpasang, sehingga `applied` tanpa perubahan byte; drift check P3 tetap 0.
+  Exit: E1 terpenuhi. Status: DONE
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
@@ -708,3 +727,14 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   rahasiakan lewat **stdin/pipe** ke `grep -f -` (bukan `-F "$VAL"`), atau bandingkan
   `sha256sum` nilai lokal dengan hash yang sudah tercatat. Aturan ini juga berlaku untuk
   `set -x` (H4) — dua-duanya adalah cara "mengukur" yang justru menggandakan kebocoran.
+- [ ] **H9** Klaim tentang konfigurasi cloud di komentar/narasi WAJIB diverifikasi dengan
+  `describe` keluaran penuh, dan pembacaan alat harus dicek bentuknya. Pelajaran E1 (2026-10-04):
+  komentar `deploy.yml` menulis "provider mengunci allowedAudiences ke nama sumber dayanya sendiri"
+  tanpa menyebut *bentuk string*-nya; `gcloud ... providers describe --format='json(allowedAudiences)'`
+  saya mengembalikan `[]` (field itu bersarang di bawah `oidc`, bukan di root) sehingga saya menyimpulkan
+  "kosong = semua audiens boleh" — simpulan yang salah dan membakar 2 run produksi-gagal
+  (`37208528460`, `37209048585`). Describe tanpa `--format` menunjukkan nilai sebenarnya:
+  `//iam.googleapis.com/...` (dua garis), sedangkan default `google-github-actions/auth` mengirim
+  `https://iam.googleapis.com/...`. STS membandingkan secara literal, bukan setelah normalisasi URI.
+  Aturan: (a) jangan filter field sebelum paham skema resource-nya; (b) setiap asumsi yang jadi
+  penyebab kegagalan pipeline ditulis kembali sebagai komentar yang menyebut nilai persisnya.
