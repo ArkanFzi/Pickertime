@@ -31,6 +31,42 @@ jobs:
       - name: Auto-Verify (AGENTS.md mewajibkan tsc --noEmit)
         run: npm run typecheck
 
+  tool-lint:
+    name: Lint perkakas shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Syntax check semua skrip ter-track
+        run: |
+          n=0; bad=0
+          while IFS= read -r f; do
+            n=$((n+1)); bash -n "$f" || { echo "SINTAKS_BURUK $f"; bad=$((bad+1)); }
+          done < <(git ls-files '*.sh')
+          echo "shell_files=$n syntax_bad=$bad"
+          [ "$bad" -eq 0 ] || exit 1
+
+      - name: Gerbang H4 - tidak ada xtrace yang bisa mencetak kredensial
+        run: |
+          files=$(git ls-files '*.sh' | xargs -r grep -lE \
+            '^[[:space:]]*set[[:space:]]+-[a-z]*x|set[[:space:]]+-o[[:space:]]+xtrace' || true)
+          hits=$(printf '%s' "$files" | grep -c . || true)
+          echo "xtrace_files=$hits"
+          [ "$hits" -eq 0 ] || { echo "DILARANG: set -x di blok yang menyentuh kredensial (TODO.md H4)"; exit 1; }
+
+  secret-scan:
+    name: Scan rahasia di file ter-track
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cari pola kredensial nyata (nama file saja, isi tidak dicetak)
+        run: |
+          pat='AIza[0-9A-Za-z_-]{20,}|gsk_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|gho_[A-Za-z0-9]{30,}|cfut_[A-Za-z0-9_-]{10,}'
+          hits=$(git grep -I -l -E "$pat" -- . | wc -l)
+          echo "secret_hits=$hits"
+          [ "$hits" -eq 0 ] || { git grep -I -l -E "$pat" -- .; echo "DITEMUKAN kandidat rahasia di file ter-track"; exit 1; }
+
   schema:
     name: Skema PocketBase + hook AI
     runs-on: ubuntu-latest

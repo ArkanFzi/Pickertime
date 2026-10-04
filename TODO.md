@@ -457,6 +457,156 @@ sekalian memutus backup.
 - [ ] **M8.1** Tuliskan invariant ini ke tempat yang dibaca agen lain (AGENTS.md atau
   `docs/02_migration/`), supaya tidak perlu ditemukan ulang lewat gerbang merah. Status: TODO
 
+## M9 — RENCANA FINAL: dari "setengah terbukti" ke STABIL (disusun 2026-10-04)
+
+Aturan seksi ini sama dengan sisa TODO: **satu item baru dianggap selesai kalau ada artefak angka**.
+"Rasanya sudah stabil" bukan bukti. Semua angka di 9.1 saya ukur sendiri hari ini.
+
+### 9.1 Basis terukur (yang jadi asumsi seluruh plan)
+
+- `main` tertinggal: `main_behind=24` commit; `pb_hooks/ai_proxy.pb.js` di `main` = `8fc2f64c45e8`
+  sedangkan `dev` **dan VM produksi** = `68c72075d898` → `main` bukan cuma tua, ia *tidak*
+  mewakili apa yang sedang melayani trafik.
+- `deploy.yml` **belum pernah jalan dan belum terdaftar**: `3_workflow_terdaftar=CI` (id 372777714),
+  `4_deploy_yml_di_main=0`. GitHub hanya mendaftarkan workflow yang ada di default branch (`main`).
+- Sumber daya pull-deploy (nama sebenarnya, dibaca dari
+  `tools/deploy/pickertime-pb-agent.sh:19` dan `tools/deploy/publish-pb-deploy.sh:23-24`):
+  topic `pickertime-pb-deploy`, sub `pickertime-pb-deploy-to-vm` (`ackDeadline=600`,
+  retensi default 7 hari), results topic `pickertime-pb-deploy-results`,
+  sub `pickertime-pb-deploy-results-to-gha` (`ackDeadline=120`).
+- Kesehatan host: `df /` = `99G 35G 60G 37%`; container `pickertime-pocketbase`
+  `restarts=0 started=2026-10-03T14:54:32Z`; `pickertime-pb-backup.timer`
+  `enabled` + `active`.
+- Alat yang sudah ada dan bisa dipakai untuk uji: `tools/backup/pb-restore-verify.sh`
+  (throwaway PocketBase di `127.0.0.1:8091`, baris 24-27 — tidak menyentuh container produksi),
+  `tools/pb/pb-prod-smoke.mjs`, `tools/pb/pb-compat-test.mjs`, `tools/pb/pb-schema-verify.mjs`,
+  `tools/deploy/deploy-pb-hooks.sh` (jalur SSH dari laptop, masih berguna untuk drift check).
+- `eas.json` sudah punya profil `production` (`EXPO_PUBLIC_PB_URL=https://api.elarisnoir.my.id`,
+  `autoIncrement: true`) **tetapi `submit.production` = `{}`** (kosong) dan `eas-cli` tidak
+  terpasang di laptop (`npx --no-install eas --version` → npm error).
+- `package.json` scripts hanya `start|android|ios|web|typecheck` → **tidak ada satu pun jalur
+  uji runtime otomatis** di repo selain `typecheck`.
+- CI hari ini (`ci.yml`): `typecheck`, `schema` (bangkitkan PocketBase 0.40.4 + `pb-schema-verify`),
+  `guard-main`. **Tidak** ada lint untuk `tools/**.sh` dan tidak ada pemindaian rahasia, jadi
+  cacat H4 (`set -x`) dan kebocoran M6 bisa berulang tanpa ada yang mencegah.
+- Cekukan `deploy.yml` yang benar-benar mengunci ref: `assertion.ref=='refs/heads/main'` +
+  `assertion.actor=='ArkanFzi'` → workflow tidak akan pernah bisa diuji dari branch/PR lain,
+  dan hanya bisa dijalankan oleh akun kamu. Tidak ada jalan pintas uji; satu-satunya uji nyata
+  adalah merge ke `main`.
+
+### 9.2 Definisi SELESAI / STABIL (exit criteria, semua wajib hijau)
+
+- **E1** `deploy.yml` tereksekusi di GitHub pada `main` dengan hasil `completed/success`
+  dan agen VM membalas `status=applied` — satu kali, nyata.
+- **E2** Rollback teruji lewat jalur GitHub (`workflow_dispatch action=rollback`), VM kembali ke
+  sha snapshot, dan sha pasca-rollback dibalik-baca identik.
+- **E3** Uji ketahanan agen: 4 pesan rusak/berbahaya ditolak SEBELUM ada perubahan state
+  (artefak oversize, entri `../`, symlink/direktori di tar, `deploy_id` iseng) — semua
+  `status=failed` dengan `lsapp_change=none`.
+- **E4** Restore drill dijalankan nyata: backup terbaru dari GCS → instance throwaway →
+  `MARKER_auth OK` + hitungan 4 koleksi > 0, tanpa menyentuh container produksi.
+- **E5** Drift nol terukur dua arah (repo `main` vs isi VM) dengan alat, bukan ingatan.
+- **E6** Build EAS profil `production` dari `main` menghasilkan artefak AAB yang bisa dipasang;
+  `EXPO_PUBLIC_PB_URL` terverifikasi menunjuk `https://api.elarisnoir.my.id`.
+- **E7** Gerbang pencegahan di CI: job lint `tools/**/*.sh` (`bash -n` + larang `set -x`) dan
+  job `secret-scan` aktif serta hijau.
+- **E8** Delapan hari berikutnya bersih: backup harian `LAST_OK` maju tiap hari, tidak ada
+  `status=failed` yang mengendap di `$STATE_DIR`, dan satu smoke read-only hijau.
+
+Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil".
+
+### 9.3 Fase
+
+- **P0 — Perkuat gerbang sebelum menyentuh produksi** (agen, tanpa risiko). Tambah 2 job di
+  `ci.yml`: `tool-lint` (`bash -n` semua `tools/**/*.sh`, plus grep `set -x` sebagai pelanggaran
+  H4) dan `secret-scan` (pola dari `docs/10-github-history-purge.md:35` di atas `git grep` HEAD).
+  Exit: E7 dengan `CI :: completed/success`.
+- **P1 — Restore drill** (agen, VM, hanya container throwaway). Jalankan
+  `tools/backup/pb-restore-verify.sh` via IAP. Exit: E4. Catatan jujur yang harus ikut tercatat:
+  backup yang diambil *sebelum* rekonsiliasi M8 akan gagal di `MARKER_auth` (password lama),
+  jadi kalau ini merah, itu bukan bukti backup rusak — itu bukti restore point-nya pra-M8.
+- **P2 — Uji ketahanan agen** (agen, aman). Empat pesan jahat dipublikasikan ke sub produksi;
+  validasi agen (`pickertime-pb-agent.sh`) terjadi SEBELUM gerbang pra-pasang dan sebelum rsync,
+  jadi state VM tidak tersentuh. Exit: E3.
+- **P3 — Drift check jadi alat, bukan catatan** (agen). `deploy-pb-hooks.sh` (mode default, tanpa
+  `--apply`) dipakai sebagai pembaca drift repo↔VM; output `berkas dikirim : 0` = nol drift.
+  Exit: E5.
+- **P4 — Merge `dev`→`main` pertama = deploy GitHub pertama** (butuh keputusan pemilik).
+  Ini satu-satunya cara memenuhi E1. Yang terjadi nyata: PR → required checks
+  `Type-check` + `Skema PocketBase + hook AI` → merge → `deploy.yml` teregistrasi lalu jalan →
+  artefak dari `main` (konten identik dengan yang sudah terpasang di VM, lihat 9.1) →
+  agen melakukan `docker restart` → **gangguan `api.elarisnoir.my.id` beberapa detik**.
+  Rollback kalau merah: sudah terbukti otomatis (M4.3) + manual lewat `workflow_dispatch`.
+  Exit: E1.
+- **P5 — Rollback drill dari GitHub** (butuh keputusan pemilik, karena restart lagi).
+  `workflow_dispatch action=rollback snapshot=<deploy_id P4>`. Exit: E2.
+- **P6 — Sisi mobile** (butuh pemilik: `EAS_TOKEN`). `eas build --profile production --platform
+  android` dari `main`; lalu keputusan terpisah soal `submit` (`submit.production` masih `{}`,
+  butuh service key Play Console). Exit: E6, membuka M4.4/M4.5.
+- **P7 — Tutup tagihan dokumen & kebersihan** (agen). M8.1 (invarian superuser-env ditulis ke
+  tempat yang dibaca agen lain), catatan runbook 9.6, hapus binding
+  `roles/iap.tunnelResourceAccessor` pada `pickertime-cd` yang tersisa dari jalur SSH yang
+  ditinggalkan (butuh persetujuan pemilik karena ini perubahan IAM), dan keputusan M5.4.
+
+### 9.4 Matriks uji (yang diterima sebagai bukti = keluaran perintah, bukan narasi)
+
+| id | uji | perintah | hijau kalau |
+|----|-----|----------|-------------|
+| T-01 | lint shell alat | `for f in tools/**/*.sh; do bash -n $f; done` | rc=0 semua, jumlah file dicatat |
+| T-02 | anti `set -x` (H4) | `grep -rn "set -x" tools/ */**` | 0 |
+| T-03 | scan rahasia | pola `docs/10-github-history-purge.md:35` di `git grep -I HEAD` | 0 |
+| T-04 | artefak oversize | publikasi `size` > 20 MiB | `status=failed`, tidak ada rsync |
+| T-05 | pathTraversal | tar berisi `pb_hooks/../../etc/x` | `arsip mengandung path berisiko` |
+| T-06 | symlink/direktori | tar dengan entri `l`/`d` | `arsip mengandung direktori/symlink/device` |
+| T-07 | `deploy_id` iseng | `run-1;rm -rf /` | penolakan charset sebelum apa pun |
+| T-08 | restore drill | `pb-restore-verify.sh` | `MARKER_auth OK` + `MARKER_counts` > 0 |
+| T-09 | drift | `deploy-pb-hooks.sh` mode default | `sudah sama dengan repo`, `rc=0` |
+| T-10 | deploy nyata | merge `main` | `status=applied`, sha tetap, CI success |
+| T-11 | rollback nyata | `workflow_dispatch` rollback | `status=rolled_back`, sha snapshot |
+| T-12 | build production | `eas build --profile production` | artefak AAB + URL unduhan |
+| T-13 | smoke produksi | `pb-prod-smoke.mjs https://api.elarisnoir.my.id` | `SMOKE PASS`, `rows left … :: 0` |
+| T-14 | 8 hari bersih | readback timer/backup/state | `LAST_OK` maju harian, tanpa `failed` |
+
+### 9.5 Batas jujur (agar "stabil" tidak dibaca lebih dari yang diuji)
+
+- Satu VM, satu container: **SPOF**. Tidak ada failover; stabilitas = stabilitas satu host.
+- RPO backup harian = hingga 24 jam data hilang; RTO belum terukur sampai T-08 selesai.
+- `deploy` **bukan** required check di proteksi `main` → deploy merah tidak memblokir merge.
+  Konsekuensi harus diketahui, bukan dikira aman.
+- Tunnel `api.elarisnoir.my.id` masih punya 520 laten terukur 1/475 (~0,2%, lihat M7.2);
+  perbaikan buffer hanya terbukti menghilangkan peringatan log, bukan menghilangkan 520.
+- `pb-prod-smoke.mjs` menulis lalu menghapus baris nyata di produksi; bukan alat untuk dipanggil
+  berulang tanpa sadar (retry transien sudah ada, tapi副作用-nya tetap ada).
+- Kredensial git yang dipakai untuk P4 adalah token yang keputusannya "risiko diterima" (M6).
+  Reopener M6 eksplisit menyebut operasi tulis ke `main` → keputusan itu berlaku lagi di P4.
+
+### 9.6 Runbook kalau P4/P5 merah
+
+1. Baca hasil: `deploy_id` di `$STATE_DIR/result.json` VM (atau log publisher di Actions).
+2. Kalau `status=failed` dan pesan berisi `gerbang merah SEBELUM ada perubahan` → state VM tidak
+   tersentuh; perbaiki penyebab (kredensial/skema), ulangkan, jangan rollback.
+3. Kalau `failed` setelah pasang → agen sudah `restore()` dari `.deploy-baseline.tar`; verifikasi
+   sha + `/api/health`, baru publish ulang.
+4. Karantina hasil rollback ada di `pb_hooks.rolledback-<id>` — hapus hanya setelah
+   `sudo diff -rq` identik dengan `app/`.
+5. Jangan pernah `docker restart` manual tanpa membaca M8: password superuser ikut berputar.
+
+### 9.7 Eksekusi fase (di-update sepanjang sesi; bukti per fase)
+
+- [x] **P0** Gerbang CI baru. Bukti dry-run lokal sebelum push: `shell_files=7 syntax_bad=0`,
+  `xtrace_files=0`, `secret_hits=0`. Dua job ditambahkan ke `ci.yml`: `Lint perkakas shell`
+  (sintaks + larangan xtrace) dan `Scan rahasia di file ter-track` (nama file saja yang dicetak
+  saat merah, tidak pernah isinya). Status: DONE
+- [ ] **P1** Restore drill (T-08). Status: TODO
+- [ ] **P2** Uji ketahanan agen (T-04..T-07). Status: TODO
+- [ ] **P3** Drift check (T-09). Status: TODO
+- [ ] **P4** Merge `dev`→`main` + deploy GitHub pertama (T-10) — butuh persetujuan pemilik
+  (jendela restart produksi + reopener M6 aktif). Status: BLOCKED-user
+- [ ] **P5** Rollback drill dari GitHub (T-11) — butuh persetujuan (restart kedua). Status: BLOCKED-user
+- [ ] **P6** Build EAS `production` (T-12) — butuh `EAS_TOKEN`. Status: BLOCKED-user
+- [ ] **P7** Dokumen invarian M8.1 + runbook + bersih-bersih IAM/M5.4. Status: TODO
+- [ ] **P8** Bukti 8 hari bersih (T-14). Status: TODO (mulai setelah P4)
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan
