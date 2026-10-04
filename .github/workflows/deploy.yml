@@ -61,10 +61,11 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.SERVICE_ACCOUNT }}
           token_format: access_token
-          # `audience` sengaja tidak diset: default action adalah
-          # //iam.googleapis.com/<WIF_PROVIDER>, dan itulah satu-satunya nilai yang
-          # diizinkan provider (allowedAudiences). Mengirim audience tanpa prefiks
-          # //iam.googleapis.com/ membuat STS menolak dengan invalid_grant.
+          # Provider mengunci allowedAudiences ke `//iam.googleapis.com/<WIF_PROVIDER>`
+          # (DUA garis). Default action mengirim `https://iam.googleapis.com/<...>` yang
+          # dianggap STS berbeda, jadi audience harus ditulis eksplisit:
+          # //iam.googleapis.com/ agar token GitHub diterima.
+          audience: //iam.googleapis.com/${{ env.WIF_PROVIDER }}
 
       - name: Terbitkan perintah dan tunggu hasil agen
         env:
