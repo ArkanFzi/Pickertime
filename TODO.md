@@ -854,15 +854,18 @@ rusak justru setelah kodenya diperbaiki.
 - Alur dua tahap sudah dijalankan: PR #12 → `dev` (`feade67`), lalu PR #13 → `main` (`a1ef8c7`) dan
   deploy produksi (11.4). Sisa dari jalur itu: **dev build berikutnya belum dipasang ulang di ponsel**,
   jadi pengukuran ulang di perangkat dilakukan melawan bundel Metro yang di-hot-reload (M11.5), bukan
-  melawan APK baru.
+  melawan APK baru. Konsekuensi yang perlu diingat untuk F-29/F-30: perbaikannya kode JS, jadi sudah
+  terbukti jalan lewat Metro, tapi klien yang terpasang di ponsel masih memuat bundel lama begitu sesi
+  Metro berhenti — alarm tetap memakai `trigger.identifier` yang diabaikan sampai bundelnya dikirim ulang.
 - Build ulang perangkat dibutuhkan untuk benar-benar melepas `expo-calendar` dan entri manifest
   `READ_CALENDAR`/`WRITE_CALENDAR`; probe sesi ini masih mencatat kedua izin itu pada build terpasang,
   jadi F-06 tetap baru terbukti di lapisan kode.
 - F-05, F-07, F-22 (dua arah), F-06/F-27, F-08, F-28 dan F-25 **sudah diukur ulang di ponsel** — lihat
   M11.5. Yang masih menunggu perangkat: suite alarm A-1…A-7 (notifikasi benar-benar bunyi) dan
   F-16 (tombol no-op) yang belum punya rute sendiri.
-- Perbaikan F-29/F-30 (`d290161`, branch `fix/alarm-armed-readback`) belum lewat PR ke `dev` pada saat
-  catatan ini ditulis.
+- Perbaikan F-29/F-30 (`d290161`, branch `fix/alarm-armed-readback`) sudah lewat alur dua tahap penuh:
+  PR #16 → `dev` (`c626111`), catatan produksi lewat PR #17 → `dev` (`23feffb`), lalu `dev` → `main`
+  lewat PR #18 (`8739515`). Tidak ada branch yang dihapus, sesuai permintaan.
 - Pesan commit `6343fd3` salah ketik ("diperkubarnisasi", seharusnya "direpolarisasi"). Dibiarkan karena
   aturan repo: tidak amend commit yang sudah ada tanpa diminta.
 - Pesan commit `71dbefe` salah ketik juga ("10/menik", seharusnya "10/menit"). Sama alasannya.
@@ -888,6 +891,14 @@ rusak justru setelah kodenya diperbaiki.
   `Profiles.createRule` kosong (publik, memang untuk signup) dan empat rule lainnya `id = @request.auth.id`.
   `jumlah koleksi di server: 10`, `health 200`. Jadi `1790909800_ownership_create_rule.js` benar-benar
   sampai ke `pb_migrations` di VM — lubang F-03 tertutup di produksi, bukan hanya di backend uji.
+- **Merge berikutnya sengaja tidak men-deploy apa pun (terukur 2026-10-07 14:49Z)**: PR #18 membawa delta
+  `dev` → `main` yang seluruhnya `TODO.md` + `lib/notifications.ts` — empat path filter `deploy.yml`
+  (`pb_hooks/**`, `pb_migrations/**`, `tools/deploy/**`, file workflow itu sendiri) tidak ada yang
+  tersentuh. Buktinya `gh run list --workflow deploy.yml` sesudah merge masih menampilkan
+  `37628720967` sebagai run terakhir, dan satu-satunya run untuk commit `8739515` adalah CI
+  (`37639958321`, enam job hijau termasuk `main hanya hasil merge PR`). Baca-saja sesudahnya:
+  `GET /api/health` = `200`, `POST /api/ai/gemini` tanpa token = `401 "The request requires valid
+  record authorization token."` — VM tidak berubah dan hook lama masih hidup.
 
 ## M11.5 — Verifikasi ulang M11 di perangkat (2026-10-07 malam, ponsel yang sama)
 
