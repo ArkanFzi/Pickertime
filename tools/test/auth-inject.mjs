@@ -2,6 +2,8 @@
 // Menyuntik sesi login ke AsyncStorage dev build lewat `adb shell run-as`,
 // karena MIUI V12 menolak INJECT_EVENTS sehingga form login tidak bisa diketik.
 // Hanya menyentuh dev build + PocketBase lokal; ditolak kalau URL produksi.
+// Butuh node >= 22.5 untuk `node:sqlite` — node 18 menolak flag-nya dengan
+// "node: bad option: --experimental-sqlite" sebelum skrip ini sempat bicara.
 import { execFileSync, spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'

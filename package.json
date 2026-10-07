@@ -14,6 +14,7 @@
     "test:findings": "node tools/test/findings.mjs",
     "test:ai-proxy": "node tools/test/ai-proxy.mjs",
     "test:device:up": "bash tools/test/device-up.sh",
+    "test:device:routes": "bash tools/test/device-routes.sh",
     "test:probe": "bash tools/test/device-probe.sh",
     "test:bundle": "node tools/test/bundle-url.mjs",
     "test:auth:inject": "node --experimental-sqlite tools/test/auth-inject.mjs"

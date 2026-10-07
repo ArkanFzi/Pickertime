@@ -79,5 +79,16 @@ try {
 check(`port Metro ${METRO_PORT}`, portFree || metroLive,
   portFree ? 'bebas' : metroLive ? 'sudah ada Metro berjalan (dipakai ulang)' : 'dipakai proses lain — jangan pindah port tanpa mengubah adb reverse')
 
+// Port di host bisa hijau padahal ponsel tidak menjangkau apa pun: aturan adb reverse
+// gugur setiap re-enumerasi USB (sering terjadi di perangkat ini), jadi isi daftarnya
+// yang harus diperiksa, bukan hanya proses di host.
+const pbHostPort = new URL(PB_TEST_URL).port
+let reverse = ''
+try { reverse = execFileSync(ADB, ['reverse', '--list'], { encoding: 'utf8' }) } catch {}
+check('adb reverse aktif (Metro + PocketBase)',
+  reverse.includes(`tcp:${METRO_PORT}`) && reverse.includes('tcp:8090') && reverse.includes(`tcp:${pbHostPort}`),
+  reverse.trim().split('\n').filter(Boolean).join(' | ')
+    || `kosong — jalankan: adb reverse tcp:${METRO_PORT} tcp:${METRO_PORT} && adb reverse tcp:8090 tcp:${pbHostPort}`)
+
 console.log(failed === 0 ? 'PREFLIGHT LULUS' : `PREFLIGHT GAGAL (${failed})`)
 process.exit(failed === 0 ? 0 : 1)

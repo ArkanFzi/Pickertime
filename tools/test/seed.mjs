@@ -34,6 +34,14 @@ try {
 }
 const userId = pb.authStore.record.id
 
+// Idempoten: menjalankan seed dua kali tidak boleh menumpuk duplikat. Aman karena URL
+// produksi sudah ditolak di atas dan penghapusan dibatasi ke record milik akun seed ini.
+for (const col of ['Tasks', 'Focus_Sessions']) {
+  const existing = await pb.collection(col).getFullList({ filter: `user = "${userId}"` })
+  for (const rec of existing) await pb.collection(col).delete(rec.id)
+  console.log(`bersih ${col} :: ${existing.length} record lama dihapus`)
+}
+
 const at = (min) => new Date(Date.now() + min * 60000)
 const iso = (d) => d.toISOString()
 
