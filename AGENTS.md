@@ -65,12 +65,21 @@ password, ubah env container dulu, baru restart.
   tertulis: `enforce_admins=true`, `required_pull_request_reviews=0 approval`, required checks
   `Type-check` + `Skema PocketBase + hook AI`. Push langsung ditolak GitHub dengan
   `GH006: Changes must be made through a pull request`.
-  **Catatan jujur**: klaim "khusus untuk deploy backend ke GCP" belum punya pipa — satu-satunya
-  workflow di `.github/workflows/` adalah `ci.yml` (job `typecheck`, `schema`, `guard-main`),
-  tidak ada job deploy. Jalur produksi nyata sampai hari ini: PocketBase jalan di VM
-  (`api.elarisnoir.my.id`) dan aplikasi mobile memakai profil EAS. Lihat `TODO.md` M4.
+  **Koreksi catatan lama (terukur 2026-10-07)**: dulu ditulis bahwa satu-satunya workflow adalah
+  `ci.yml` dan "belum ada pipa deploy" — itu sudah tidak benar. `.github/workflows/` kini berisi
+  `ci.yml` **dan** `deploy.yml` ("Deploy backend PocketBase"): trigger `push` ke `main` dengan
+  **path filter** `pb_hooks/**`, `pb_migrations/**`, `tools/deploy/**`, dan file workflow itu sendiri
+  (+ `workflow_dispatch` untuk `apply`/`rollback`). Workflow ini tidak SSH ke VM; ia menerbitkan
+  perintah ke Pub/Sub dan agen root di VM yang memasang, restart, lalu membalas `applied`.
+  Bukti eksekusi nyata: run deploy `#4` pada sha `5788455` (2026-10-04T14:25:31Z, `completed success`,
+  `status=applied` — lihat `TODO.md` M9 P9). Konsekuensi penting: merge ke `main` yang **tidak**
+  menyentuh keempat path itu tidak men-deploy apa pun (terbukti lagi saat PR #9 merge 2026-10-07 dan
+  run deploy terakhir tetap `#4`). Job CI sekarang lima: `Type-check`, `Skema PocketBase + hook AI`,
+  `Lint perkakas shell`, `Scan rahasia di file ter-track`, `main hanya hasil merge PR`.
 - **Branch Tasks**: `feat/<nama-fitur>` atau `fix/<nama-bug>` (dibuat dari `dev`).
-- **Alur PR**: `feat/*` -> PR -> `dev` (staging) -> PR -> `main`.
+- **Alur PR**: `feat/*` -> PR -> `dev` (staging) -> PR -> `main`. WAJIB dua tahap — jangan buka PR
+  branch tugas langsung ke `main`. Pelajaran: PR #7 (`test/device-harness` -> `main`, 2026-10-07)
+  melompati `dev` sehingga `dev` tertinggal dari produksi sampai harus ditambal PR #8/#9.
 - **Tidak ada branch `production`**: cabang itu dihapus 2026-10-02 setelah kerja uniknya
   (`app/edit-task.tsx`) dilebur ke `dev` lewat PR #1; jaring pengaman ada di tag
   `archive/production-20260517` dan `docs/archive/production-20260517/`.
