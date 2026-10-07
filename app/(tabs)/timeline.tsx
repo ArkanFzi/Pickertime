@@ -8,17 +8,18 @@ import { useStore, CreateTaskPayload } from '@/store/useStore';
 import { Task } from '@/store/useStore';
 import { generateDailySchedule } from '@/lib/gemini';
 
+// Kunci = satu-satunya nilai select `Tasks.category` di snapshot skema (F-01).
 const CATEGORY_COLORS: Record<string, string> = {
   Work: '#00D4FF',
   Study: '#A78BFA',
   Health: '#34D399',
   Personal: '#F59E0B',
-  Creative: '#F87171',
-  School: '#60A5FA',
-  General: '#9CA3AF',
+  Other: '#F87171',
 };
 
-const FILTERS = ['All Tasks', 'Work', 'Study', 'Personal', 'Health'];
+const NEUTRAL_COLOR = '#9CA3AF';
+
+const FILTERS = ['All Tasks', 'Work', 'Study', 'Personal', 'Health', 'Other'];
 
 // Mock timeline for demo when no tasks
 const MOCK_TIMELINE: Array<{
@@ -36,7 +37,7 @@ const MOCK_TIMELINE: Array<{
 ];
 
 function TimelineTask({ item, onPress, onSmartAlarmPress }: { item: typeof MOCK_TIMELINE[0]; onPress?: () => void; onSmartAlarmPress?: () => void }) {
-  const color = CATEGORY_COLORS[item.task?.category || 'General'];
+  const color = CATEGORY_COLORS[item.task?.category || ''] || NEUTRAL_COLOR;
 
   if (item.type === 'done') {
     return (

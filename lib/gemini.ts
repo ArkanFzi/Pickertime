@@ -126,7 +126,7 @@ export async function generateDailySchedule(
     [
       { "title": "Short Task Name", "desc": "Short description", "duration": 60, "category": "Work" }
     ]
-    Duration must be an integer in minutes (e.g., 30, 60, 90). Category must be one of: Work, Study, Health, Personal, Creative.`;
+    Duration must be an integer in minutes (e.g., 30, 60, 90). Category must be one of: Work, Study, Health, Personal, Other.`;
 
     const result = await callGemini(prompt);
     const cleanJson = result.replace(/```json|```/g, '').trim();
