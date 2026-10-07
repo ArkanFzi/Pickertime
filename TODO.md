@@ -689,6 +689,86 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   dengan yang sudah terpasang, sehingga `applied` tanpa perubahan byte; drift check P3 tetap 0.
   Exit: E1 terpenuhi. Status: DONE
 
+## M10 — Harness uji perangkat (dev build) + temuan yang terbukti di perangkat (2026-10-07)
+
+Status: harness jalan dan repeatable; 7 temuan terbukti dengan keluaran perintah.
+**Perbaikan kode atas temuan ini BELUM satu baris pun dieksekusi** — akan disusun sebagai M11.
+
+### 10.1 Basis terukur
+
+- Perangkat: Xiaomi `M2006C3LG` (dandelion), Android 10 / **API 29**, MIUI `V12.0.15.0.QCDIDXM`.
+- Build terpasang: dev client `versionName=1.0.0`, `targetSdk=36`, flag `DEBUGGABLE`, install 2026-10-07 11:25.
+  Konsekuensi API 29: `SCHEDULE_EXACT_ALARM` (API 31+) **tidak** berlaku di sini — hipotesis awal saya salah.
+- Topologi: Metro host `:8083`; PocketBase uji = container `pt-pb-test`
+  (`ghcr.io/muchobien/pocketbase:0.40.4`, `127.0.0.1:8099->8090`, `pb_data` di
+  `~/.local/share/pickertime-test/pb_data`, `pb_hooks`+`pb_migrations` di-bind-mount dari repo);
+  `adb reverse tcp:8083 tcp:8083` dan `tcp:8090 tcp:8099`. Sisi ponsel selalu `127.0.0.1:<port>`
+  sehingga `.env` tidak perlu diubah walau port host berpindah (8090/8081/8082 sudah dipakai layanan lain).
+- Pembatas MIUI yang terukur (bukan asumsi):
+  - `adb shell input tap|swipe|keyevent` → `SecurityException: INJECT_EVENTS`.
+  - `adb shell pm clear <pkg>` → `SecurityException: CLEAR_APP_USER_DATA`.
+  - `adb shell uiautomator dump` → `ERROR: could not get idle state` (animasi `Animated.loop` di
+    `app/focus.tsx:63` membuat layar tidak pernah idle) → **screenshot adalah kanal assertion resmi di repo ini**.
+  - `settings get global adb_enabled` = `1` hanya membuktikan sakelar "Debugging USB" biasa; yang
+    dibutuhkan adalah **"Debugging USB (Setelan keamanan)"**.
+- Jalan tikus tanpa sentuh (semua non-privilege): build `DEBUGGABLE` → `adb shell run-as` →
+  tulis baris `pb_auth` ke `databases/RKStorage` (tabel `catalystLocalStorage`) pakai `node:sqlite`;
+  navigasi via `am start -a VIEW -d pickertime://<rute>`; layar hidup via `wm dismiss-keyguard`.
+
+### 10.2 Alat (`tools/test/`, semua menolak produksi)
+
+| perintah | fungsi | guard |
+|---|---|---|
+| `npm run test:preflight` | 8 gerbang lingkungan (adb state, `/data` free, dev-client terpasang, PB sehat, `.env` bukan produksi) | keluar bukan-0 sebelum apa pun jalan |
+| `npm run test:seed` | akun + 5 task + 1 sesi lewat **signup publik** | `if (/elarisnoir/.test(URL)) exit(1)` |
+| `npm run test:device:up` | preflight → reverse → Metro → deep link dev client | — |
+| `npm run test:probe <label>` | dump alarm/notifikasi/izin/pid/crash yang **difilter ke paket ini** | crash aplikasi lain tidak ikut tercatat |
+| `npm run test:enum` | kontrak enum UI vs snapshot skema `Tasks.category` | — |
+| `npm run test:findings` | bukti F-01/F-02/F-03 lintas akun | membersihkan baris yang dibuatnya |
+| `npm run test:ai-proxy` | 6 probe `/api/ai/gemini` | `exit(2)` kalau server belum punya `GEMINI_API_KEY` (anti false-green) |
+| `npm run test:bundle` | baca nilai env **yang ter-inline di bundle**, bukan grep URL | — |
+| `npm run test:auth:inject` | suntik sesi login ke dev build (pengganti mengetik) | `run-as` gagal kalau build bukan debuggable |
+
+### 10.3 Matriks temuan (bukti = keluaran perintah, bukan narasi)
+
+| id | klaim | cara bukti | hasil |
+|----|-------|-----------|-------|
+| F-01 | UI/prompt memakai kategori yang ditolak backend | `npm run test:enum` | `RED` di `app/(tabs)/schedule.tsx`, `app/edit-task.tsx`, `CATEGORY_COLORS` di `timeline.tsx`, prompt AutoPlan `lib/gemini.ts` (`Creative`/`School`/`General` tak ada). Catatan tambahan: `FILTERS` hijau tapi tidak memuat `Other` → task `Other` tak bisa difilter |
+| F-13/F-14 | proxy membocorkan pesan error upstream & tak membatasi panjang | `npm run test:ai-proxy` | merah; tipe payload **tidak** divalidasi (hipotesis awal saya soal ini salah dan sudah ditarik) |
+| F-19 | tipe rusak hanya saat rute bertipe dibuat | `npx tsc --noEmit` dengan vs tanpa `.expo/types/router.d.ts` | 1 error `components/ExternalLink.tsx:13` vs 0 error |
+| F-22 | chip "Smart Alarm set · 10 min before" tanpa alarm | `adb shell dumpsys alarm \| grep -c elarisnoir` = **0**, vs render无条件 `app/(tabs)/timeline.tsx:95-101` | kartu task tetap mengklaim alarm terpasang. `scheduleTaskNotification` hanya dipanggil `store/useStore.ts:166,190`; `syncUpdateTask` (≈:205) tidak pernah cancel/re-arm |
+| F-25 | kartu UPCOMING mengarang | `grep -n "Starts in 45m" app/(tabs)/index.tsx` → :206 literal di luar kondisional; :205 fallback `'Team Sync'` | terbukti dua arah: server mati → "Q3 Product Strategy"+"Team Sync"+"0 of 0 Done" tanpa state error; server hidup → task asli **tetap** ditulis "Starts in 45m" |
+| F-05 | timer focus bukan wall clock | screencap + epoch ms; `am start -n com.android.settings/.Settings` untuk background | foreground 35,6 s → 35 s layar (bersih); setelah 21,4 s background: harusnya 23:35, tampil **23:31→23:51** = **±16 s hilang**. Akar: `setInterval(p=>p-1)` `app/focus.tsx:70-86`. Turunan: `handleSessionComplete` menulis `duration_seconds: initialSeconds` (rencana, bukan nyata) → insights tak akan pernah akurat |
+| F-07 | guard auth cuma di satu titik | hapus baris `pb_auth` (setara logout), cold start mendarat benar di Welcome, lalu `am start -a VIEW -d pickertime://timeline` | **tembus**: layar terlindungi + tab bar ter-render tanpa redirect. `grep -rl Redirect app/` = 1 file (`app/index.tsx`); `(tabs)/_layout.tsx` dan `(auth)/_layout.tsx` tanpa guard. Bukan bocor data — API rules menolak, daftar kosong |
+| F-11 | empty state timeline | deep link saat logout | **LULUS** — "No Tasks Today" + Auto-Plan/Manual Entry wajar (dicatat agar tidak dikira bug) |
+
+### 10.4 Yang TIDAK teruji (jangan dibaca sebagai sudah aman)
+
+- Semua jalur yang butuh jari: form sign-in/sign-up, F-08 residu logout, F-16 tombol no-op,
+  dan suite alarm A-1…A-7 (termasuk apakah `scheduleNotificationAsync` benar-benar menghasilkan
+  alarm di MIUI, dan apakah ia bertahan setelah reboot).
+- Gate CI: `test:enum` dan `test:findings` **sengaja belum** dipasang di `.github/workflows/ci.yml`
+  karena keduanya merah sampai M11 masuk — memasangnya sekarang menjebol tiap PR.
+- F-06 kalender (izin diminta, tak pernah dipakai) — `pm grant` tersedia sebagai jalur uji, belum dijalankan.
+
+### 10.5 Batas jujur
+
+Satu perangkat, satu akun seed, satu sesi dev-build; angka drift diukur dari `screencap` + epoch host
+(granularitas ±1 s, bukan osiloscope). Tidak ada satu pun klaim di 10.3 yang berasal dari pembacaan
+kode saja — kecuali baris "akar" yang memang penunjuk lokasi, dan itu disebut sebagai kode, bukan hasil ukur.
+
+### 10.6 Koreksi diri selama sesi (biar tidak diulang)
+
+1. Dugaan "hook AI tak memvalidasi tipe payload" → **salah**, ditarik.
+2. Dugaan "server 0.40.4 menolak field `identify` yang dikirim SDK" → **salah**; SDK 0.26.9 mengirim
+   `identity` (`grep -o 'authWithPassword(.\{0,160\}' node_modules/pocketbase/dist/pocketbase.es.mjs`),
+   yang salah adalah skrip saya.
+3. Klaim "`scheduleTaskNotification` tidak pernah dipanggil" → **salah**; grep saya memakai
+   `--include` dengan filter folder sehingga `store/` tak ikut ter-scan. Sebelum menuduh kode mati,
+   scan dulu tanpa pembatas path.
+4. Layar "logged out + data mock" sempat saya baca sebagai hilangnya sesi; ternyata `pt-pb-test`
+   sudah `Exited (0)` 3 jam. Cek `docker ps -a` sebelum menyimpulkan aplikasi rusak.
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan
