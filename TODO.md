@@ -820,12 +820,12 @@ apa adanya dari keluaran alat (H1).
 | F-13/F-14 | `ai_proxy.pb.js`: prompt wajib string, batas 4.000 karakter (413), kegagalan upstream dibalas 502 generik (detail vendor hanya ke log server), jendela tetap 10 request/menit per akun lewat `$app.store()` | `b518e48` | `npm run test:ai-proxy` vs backend uji: `error upstream (HTTP 502) tidak menyebut detail vendor`, `prompt 200.000 karakter -> HTTP 413 dalam 9ms`, `prompt bertipe objek -> HTTP 400`, `12 request paralel dari 1 akun baru -> 10 lolos, 2 ditahan HTTP 429 dalam 109ms`. Gerbang yang sama dijalankan melawan hook **sebelum** perbaikan (container buang di 127.0.0.1:8096, `git show b518e48^:pb_hooks/ai_proxy.pb.js`): `4 masalah pada jalur proxy AI terkonfirmasi` — jadi hijaunya tidak vacuous |
 | F-01 | `CATEGORIES`, `CATEGORY_COLORS`, `FILTERS` (termasuk `Other`) dan prompt AutoPlan disamakan ke select `Tasks.category`; satu daftar dipakai bersama lewat `lib/taskContract.ts` | `8c08aa8` | `npm run test:enum` → 6 sumber `GREEN`, keluaran penutup `Semua sumber cocok dengan skema.`; `test:findings` → `GREEN F-01 category "Creative" ditolak HTTP 400` |
 | F-19 | `components/ExternalLink.tsx` memakai tipe `href` yang ikut `Link` | `80a2202` | `npx tsc --noEmit` exit 0 dengan **dan** tanpa `.expo/types/router.d.ts` (dulu 1 error) |
-| F-28 | Kegagalan AI mengembalikan `null`, bukan teks yang menyamar sebagai output AI; `tasksError` masuk state dan dibaca banner; AutoPlan berhenti menulis task karangan | `1d44fc8` | `store/useStore.ts:334` (`set({ tasksError: 'Daftar tugas gagal dimuat dari server. Isi yang tampil bisa basi.' })`), `lib/gemini.ts` 9 cabang `return null`. Sisi layar (banner benar-benar tampil) belum diukur di perangkat |
+| F-28 | Kegagalan AI mengembalikan `null`, bukan teks yang menyamar sebagai output AI; `tasksError` masuk state dan dibaca banner; AutoPlan berhenti menulis task karangan | `1d44fc8` | `store/useStore.ts:334` (`set({ tasksError: 'Daftar tugas gagal dimuat dari server. Isi yang tampil bisa basi.' })`), `lib/gemini.ts` 9 cabang `return null`. Banner terukur tampil di perangkat saat backend dimatikan, dan sisa layar tetap jujur (M11.5) |
 | F-25 | kartu NEXT BEST ACTION / UPCOMING dihitung dari task nyata (judul, durasi, kategori, countdown dari data) | `d834d79` | `grep -rn "Starts in 45m\|Team Sync" app/` → 1 hasil, dan itu **komentar** di `app/(tabs)/timeline.tsx:25` yang menjelaskan karangan yang sudah dihapus; tidak ada lagi literal di JSX |
-| F-22 (+F-08) | `syncTaskAlarm` dipanggil ulang saat jadwal berubah; chip hanya boleh bilang "Smart Alarm set" kalau id ada di `getAllScheduledNotificationsAsync()` (`listArmedAlarmTaskIds`), selain itu "Alarm diminta, tapi belum terdaftar di HP"; state dibersihkan saat logout | `36277ce` | `app/(tabs)/timeline.tsx:38,106-108` dan `store/useStore.ts:171`. **Bukti OS-nya (`dumpsys alarm`) belum bisa diulang** — adb masih `no permissions`, jadi klaim "alarm benar-benar bunyi" tetap terbuka (A-1…A-7) |
-| F-05 | timer fokus dibaca dari jam dinding (`deadlineRef` vs `Date.now()`), sesi menulis durasi nyata bukan rencana, End Early tetap mencatat sesi | `cc06e42` | `app/focus.tsx:49,61,69,94`; `tsc` exit 0 dan `npx expo export --platform android` exit 0. Drift ±16 s yang jadi bukti temuan **belum diukur ulang** di perangkat |
-| F-07 | guard login dipindah ke `app/_layout.tsx`: rute di luar `(auth)` dan bukan index akar → `<Redirect href="/(auth)/welcome" />` | `8534ec3` | `grep -rl Redirect app/` = `app/index.tsx` + `app/_layout.tsx`. Semantik `useSegments` dibuktikan dari sumber, bukan tebakan: `node_modules/expo-router/build/global-state/routeInfo.js` menyusun `segments` dari `route.name.split('/')` (token grup **tetap ada**) dan menyaring `(…)` hanya untuk `pathname`. Deep link `pickertime://timeline` belum dijalankan ulang di ponsel |
-| F-06 + F-27 | `requestCalendarPermissions()` dan `requestDNDPermissions()` (isinya `return true`) dihapus; layar izin tinggal satu item wajib, hasil izin dibaca sungguh: denial memunculkan banner + tombol "Try Again", "nanti" tidak lagi berpura-pura sukses, preview "Team Sync" dikarang-dikarang dihapus | `0d7437d` | `grep -rn "expo-calendar\|Calendar\." app lib store` → **0**; `grep -rn "requestDNDPermissions" app lib store` → 1 hasil, komentar di `app/(auth)/permissions.tsx:14`. Batas jujur: `expo-calendar` masih ada di `package.json:28` dan entri `READ_CALENDAR`/`WRITE_CALENDAR` baru hilang dari manifest setelah **build ulang**, jadi bukti ini lapisan kode — bukan APK |
+| F-22 (+F-08) | `syncTaskAlarm` dipanggil ulang saat jadwal berubah; chip hanya boleh bilang "Smart Alarm set" kalau id ada di `getAllScheduledNotificationsAsync()` (`listArmedAlarmTaskIds`), selain itu "Alarm diminta, tapi belum terdaftar di HP"; state dibersihkan saat logout | `36277ce` | `app/(tabs)/timeline.tsx:38,106-108` dan `store/useStore.ts:171`. ~~Bukti OS-nya belum bisa diulang~~ — **diganti**: `dumpsys alarm` terukur di perangkat dan sisi positifnya menemukan cacat baru (F-29/F-30, lihat M11.5) |
+| F-05 | timer fokus dibaca dari jam dinding (`deadlineRef` vs `Date.now()`), sesi menulis durasi nyata bukan rencana, End Early tetap mencatat sesi | `cc06e42` | `app/focus.tsx:49,61,69,94`; `tsc` exit 0 dan `npx expo export --platform android` exit 0. Drift diukur ulang di perangkat: 38 s layar vs ±37 s jam dinding → **±1 s** (M11.5) |
+| F-07 | guard login dipindah ke `app/_layout.tsx`: rute di luar `(auth)` dan bukan index akar → `<Redirect href="/(auth)/welcome" />` | `8534ec3` | `grep -rl Redirect app/` = `app/index.tsx` + `app/_layout.tsx`. Semantik `useSegments` dibuktikan dari sumber, bukan tebakan: `node_modules/expo-router/build/global-state/routeInfo.js` menyusun `segments` dari `route.name.split('/')` (token grup **tetap ada**) dan menyaring `(…)` hanya untuk `pathname`. Deep link `pickertime://timeline` **sudah** dijalankan di ponsel dalam keadaan logout: mendarat di Welcome tanpa tab bar (M11.5). Catatan: guard mengembalikan `<Redirect>` alih-alih `<Stack>`, jadi saat cabangnya diambil dari jalur logout/sign-in konsol mencatat `ERROR The action 'REPLACE' … was not handled by any navigator` |
+| F-06 + F-27 | `requestCalendarPermissions()` dan `requestDNDPermissions()` (isinya `return true`) dihapus; layar izin tinggal satu item wajib, hasil izin dibaca sungguh: denial memunculkan banner + tombol "Try Again", "nanti" tidak lagi berpura-pura sukses, preview "Team Sync" dikarang-dikarang dihapus | `0d7437d` | `grep -rn "expo-calendar\|Calendar\." app lib store` → **0**; `grep -rn "requestDNDPermissions" app lib store` → 1 hasil, komentar di `app/(auth)/permissions.tsx:14`. Batas jujur: `expo-calendar` masih ada di `package.json:28` dan entri `READ_CALENDAR`/`WRITE_CALENDAR` baru hilang dari manifest setelah **build ulang** — probe perangkat sesi ini masih mencatat kedua izin itu, jadi bukti ini tetap lapisan kode, bukan APK (layarnya sendiri sudah terukur, M11.5) |
 | F-02 | `lib/taskContract.ts`: `taskPayloadError` + `createTaskBatch` (tolak seluruh batch sebelum baris pertama bila ada payload haram; batalkan baris yang terlanjur tertulis bila server gagal). Server tidak punya transaksi untuk record user — `/api/batch` dijawab `403 "Batch requests are not allowed"` (terukur), jadi rollback klien adalah plafon jujur | `60c5cdd`, `6343fd3` | `npm run test:batch` → 8 assertion `GREEN` (F-02a…F-02h), penutup `Batch tulis task tidak meninggalkan baris yatim.`; `test:findings` dengan penulis PocketBase asli → `GREEN F-02 batch ditolak tanpa baris yatim — Task 5 dari 5 ditolak sebelum ditulis` |
 | F-03 | migrasi `1790909800_ownership_create_rule.js`: `createRule = '@request.auth.id != "" && user = @request.auth.id'` untuk `Tasks`, `Focus_Sessions`, `Workspace_Events` | `018f669` | Di backend uji (8099) **dan** di container yang dibangun segar dari `pb_migrations` (8097, `docker run` lalu `seed.mjs`): `GREEN F-03 penulisan atas nama user lain ditolak HTTP 400`; `pb-schema-verify` → `other sees 0 tasks; tulis atas nama user lain HTTP 400; own profile readable=true`. Lubangnya pernah dibuka lagi di server buang dan verifier langsung jadi MERAH |
 | CI | job baru `contract` (`test:enum` + `test:batch`); langkah "Bukti temuan device harness sudah tertutup" (`seed.mjs` + `findings.mjs`) di job `schema`; node `'20'`→`'22'` mengikuti `.nvmrc`; `findings.mjs` direpolarisasi (temuan tertutup = GREEN, keluar 0) | `396115b` | Run PR #12 `37627652192`: `Type-check pass 28s`, `Skema PocketBase + hook AI pass 33s`, `Kontrak enum + batch tulis task pass 24s`, `Lint perkakas shell pass 5s`, `Scan rahasia di file ter-track pass 5s`, `main hanya hasil merge PR skipping` |
@@ -852,14 +852,17 @@ rusak justru setelah kodenya diperbaiki.
 ### 11.3 Yang masih menggantung
 
 - Alur dua tahap sudah dijalankan: PR #12 → `dev` (`feade67`), lalu PR #13 → `main` (`a1ef8c7`) dan
-  deploy produksi (11.4). Yang tersisa dari jalur itu cuma konsekuensinya: **dev build berikutnya
-  belum dipasang ulang di ponsel**, jadi belum ada satu pun klaim M11 yang diukur ulang di perangkat.
+  deploy produksi (11.4). Sisa dari jalur itu: **dev build berikutnya belum dipasang ulang di ponsel**,
+  jadi pengukuran ulang di perangkat dilakukan melawan bundel Metro yang di-hot-reload (M11.5), bukan
+  melawan APK baru.
 - Build ulang perangkat dibutuhkan untuk benar-benar melepas `expo-calendar` dan entri manifest
-  `READ_CALENDAR`/`WRITE_CALENDAR`; sampai sekarang F-06 hanya terbukti di lapisan kode.
-- Semua bukti yang butuh ponsel (F-05 drift, F-07 deep link, F-22 `dumpsys alarm`, F-06/F-27 dialog
-  sistem, F-08 residu logout, F-16 tombol no-op, F-28 banner, suite alarm A-1…A-7) menunggu dua
-  blokir lingkungan: izin USB adb (udev/plugdev) dan sakelar MIUI "Debugging USB (Setelan keamanan)".
-  Pengganti yang dipakai sesi ini: `npx expo export --platform android` (exit 0) sebagai smoke test bundel.
+  `READ_CALENDAR`/`WRITE_CALENDAR`; probe sesi ini masih mencatat kedua izin itu pada build terpasang,
+  jadi F-06 tetap baru terbukti di lapisan kode.
+- F-05, F-07, F-22 (dua arah), F-06/F-27, F-08, F-28 dan F-25 **sudah diukur ulang di ponsel** — lihat
+  M11.5. Yang masih menunggu perangkat: suite alarm A-1…A-7 (notifikasi benar-benar bunyi) dan
+  F-16 (tombol no-op) yang belum punya rute sendiri.
+- Perbaikan F-29/F-30 (`d290161`, branch `fix/alarm-armed-readback`) belum lewat PR ke `dev` pada saat
+  catatan ini ditulis.
 - Pesan commit `6343fd3` salah ketik ("diperkubarnisasi", seharusnya "direpolarisasi"). Dibiarkan karena
   aturan repo: tidak amend commit yang sudah ada tanpa diminta.
 - Pesan commit `71dbefe` salah ketik juga ("10/menik", seharusnya "10/menit"). Sama alasannya.
@@ -884,6 +887,83 @@ rusak justru setelah kodenya diperbaiki.
   masuk ke `_superusers` lalu `GET /api/collections/Tasks` (dan dua koleksi lainnya) — nilai yang diharapkan
   `@request.auth.id != "" && user = @request.auth.id`. Jangan taruh password di argumen perintah (H8);
   lewatkan lewat stdin/variabel env yang tidak dicetak.
+
+## M11.5 — Verifikasi ulang M11 di perangkat (2026-10-07 malam, ponsel yang sama)
+
+Dua blokir lingkungan di 11.3 ternyata bukan blokir: `adb` tinggal `kill-server && start-server`
+(daemon lama dipasang sebelum grup `plugdev`; tidak ada sudo yang dipakai) dan sakelar MIUI
+"Debugging USB (Setelan keamanan)" sudah nyala. Perangkat `5TXK5DNF4XNJVSZD`, bundel disajikan Metro
+di 8083, backend uji `pt-pb-test` di 8099 lewat `adb reverse tcp:8090 tcp:8099`.
+
+**Gotcha perkakas yang mahal**: `adb shell input tap` **tidak** memicu `onPress` di layar ini (RN
+menolak sentuh 0 ms; `uiautomator dump` pun gagal `could not get idle state` karena animasi glow).
+`adb shell input swipe X Y X Y 150` selalu jalan. Semua langkah di bawah memakai bentuk itu.
+Kesalahan kedua: mengira tombol mati padahal koordinat dikira dari tampilan — screenshot 720×1600 itu
+1:1 dengan ruang sentuh, jadiukur batasnya dari piksel (PIL), bukan dari mata.
+
+| temuan | yang diukur di perangkat | hasil |
+|--------|--------------------------|-------|
+| F-07 | cold start dalam keadaan logout, lalu `am start -a VIEW -d "pickertime://timeline"` | mendarat di Welcome, tanpa tab bar, tanpa error konsol (`m11-16`) |
+| F-08 | logout dari Profile → baca `databases/RKStorage` lewat `run-as` + `node:sqlite` | `catalystLocalStorage` **0 kunci** (pb_auth hilang); login balik lewat UI menulis `pb_auth len=585` — simetris |
+| F-22 (sisi negatif) | Timeline sesudah cold start dengan task seed yang trigger-nya sudah lewat | chip amber "Alarm diminta, tapi belum terdaftar di HP", `dumpsys alarm \| grep -c elarisnoir` = 0 — chip tidak lagi mengaku |
+| F-22 (sisi positif) | buat task 22:00 dari layar Create Task (slot disarankan diterapkan) | `RTC_WAKEUP … tag=*walarm*:expo.modules.notifications.NOTIFICATION_EVENT when=2026-10-07 21:50:00.000` (= 10 menit sebelum, persis), hitungan alarm 0→2, chip jadi "Smart Alarm set · 10 min before" (`m11-27`) |
+| F-05 | timer fokus 24:58, tekan HOME, 30 s latar, bring-to-front (+4 s) | layar 24:20 → delta layar 38 s vs delta jam dinding ±37 s, **drift ±1 s** (dulu 16 s hilang dari 21 s) |
+| F-06/F-27 | `pickertime://permissions` | satu item wajib + copy jujur ("Without this permission the alarm stays listed on the task but never sounds"); switch mati lalu "Enable Selected Access" → ke dashboard **tanpa** klaim sukses (cabang sadar `app/(auth)/permissions.tsx:47-51`) |
+| F-28 | `docker stop pt-pb-test` lalu cold start | banner amber "Daftar tugas gagal dimuat dari server. Isi yang tampil bisa basi." + tombol "Coba lagi"; sisanya jujur: "No tasks yet", "0 of 0 Done", "Nothing scheduled" — tidak ada teks yang menyamar sebagai output AI (`m11-40`) |
+| F-28 pulih | "Coba lagi" sesudah container jalan lagi | banner hilang, 4 task kembali, "Overdue 6m" → "Overdue 8m" dihitung ulang; greeting masih "there" (profile tidak ikut dimuat ulang) |
+| F-25 | kartu Next Up saat cold start | "Kerjakan slide laporan / uji A-1/A-2: notifikasi tepat waktu / 25 mins · Work" — judul, durasi, kategori semuanya data nyata |
+| suite | `npm run test:device:routes` | `semua 11 rute hidup tanpa crash` (PID 12582 konstan, kolom CRASH 0 di sebelas baris) |
+| suite | `npm run test:probe m11-verifikasi-perangkat` | `tools/test/tmp/probe-20261007T142948Z-m11-verifikasi-perangkat.txt`; masih mencatat `READ_CALENDAR`/`WRITE_CALENDAR` pada build terpasang → bukti 11.3 (butuh build ulang) tetap berlaku |
+
+### F-29 dan F-30: perbaikan F-22 saya sendiri cacat, dan perangkat yang membuktikan
+
+Sisi positif F-22 pertama kali gagal: alarm **sudah** terdaftar di OS (2 di `dumpsys alarm`) tapi chip
+tetap amber. Bentuk balikan `getAllScheduledNotificationsAsync()` diukur dengan log sementara
+(`ARMED_RAW`, sudah dihapus):
+
+```json
+{"content":{"data":{"type":"smart-alarm","taskId":"uddwrkhr2l7kqs2"}, "...":"…"},
+ "trigger":{"channelId":null,"repeats":false,"value":1791384600000,"type":"date"},
+ "identifier":"9769403f-8580-404e-bb0b-71adcb902cba"}
+```
+
+- **F-29** — `listArmedAlarmTaskIds()` membaca `n?.request?.trigger?.identifier` padahal tiap item array
+  **sudah** berupa `NotificationRequest` (`.request` hanya ada di `NotificationResponse`). Hasilnya selalu
+  `[]`, jadi chip sisi positif tidak mungkin pernah hijau. Perbaikan M11 menukar kebohongan dengan
+  false-negative.
+- **F-30** — `identifier` dikirim **di dalam** `trigger`; field yang benar ada di tingkat request
+  (`NotificationRequestInput.identifier`), jadi expo menyimpan UUID sendiri. `cancelScheduledNotificationAsync(task.id)`
+  tidak pernah membatalkan apa pun — alarm task yang diedit/dihapus tetap menyala.
+
+Keduanya ditutup di `d290161` (branch `fix/alarm-armed-readback`): identifier pindah ke tingkat request,
+kunci baca-ulang jadi `content.data.taskId ?? identifier` (menangguhkan alarm build lama yang ber-UUID),
+dan `cancelTaskNotification` memindai daftar OS lalu membatalkan per identifier asli.
+Bukti sesudah perbaikan, satu sesi yang sama: chip hijau (`m11-27`), lalu hapus task dari Edit Task →
+alarm hilang dari registry expo dan **titik biru di lonceng Timeline ikut hilang** (`m11-34`) — jalur
+pembatalan alarm UUID terbukti, bukan hanya dibaca dari kode.
+
+### Batas baru yang terukur (jangan dibaca sebagai "alarm dijamin bunyi")
+
+`am force-stop` menghapus alarm dari AlarmManager (hitungan 2→0, terukur) **tetapi**
+`getAllScheduledNotificationsAsync()` tetap melaporkan request-nya, jadi chip bisa bilang
+"Smart Alarm set" padahal OS tidak akan pernah menyalakannya. Sumber kebenaran chip adalah registry
+expo, bukan AlarmManager; di MIUI penghentian paksa/pembersihan latar adalah kejadian biasa.
+Yang masih terbuka: A-1…A-7 (notifikasi benar-benar bunyi tepat waktu) dan jadwal ulang alarm setelah
+proses dibunuh — keduanya butuh perubahan kode, bukan hanya pengukuran.
+
+### Temuan kosmetik/baru kecil dari sesi perangkat ini
+
+- Banner `tasksError` posisinya absolute di atas header, jadi menutupi "Good Evening, …" dan avatar
+  (`m11-40`); isinya benar, layout-nya menimpa.
+- Copy UI campur bahasa di jalur tulis task: `app/(tabs)/schedule.tsx:203,208` dan
+  `app/edit-task.tsx:169,173,180,192` ("✅ Tersimpan", "Hapus Tugas", "Gagal Menghapus") padahal
+  seluruh layar lain berbahasa Inggris.
+- Badge "98% Match" di `app/(tabs)/schedule.tsx:329` adalah literal tetap — tidak dihitung dari data apa
+  pun; satu keluarga dengan F-25 (klaim bergaya AI yang tidak punya dasar).
+- Swipe untuk menggulir layar Create/Edit Task lewat `RadialTimePicker` ikut memutar dial
+  (Duration 60 m → 120 m terukur di `m11-32`). Gotcha perkakas: jangan mulai swipe di area dial.
+- `adb shell input text` tidak men-dekode `%20` jadi spasi — judul task uji terbaca
+  `Uji%20F-22%20alarm%20nyata`. Kesalahan pemanggil, bukan aplikasi.
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
