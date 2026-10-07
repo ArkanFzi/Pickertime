@@ -26,8 +26,10 @@ mkdir -p tools/test/tmp
   "$ADB" shell dumpsys package "$PKG" 2>/dev/null | grep -A12 "runtime permissions" || echo "(paket belum terpasang)"
   echo "## pid proses"
   "$ADB" shell pidof "$PKG" || echo "(tidak berjalan)"
-  echo "## crash buffer"
-  "$ADB" logcat -d -b crash -t 40 2>/dev/null | tail -20 || true
+  echo "## crash buffer (difilter ke paket ini)"
+  # Buffer crash menyimpan korban aplikasi lain juga; tanpa filter, artefak kita
+  # terisi crash Google Play Wallet seminggu lalu.
+  "$ADB" logcat -d -b crash 2>/dev/null | grep -iE "${PKG}|ReactNative" | tail -20 || echo "(tidak ada crash untuk paket ini)"
 } >"$OUT" 2>&1
 
 echo "tersimpan: $OUT"
