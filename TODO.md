@@ -851,10 +851,9 @@ rusak justru setelah kodenya diperbaiki.
 
 ### 11.3 Yang masih menggantung
 
-- Push branch + PR ke `dev` dulu (aturan dua tahap di `AGENTS.md`), baru `dev` → `main`.
-  Merge ke `main` **menyentuh produksi**: branch ini mengubah `pb_hooks/**` dan `pb_migrations/**`,
-  yang masuk path filter `deploy.yml`, dan `createRule` baru harus benar-benar sampai ke
-  `pb_migrations` di VM. Butuh konfirmasi eksplisit sebelum itu.
+- Alur dua tahap sudah dijalankan: PR #12 → `dev` (`feade67`), lalu PR #13 → `main` (`a1ef8c7`) dan
+  deploy produksi (11.4). Yang tersisa dari jalur itu cuma konsekuensinya: **dev build berikutnya
+  belum dipasang ulang di ponsel**, jadi belum ada satu pun klaim M11 yang diukur ulang di perangkat.
 - Build ulang perangkat dibutuhkan untuk benar-benar melepas `expo-calendar` dan entri manifest
   `READ_CALENDAR`/`WRITE_CALENDAR`; sampai sekarang F-06 hanya terbukti di lapisan kode.
 - Semua bukti yang butuh ponsel (F-05 drift, F-07 deep link, F-22 `dumpsys alarm`, F-06/F-27 dialog
@@ -863,6 +862,28 @@ rusak justru setelah kodenya diperbaiki.
   Pengganti yang dipakai sesi ini: `npx expo export --platform android` (exit 0) sebagai smoke test bundel.
 - Pesan commit `6343fd3` salah ketik ("diperkubarnisasi", seharusnya "direpolarisasi"). Dibiarkan karena
   aturan repo: tidak amend commit yang sudah ada tanpa diminta.
+- Pesan commit `71dbefe` salah ketik juga ("10/menik", seharusnya "10/menit"). Sama alasannya.
+
+### 11.4 Dipasang ke produksi (terukur 2026-10-07 13:28Z)
+
+- PR #13 `release/m11-ke-main` di-merge → `main` = `a1ef8c7`. Sebelum merge, CI PR #13
+  (run `37628504831`) sudah hijau lima-limanya.
+- `deploy.yml` run `37628720967`, job `pb_hooks + pb_migrations ke VM` selesai 33 s. Baris hasilnya:
+  `deploy_id=run-37628720967-a1ef8c74 status=applied message=health+anon-401+superuser+4 koleksi hijau`;
+  artifact `inbox/run-37628720967-a1ef8c74.tar` 51200 byte `sha256=df278fd0…eba4`; dua isi yang relevan
+  `pb_hooks/ai_proxy.pb.js c45c05d7…` dan `pb_migrations/1790909800_ownership_create_rule.js bf61426d…`.
+  Satu pesan lama ditinggal sesuai desain publisher: `hasil lain ditinggal (bukan deploy_id ini): deploy-20261004T102947Z:failed`.
+- Baca-saja dari host sesudah pasang: `GET /api/health` = `200`; `POST /api/ai/gemini` tanpa token =
+  `401 {"data":{},"message":"The request requires valid record authorization token."}` — jadi hook baru
+  hidup dan `requireAuth` masih yang pertama menolak.
+- Gerbang agen ikut memeriksa **superuser** setelah restart dan hijau: itu bukti tidak langsung bahwa
+  invarian M8.1 (kredensial superuser = env container) tidak pecah, dan jalur backup tidak putus diam-diam.
+- **Yang belum terbukti di produksi**: string `createRule` yang tersimpan di `Tasks`, `Focus_Sessions`,
+  `Workspace_Events`. Semua alat di repo ini sengaja menolak URL produksi (`if (/elarisnoir/.test(URL)) exit(1)`)
+  dan membacanya butuh kredensial superuser, jadi ini jalurnya kamu. Bentuknya cukup satu request baca-saja:
+  masuk ke `_superusers` lalu `GET /api/collections/Tasks` (dan dua koleksi lainnya) — nilai yang diharapkan
+  `@request.auth.id != "" && user = @request.auth.id`. Jangan taruh password di argumen perintah (H8);
+  lewatkan lewat stdin/variabel env yang tidak dicetak.
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
