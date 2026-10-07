@@ -23,13 +23,34 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - run: npm ci
 
       - name: Auto-Verify (AGENTS.md mewajibkan tsc --noEmit)
         run: npm run typecheck
+
+  contract:
+    name: Kontrak enum + batch tulis task
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # tools/test/task-batch.mjs mengimpor lib/taskContract.ts langsung, butuh node
+          # >= 22.18 (type stripping); .nvmrc mengunci 22.23.2.
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Nilai kategori UI/AI harus ada di select Tasks.category (F-01)
+        run: npm run test:enum
+
+      - name: Batch tulis task tidak boleh meninggalkan baris yatim (F-02)
+        run: npm run test:batch
 
   tool-lint:
     name: Lint perkakas shell
@@ -89,7 +110,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - run: npm ci
@@ -100,6 +121,13 @@ jobs:
           PB_SU_PASSWORD: ci-only-password-123
           CI_SHA: ${{ github.sha }}
         run: node tools/pb/pb-schema-verify.mjs http://127.0.0.1:8090 "ci-$CI_SHA"
+
+      - name: Bukti temuan device harness sudah tertutup (F-01 F-02 F-03)
+        env:
+          PB_TEST_URL: http://127.0.0.1:8090
+        run: |
+          node tools/test/seed.mjs
+          node tools/test/findings.mjs
 
       - name: Log PocketBase saat gagal
         if: failure()

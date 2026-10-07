@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Animated,
+  View, Text, TouchableOpacity, StyleSheet, Animated, AppState,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,18 +37,39 @@ export default function FocusScreen() {
   const [timeLeft, setTimeLeft] = useState(initialSeconds);
   const [isRunning, setIsRunning] = useState(true);
   const [shieldOn, setShieldOn] = useState(true);
-  const [sessionNum, setSessNum] = useState(2);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const breatheAnim = useRef(new Animated.Value(0.8)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
 
+  // Timer dihitung dari batas waktu di jam dinding, bukan dari berapa kali setInterval
+  // sempat jalan: saat aplikasi masuk latar, interval ditahan sistem dan timer lama
+  // kehilangan detik secara diam-diam (F-05, terukur 16s hilang dari 21s).
+  const deadlineRef = useRef(Date.now() + initialSeconds * 1000);
+  const pausedRemainingRef = useRef(initialSeconds);
+  const sessionLoggedRef = useRef(false);
+
   const size = 280;
   const radius = 130;
   const circumference = 2 * Math.PI * radius;
   const progressPct = timeLeft / initialSeconds;
   const strokeOffset = circumference * (1 - progressPct);
+
+  function remainingNow(): number {
+    if (!isRunning) return pausedRemainingRef.current;
+    return Math.max(0, Math.round((deadlineRef.current - Date.now()) / 1000));
+  }
+
+  function toggleRunning() {
+    if (isRunning) {
+      pausedRemainingRef.current = remainingNow();
+      setIsRunning(false);
+    } else {
+      deadlineRef.current = Date.now() + pausedRemainingRef.current * 1000;
+      setIsRunning(true);
+    }
+  }
 
   useEffect(() => {
     Animated.parallel([
@@ -69,38 +90,61 @@ export default function FocusScreen() {
 
   useEffect(() => {
     if (isRunning) {
-      intervalRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(intervalRef.current!);
-            handleSessionComplete();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+      const tick = () => {
+        const left = Math.max(0, Math.round((deadlineRef.current - Date.now()) / 1000));
+        setTimeLeft(left);
+        if (left === 0) handleSessionComplete();
+      };
+      tick();
+      intervalRef.current = setInterval(tick, 1000);
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isRunning]);
 
-  async function handleSessionComplete() {
-    if (!user) return;
+  // Bangun kembali dari latar: koreksi tampilan sebelum interval berikutnya.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && isRunning) {
+        setTimeLeft(remainingNow());
+      }
+    });
+    return () => sub.remove();
+  }, [isRunning]);
+
+  async function logFocusSession(elapsedSeconds: number, completed: boolean) {
+    if (!user || elapsedSeconds < 1 || sessionLoggedRef.current) return;
+    sessionLoggedRef.current = true;
     await pb.collection('Focus_Sessions').create({
       user: user.id,
       task: activeTask?.id || null,
-      duration_seconds: initialSeconds,
-      completed: true,
+      // Durasi yang benar-benar berjalan, bukan durasi yang direncanakan.
+      duration_seconds: elapsedSeconds,
+      completed,
     });
-    
-    // Trigger workspace event
-    await triggerWorkspaceEvent('SESSION_COMPLETE');
-
-    // Navigate back or to a success screen
-    router.replace('/(tabs)/insights');
   }
 
+  async function handleSessionComplete() {
+    try {
+      await logFocusSession(initialSeconds, true);
+      await triggerWorkspaceEvent('SESSION_COMPLETE');
+      router.replace('/(tabs)/insights');
+    } catch (err) {
+      console.warn('Sesi fokus gagal dicatat:', err);
+    }
+  }
+
+  async function handleEndEarly() {
+    const elapsed = initialSeconds - remainingNow();
+    try {
+      await logFocusSession(elapsed, false);
+      await triggerWorkspaceEvent('STOP_FOCUS');
+    } catch (err) {
+      console.warn('Sesi fokus gagal dicatat:', err);
+    }
+    router.back();
+  }
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
@@ -127,7 +171,9 @@ export default function FocusScreen() {
       {/* Task Info */}
       <Animated.View style={[styles.taskInfo, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
         <View style={styles.sessionBadge}>
-          <Text style={styles.sessionBadgeText}>Session {sessionNum} of 4</Text>
+          <Text style={styles.sessionBadgeText}>
+            {activeTask ? `${activeTask.duration_minutes}-min block · ${activeTask.category}` : '25-min block · Free focus'}
+          </Text>
         </View>
         <Text style={styles.taskName}>
           {activeTask?.title || 'Deep Work Block'}
@@ -192,7 +238,7 @@ export default function FocusScreen() {
       <View style={styles.controls}>
         <TouchableOpacity
           style={styles.controlBtn}
-          onPress={() => setIsRunning(!isRunning)}
+          onPress={toggleRunning}
           activeOpacity={0.8}
         >
           <View style={styles.controlIcon}>
@@ -205,7 +251,7 @@ export default function FocusScreen() {
 
         <TouchableOpacity
           style={styles.controlBtn}
-          onPress={() => router.back()}
+          onPress={handleEndEarly}
           activeOpacity={0.8}
         >
           <View style={[styles.controlIcon, styles.stopIcon]}>

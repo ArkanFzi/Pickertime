@@ -5,13 +5,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '@/store/useStore';
 import { pb } from '@/lib/pocketbase';
+import { cancelAllTaskNotifications } from '@/lib/notifications';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, profile, setUser, setProfile } = useStore();
+  const { user, profile, setUser, setProfile, setTasks, refreshArmedAlarms } = useStore();
   const insets = useSafeAreaInsets();
 
-  function handleLogout() {
+  async function handleLogout() {
+    // Sisa akun lama tidak boleh tinggal di HP: alarm yang sudah dijadwalkan dan
+    // daftar task di store harus ikut dibersihkan (F-08).
+    await cancelAllTaskNotifications();
+    await refreshArmedAlarms();
+    setTasks([]);
     pb.authStore.clear();
     setUser(null);
     setProfile(null);

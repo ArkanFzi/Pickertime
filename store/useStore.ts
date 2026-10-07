@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import { AuthModel } from 'pocketbase';
+import { AuthModel, RecordModel } from 'pocketbase';
 import { pb } from '@/lib/pocketbase';
-import { scheduleTaskNotification } from '@/lib/notifications';
+import { scheduleTaskNotification, cancelTaskNotification, listArmedAlarmTaskIds } from '@/lib/notifications';
+import { createTaskBatch, type TaskWriter, type TaskWritePayload } from '@/lib/taskContract';
 
 export type UserRole = 'Student' | 'Professional' | 'Freelancer' | 'Creator' | 'Researcher' | string;
 export type EnergyPref = 'Morning' | 'Afternoon' | 'Night Owl';
@@ -32,19 +33,23 @@ export interface Task {
 }
 
 // ─── Payload types untuk fungsi sinkronisasi ────────────────────────────────
-export interface CreateTaskPayload {
-  user: string;
-  title: string;
-  description?: string;
-  category: string;
-  priority: 'High' | 'Medium' | 'Low';
-  start_time?: string;
-  end_time?: string;
-  duration_minutes: number;
-  is_completed?: boolean;
-  has_alarm?: boolean;
-  alarm_minutes_before?: number;
-}
+// Bentuknya tinggal di lib/taskContract supaya yang dipakai UI, AutoPlan, dan gate
+// tools/test adalah tipe yang sama.
+export type CreateTaskPayload = TaskWritePayload;
+
+// Satu jalur tulis untuk task tunggal maupun batch — dua tempat yang sama-sama bisa
+// lupa memvalidasi adalah cara F-02 bertahan.
+const tasksWriter: TaskWriter<RecordModel> = {
+  create: (data) => pb.collection('Tasks').create(data),
+  remove: (id) => pb.collection('Tasks').delete(id),
+};
+
+const withTaskDefaults = (payload: CreateTaskPayload): CreateTaskPayload => ({
+  ...payload,
+  is_completed: payload.is_completed ?? false,
+  has_alarm: payload.has_alarm ?? true,
+  alarm_minutes_before: payload.alarm_minutes_before ?? 10,
+});
 
 interface AppState {
   // Auth
@@ -59,6 +64,17 @@ interface AppState {
   addTask: (task: Task) => void;
   updateTask: (id: string, updates: Partial<Task>) => void;
   toggleTask: (id: string) => void;
+
+  // Alarm yang benar-benar terdaftar di OS. Chip "Smart Alarm set" hanya boleh
+  // bicara kalau id task ada di daftar ini (F-22).
+  armedAlarms: string[];
+  refreshArmedAlarms: () => Promise<void>;
+
+  /**
+   * Samakan alarm OS dengan kondisi task sekarang: jadwalkan ulang kalau masih
+   * butuh alarm, batalkan kalau selesai/tanpa alarm/dihapus.
+   */
+  syncTaskAlarm: (task: Task) => Promise<void>;
 
   // ─── Fungsi Sinkronisasi Terpusat ────────────────────────────────────────
   // Setiap fungsi sync_ melakukan pemanggilan API PocketBase + update state
@@ -111,9 +127,11 @@ interface AppState {
   setIsRunning: (val: boolean) => void;
 
   /**
-   * Mengambil daftar task dari PocketBase untuk hari ini dan menyimpannya di Zustand
+   * Mengambil daftar task dari PocketBase untuk hari ini dan menyimpannya di Zustand.
+   * Kegagalan dicatat di `tasksError` supaya layar tidak diam-diam menampilkan data basi.
    */
   syncFetchTasks: () => Promise<void>;
+  tasksError: string | null;
 
   // Snooze analytics
   snoozeCount: number;
@@ -133,6 +151,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   // ─── Tasks (operasi lokal) ──────────────────────────────────────────────────
   tasks: [],
+  tasksError: null,
   setTasks: (tasks) => set({ tasks }),
   addTask: (task) => set((state) => ({ tasks: [task, ...state.tasks] })),
   updateTask: (id, updates) =>
@@ -146,24 +165,35 @@ export const useStore = create<AppState>((set, get) => ({
       ),
     })),
 
+  // ─── Alarm ──────────────────────────────────────────────────────────────────
+  armedAlarms: [],
+  refreshArmedAlarms: async () => {
+    set({ armedAlarms: await listArmedAlarmTaskIds() });
+  },
+
+  syncTaskAlarm: async (task) => {
+    if (task.has_alarm && !task.is_completed && task.start_time) {
+      await scheduleTaskNotification(task);
+    } else {
+      await cancelTaskNotification(task.id);
+    }
+    await get().refreshArmedAlarms();
+  },
+
   // ─── syncAddTask ────────────────────────────────────────────────────────────
   syncAddTask: async (payload) => {
-    // 1. Kirim ke server terlebih dahulu
-    const data = await pb.collection('Tasks').create({
-      ...payload,
-      is_completed: payload.is_completed ?? false,
-      has_alarm: payload.has_alarm ?? true,
-      alarm_minutes_before: payload.alarm_minutes_before ?? 10,
-    });
+    // 1. Validasi + tulis lewat jalur batch yang sama (task tunggal = batch isi satu)
+    const [data] = await createTaskBatch(tasksWriter, [withTaskDefaults(payload)]);
 
     const newTask = data as unknown as Task;
 
     // 2. Hanya jika server berhasil, perbarui state lokal
     set((state) => ({ tasks: [newTask, ...state.tasks] }));
 
-    // 3. Jadwalkan notifikasi lokal
+    // 3. Jadwalkan alarm lokal. Dulu dipanggil tanpa await, jadi kegagalannya
+    // tidak pernah sampai ke catch dan state alarm tidak pernah dibaca ulang.
     try {
-      scheduleTaskNotification(newTask);
+      await get().syncTaskAlarm(newTask);
     } catch (notifErr) {
       // Notifikasi gagal bukan alasan untuk gagalkan seluruh operasi
       console.warn('[syncAddTask] Failed to schedule notification:', notifErr);
@@ -174,27 +204,22 @@ export const useStore = create<AppState>((set, get) => ({
 
   // ─── syncAddMultipleTasks ───────────────────────────────────────────────────
   syncAddMultipleTasks: async (payloads) => {
-    const newTasks: Task[] = [];
-    
-    // Process sequentially to keep it simple, or Promise.all if supported by server
-    for (const payload of payloads) {
-      const data = await pb.collection('Tasks').create({
-        ...payload,
-        is_completed: payload.is_completed ?? false,
-        has_alarm: payload.has_alarm ?? true,
-        alarm_minutes_before: payload.alarm_minutes_before ?? 10,
-      });
-      const t = data as unknown as Task;
-      newTasks.push(t);
+    // createTaskBatch menolak seluruh batch sebelum baris pertama ditulis kalau ada
+    // payload haram, dan membatalkan baris yang terlanjur tertulis kalau server yang
+    // gagal. State lokal baru disentuh setelah semua berhasil (F-02).
+    const created = await createTaskBatch(tasksWriter, payloads.map(withTaskDefaults));
+    const newTasks = created as unknown as Task[];
+
+    set((state) => ({ tasks: [...newTasks, ...state.tasks] }));
+
+    for (const t of newTasks) {
       try {
-        scheduleTaskNotification(t);
+        await get().syncTaskAlarm(t);
       } catch (e) {
         console.warn('Failed scheduling notification:', e);
       }
     }
 
-    // Perbarui state lokal dengan tugas-tugas baru
-    set((state) => ({ tasks: [...newTasks, ...state.tasks] }));
     return newTasks;
   },
 
@@ -208,6 +233,10 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => ({
       tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
     }));
+
+    // 3. Jadwal berubah = alarm lama salah. Pasang ulang sesuai kondisi terbaru.
+    const merged = get().tasks.find((t) => t.id === id);
+    if (merged) await get().syncTaskAlarm(merged);
 
     return updatedTask;
   },
@@ -228,6 +257,10 @@ export const useStore = create<AppState>((set, get) => ({
         t.id === id ? { ...t, is_completed: newValue } : t
       ),
     }));
+
+    // 3. Task selesai tidak boleh membangunkan user nanti
+    const after = get().tasks.find((t) => t.id === id);
+    if (after) await get().syncTaskAlarm(after);
   },
 
   // ─── syncSnoozeTask ─────────────────────────────────────────────────────────
@@ -257,6 +290,10 @@ export const useStore = create<AppState>((set, get) => ({
       tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
     }));
 
+    // 3. Alarm harus ikut bergeser, tidak boleh berbunyi pada jadwal lama
+    const afterSnooze = get().tasks.find((t) => t.id === id);
+    if (afterSnooze) await get().syncTaskAlarm(afterSnooze);
+
     get().incrementSnooze();
   },
 
@@ -272,6 +309,10 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => ({
       tasks: state.tasks.filter((t) => t.id !== id),
     }));
+
+    // 3. Task yang dihapus tidak boleh meninggalkan alarm yatim
+    await cancelTaskNotification(id);
+    await get().refreshArmedAlarms();
   },
 
   // ─── syncFetchTasks ─────────────────────────────────────────────────────────
@@ -285,10 +326,12 @@ export const useStore = create<AppState>((set, get) => ({
         sort: 'start_time',
       });
       if (records) {
-        set({ tasks: records as any });
+        set({ tasks: records as any, tasksError: null });
+        await get().refreshArmedAlarms();
       }
     } catch (err) {
       console.error('Fetch tasks error:', err);
+      set({ tasksError: 'Daftar tugas gagal dimuat dari server. Isi yang tampil bisa basi.' });
     }
   },
 

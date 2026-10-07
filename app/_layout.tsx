@@ -1,6 +1,6 @@
 import '../global.css';
 import { useEffect, useState } from 'react';
-import { Stack, useRouter } from 'expo-router';
+import { Redirect, Stack, useRouter, useSegments } from 'expo-router';
 
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -29,7 +29,8 @@ if (!isExpoGo) {
 
 export default function RootLayout() {
   const router = useRouter();
-  const { setUser, setProfile } = useStore();
+  const segments = useSegments();
+  const { user, setUser, setProfile, setTasks } = useStore();
 
   const [loading, setLoading] = useState(true);
 
@@ -62,6 +63,7 @@ export default function RootLayout() {
       } else {
         setUser(null);
         setProfile(null);
+        setTasks([]);
       }
     });
 
@@ -97,6 +99,15 @@ export default function RootLayout() {
   }
 
   if (loading) return null;
+
+  // Pemeriksaan login dulu hanya ada di app/index.tsx, jadi deep link seperti
+  // x-pickertime://focus tetap membuka rute terlindungi (F-07). Kelompok (auth)
+  // dan index akar (belum ada segmen) dibiarkan lewat: index sudah mengarahkan
+  // sendiri ke (tabs) atau (auth)/welcome.
+  const isPublicRoute = !segments[0] || segments[0] === '(auth)';
+  if (!user && !isPublicRoute) {
+    return <Redirect href="/(auth)/welcome" />;
+  }
 
   return (
     <>

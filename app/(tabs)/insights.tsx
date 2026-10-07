@@ -18,6 +18,8 @@ export default function InsightsScreen() {
   const router = useRouter();
   const { profile, user, snoozeCount, syncFetchTasks } = useStore();
   const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [aiFailed, setAiFailed] = useState(false);
+  const [aiDismissed, setAiDismissed] = useState(false);
 
   const [loadingAI, setLoadingAI] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
@@ -38,7 +40,23 @@ export default function InsightsScreen() {
 
   const totalFocusMins = stats.totalMins;
   const completionRate = stats.completionRate;
-  const snoozeRate = stats.totalCount > 0 ? Math.min(100, Math.round((snoozeCount / stats.totalCount) * 100)) : (snoozeCount > 0 ? 15 : 0);
+
+  // "Best time to focus" dihitung dari heatmap nyata, bukan dari energy_pref yang
+  // baru dipilih user di onboarding.
+  const periodCounts = Object.entries(heatmap).map(([period, vals]) => ({
+    period,
+    count: vals.reduce((a, b) => a + b, 0),
+  }));
+  const weeklySessions = periodCounts.reduce((a, p) => a + p.count, 0);
+  const bestPeriod = weeklySessions > 0
+    ? periodCounts.slice().sort((a, b) => b.count - a.count)[0]
+    : null;
+  // snoozeCount hanya menghitung snooze sejak aplikasi dibuka (tidak dipersist), jadi
+  // tanpa task minggu ini angkanya tidak bisa dijadikan persentase — dulu dipaksakan
+  // jadi '0%'/'15%' yang terbaca sebagai ukuran nyata.
+  const snoozeRate = stats.totalCount > 0
+    ? Math.min(100, Math.round((snoozeCount / stats.totalCount) * 100))
+    : null;
 
 
   const slideAnims = useRef(
@@ -141,6 +159,8 @@ export default function InsightsScreen() {
       { trend: trendData || focusTrend } // Use fresh data if provided
     );
     setAiInsight(insight);
+    setAiFailed(insight === null);
+    if (insight) setAiDismissed(false);
     setLoadingAI(false);
   }
 
@@ -178,7 +198,7 @@ export default function InsightsScreen() {
               <Text style={styles.statLabel}>Focus Mins</Text>
             </View>
             <Text style={styles.statValue}>{totalFocusMins.toLocaleString()}</Text>
-            <Text style={styles.statTrend}>↑ 12% vs last week</Text>
+            <Text style={styles.statSubText}>Since Monday</Text>
           </View>
 
           <View style={styles.statCard}>
@@ -237,11 +257,9 @@ export default function InsightsScreen() {
             <Ionicons name="flame" size={16} color="#00D4FF" />
           </View>
           <Text style={styles.heatmapSub}>
-            {profile?.energy_pref === 'Night Owl'
-              ? 'You are most productive in the evenings.'
-              : profile?.energy_pref === 'Afternoon'
-              ? 'You are most productive between 12PM and 5PM.'
-              : 'You are most productive between 9AM and 11AM.'}
+            {bestPeriod
+              ? `${bestPeriod.count} of ${weeklySessions} focus sessions this week were in the ${bestPeriod.period.toLowerCase()}.`
+              : 'No focus sessions logged this week yet.'}
           </Text>
 
           <View style={styles.heatGrid}>
@@ -265,32 +283,42 @@ export default function InsightsScreen() {
 
         {/* AI Suggestion */}
         <Animated.View style={Animated_(3)}>
-          <Text style={styles.sectionTitle}>AI Suggestions</Text>
-          <View style={styles.suggestionCard}>
-            <View style={styles.suggestionGlow} />
-            <View style={styles.suggestionRow}>
-              <View style={styles.suggestionIcon}>
-                <Ionicons name="bulb-outline" size={16} color="#00D4FF" />
-              </View>
-              <View style={styles.suggestionText}>
-                <Text style={styles.suggestionTitle}>
-                  {loadingAI ? '🤖 Analyzing Pattern...' : 'Optimize Your Schedule'}
-                </Text>
-                <Text style={styles.suggestionBody}>
-                  {aiInsight || 'Complete a few focus sessions to get personalized advice.'}
-                </Text>
-              </View>
+          {!aiDismissed && (
+            <>
+              <Text style={styles.sectionTitle}>AI Suggestions</Text>
+              <View style={styles.suggestionCard}>
+                <View style={styles.suggestionGlow} />
+                <View style={styles.suggestionRow}>
+                  <View style={styles.suggestionIcon}>
+                    <Ionicons name="bulb-outline" size={16} color="#00D4FF" />
+                  </View>
+                  <View style={styles.suggestionText}>
+                    <Text style={styles.suggestionTitle}>
+                      {loadingAI ? '🤖 Analyzing Pattern...' : aiFailed ? 'AI advice unavailable' : 'Optimize Your Schedule'}
+                    </Text>
+                    <Text style={styles.suggestionBody}>
+                      {aiInsight ?? (aiFailed
+                        ? 'The AI service did not answer, so there is no recommendation to show. The numbers below are still your real data.'
+                        : 'Complete a few focus sessions to get personalized advice.')}
+                    </Text>
+                  </View>
 
-            </View>
-            <View style={styles.suggestionActions}>
-              <TouchableOpacity style={styles.adjustBtn} onPress={() => router.push('/schedule')} activeOpacity={0.8}>
-                <Text style={styles.adjustBtnText}>Adjust Schedule</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.dismissBtn} onPress={() => setAiInsight(null)} activeOpacity={0.8}>
-                <Text style={styles.dismissBtnText}>Dismiss</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+                </View>
+                <View style={styles.suggestionActions}>
+                  <TouchableOpacity style={styles.adjustBtn} onPress={() => router.push('/schedule')} activeOpacity={0.8}>
+                    <Text style={styles.adjustBtnText}>Adjust Schedule</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dismissBtn}
+                    onPress={() => { setAiDismissed(true); setAiInsight(null); }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.dismissBtnText}>Dismiss</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </>
+          )}
 
           {/* Alarm Effectiveness */}
           <View style={styles.alarmEffCard}>
@@ -300,12 +328,14 @@ export default function InsightsScreen() {
               </View>
               <View>
                 <Text style={styles.alarmEffTitle}>Snooze Rate</Text>
-                <Text style={styles.alarmEffSub}>Morning alarms</Text>
+                <Text style={styles.alarmEffSub}>Counted this session</Text>
               </View>
             </View>
             <View style={styles.alarmEffRight}>
-              <Text style={styles.alarmEffValue}>{snoozeRate}%</Text>
-              <Text style={styles.alarmEffTrend}>{snoozeRate > 20 ? 'High snooze rate' : 'Excellent consistency'}</Text>
+              <Text style={styles.alarmEffValue}>{snoozeRate === null ? '--' : `${snoozeRate}%`}</Text>
+              <Text style={styles.alarmEffTrend}>
+                {snoozeRate === null ? 'Not enough data' : snoozeRate > 20 ? 'High snooze rate' : 'Low snooze rate'}
+              </Text>
             </View>
           </View>
         </Animated.View>
@@ -374,7 +404,6 @@ const styles = StyleSheet.create({
   statIcon: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   statLabel: { fontSize: 10, fontWeight: '600', color: 'rgba(255,255,255,0.5)', letterSpacing: 0.5, textTransform: 'uppercase' },
   statValue: { fontSize: 28, fontWeight: '800', color: '#fff' },
-  statTrend: { fontSize: 12, color: '#34D399' },
   statSubText: { fontSize: 12, color: 'rgba(255,255,255,0.4)' },
   chartCard: {
     backgroundColor: 'rgba(255,255,255,0.04)',

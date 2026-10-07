@@ -45,6 +45,13 @@ const filtersIn = (file) => {
   const block = src.slice(from, src.indexOf(']', from))
   return [...block.matchAll(/'([^']+)'/g)].map((m) => m[1]).filter((v) => v !== 'All Tasks')
 }
+const listIn = (file, name) => {
+  const src = read(file)
+  const from = src.indexOf(`const ${name} = [`)
+  if (from === -1) return []
+  const block = src.slice(from, src.indexOf(']', from))
+  return [...block.matchAll(/'([^']+)'/g)].map((m) => m[1])
+}
 const promptIn = (file) => {
   const src = read(file)
   const m = src.match(/Category must be one of: ([^.]+)\./)
@@ -52,6 +59,7 @@ const promptIn = (file) => {
 }
 
 const SOURCES = [
+  ['lib/taskContract.ts', 'const TASK_CATEGORIES = [', (f) => listIn(f, 'TASK_CATEGORIES')],
   ['app/(tabs)/schedule.tsx', "const CATEGORIES = [", (f) => idsIn(f, 'const CATEGORIES = [')],
   ['app/edit-task.tsx', "const CATEGORIES = [", (f) => idsIn(f, 'const CATEGORIES = [')],
   ['app/(tabs)/timeline.tsx', 'CATEGORY_COLORS', (f) => keysIn(f, 'const CATEGORY_COLORS')],

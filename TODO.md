@@ -692,7 +692,8 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
 ## M10 — Harness uji perangkat (dev build) + temuan yang terbukti di perangkat (2026-10-07)
 
 Status: harness jalan dan repeatable; matriks 10.3 berisi 11 baris (10 temuan merah, 1 lulus).
-**Perbaikan kode atas temuan ini BELUM satu baris pun dieksekusi** — akan disusun sebagai M11.
+Perbaikan kode atas temuan ini dikerjakan di **M11** (branch `fix/ai-proxy-hardening`) — lihat bagian M11
+untuk status per temuan dan cara buktinya; yang belum terukur di perangkat ditandai di sana.
 Sudah masuk branch: harness sesi ini lewat PR #8 ke `dev` (merge `924f96c`) lalu PR #9 `dev` → `main`
 (merge `f2639b9`); keduanya CI hijau dan **tidak** men-trigger `deploy.yml` (diff cuma `tools/test/`,
 `package.json`, `TODO.md`, `AGENTS.md` — di luar path filter deploy). PR #7 sebelumnya melompati `dev`
@@ -759,8 +760,10 @@ sehingga `dev` tertinggal dari produksi; aturannya ditegakkan lagi di `AGENTS.md
 - Semua jalur yang butuh jari: form sign-in/sign-up, F-08 residu logout, F-16 tombol no-op,
   dan suite alarm A-1…A-7 (termasuk apakah `scheduleNotificationAsync` benar-benar menghasilkan
   alarm di MIUI, dan apakah ia bertahan setelah reboot).
-- Gate CI: `test:enum` dan `test:findings` **sengaja belum** dipasang di `.github/workflows/ci.yml`
-  karena keduanya merah sampai M11 masuk — memasangnya sekarang menjebol tiap PR.
+- Gate CI: dulu `test:enum` dan `test:findings` **sengaja belum** dipasang karena keduanya merah.
+  Sudah ditutup di M11 (`396115b`): job `contract` menjalankan `test:enum` + `test:batch`, dan job
+  `schema` menjalankan `seed.mjs` + `findings.mjs` terhadap container yang dibangun dari
+  `pb_migrations`. Konsekuensinya sekarang sebaliknya — temuan yang terbuka kembali akan menjebol PR.
 - Sisi UI dari F-06/F-27 (menekan tombolnya dan melihat dialog sistem) belum diuji di perangkat;
   yang terbukti sekarang adalah lapisan kode + manifest, dan `pm grant` tersedia sebagai jalur lanjutannya.
 
@@ -802,6 +805,64 @@ jadi jalankan lewat `nvm use 22` atau panggil biner node 22 langsung.
 7. Klaim awal saya di 10.2 ("route smoke menangkap transport yang mati") salah saya tulis sendiri
    sebelum diukur — smoke itu cuma mengecek proses/pid/crash. Dibetulkan di tabel sebelum di-commit:
    alat tidak boleh diberi kredit yang belum dibuktikan.
+
+## M11 — Perbaikan temuan M10 (branch `fix/ai-proxy-hardening`, 2026-10-07)
+
+Status: 16 commit (`fix/ai-proxy-hardening` + koreksi gerbang + dokumentasi ini) sudah merge ke `dev`
+lewat PR #12 (`feade67`), CI hijau semua — lima job lulus, termasuk job baru `contract` dan gate
+findings di backend hasil migrasi. Semua angka di bawah dijalankan di host pada sesi ini dan dikutip
+apa adanya dari keluaran alat (H1).
+
+### 11.1 Per temuan: apa yang diubah + bukti
+
+| id | perubahan | commit | bukti terukur |
+|----|-----------|--------|---------------|
+| F-13/F-14 | `ai_proxy.pb.js`: prompt wajib string, batas 4.000 karakter (413), kegagalan upstream dibalas 502 generik (detail vendor hanya ke log server), jendela tetap 10 request/menit per akun lewat `$app.store()` | `b518e48` | `npm run test:ai-proxy` vs backend uji: `error upstream (HTTP 502) tidak menyebut detail vendor`, `prompt 200.000 karakter -> HTTP 413 dalam 9ms`, `prompt bertipe objek -> HTTP 400`, `12 request paralel dari 1 akun baru -> 10 lolos, 2 ditahan HTTP 429 dalam 109ms`. Gerbang yang sama dijalankan melawan hook **sebelum** perbaikan (container buang di 127.0.0.1:8096, `git show b518e48^:pb_hooks/ai_proxy.pb.js`): `4 masalah pada jalur proxy AI terkonfirmasi` — jadi hijaunya tidak vacuous |
+| F-01 | `CATEGORIES`, `CATEGORY_COLORS`, `FILTERS` (termasuk `Other`) dan prompt AutoPlan disamakan ke select `Tasks.category`; satu daftar dipakai bersama lewat `lib/taskContract.ts` | `8c08aa8` | `npm run test:enum` → 6 sumber `GREEN`, keluaran penutup `Semua sumber cocok dengan skema.`; `test:findings` → `GREEN F-01 category "Creative" ditolak HTTP 400` |
+| F-19 | `components/ExternalLink.tsx` memakai tipe `href` yang ikut `Link` | `80a2202` | `npx tsc --noEmit` exit 0 dengan **dan** tanpa `.expo/types/router.d.ts` (dulu 1 error) |
+| F-28 | Kegagalan AI mengembalikan `null`, bukan teks yang menyamar sebagai output AI; `tasksError` masuk state dan dibaca banner; AutoPlan berhenti menulis task karangan | `1d44fc8` | `store/useStore.ts:334` (`set({ tasksError: 'Daftar tugas gagal dimuat dari server. Isi yang tampil bisa basi.' })`), `lib/gemini.ts` 9 cabang `return null`. Sisi layar (banner benar-benar tampil) belum diukur di perangkat |
+| F-25 | kartu NEXT BEST ACTION / UPCOMING dihitung dari task nyata (judul, durasi, kategori, countdown dari data) | `d834d79` | `grep -rn "Starts in 45m\|Team Sync" app/` → 1 hasil, dan itu **komentar** di `app/(tabs)/timeline.tsx:25` yang menjelaskan karangan yang sudah dihapus; tidak ada lagi literal di JSX |
+| F-22 (+F-08) | `syncTaskAlarm` dipanggil ulang saat jadwal berubah; chip hanya boleh bilang "Smart Alarm set" kalau id ada di `getAllScheduledNotificationsAsync()` (`listArmedAlarmTaskIds`), selain itu "Alarm diminta, tapi belum terdaftar di HP"; state dibersihkan saat logout | `36277ce` | `app/(tabs)/timeline.tsx:38,106-108` dan `store/useStore.ts:171`. **Bukti OS-nya (`dumpsys alarm`) belum bisa diulang** — adb masih `no permissions`, jadi klaim "alarm benar-benar bunyi" tetap terbuka (A-1…A-7) |
+| F-05 | timer fokus dibaca dari jam dinding (`deadlineRef` vs `Date.now()`), sesi menulis durasi nyata bukan rencana, End Early tetap mencatat sesi | `cc06e42` | `app/focus.tsx:49,61,69,94`; `tsc` exit 0 dan `npx expo export --platform android` exit 0. Drift ±16 s yang jadi bukti temuan **belum diukur ulang** di perangkat |
+| F-07 | guard login dipindah ke `app/_layout.tsx`: rute di luar `(auth)` dan bukan index akar → `<Redirect href="/(auth)/welcome" />` | `8534ec3` | `grep -rl Redirect app/` = `app/index.tsx` + `app/_layout.tsx`. Semantik `useSegments` dibuktikan dari sumber, bukan tebakan: `node_modules/expo-router/build/global-state/routeInfo.js` menyusun `segments` dari `route.name.split('/')` (token grup **tetap ada**) dan menyaring `(…)` hanya untuk `pathname`. Deep link `pickertime://timeline` belum dijalankan ulang di ponsel |
+| F-06 + F-27 | `requestCalendarPermissions()` dan `requestDNDPermissions()` (isinya `return true`) dihapus; layar izin tinggal satu item wajib, hasil izin dibaca sungguh: denial memunculkan banner + tombol "Try Again", "nanti" tidak lagi berpura-pura sukses, preview "Team Sync" dikarang-dikarang dihapus | `0d7437d` | `grep -rn "expo-calendar\|Calendar\." app lib store` → **0**; `grep -rn "requestDNDPermissions" app lib store` → 1 hasil, komentar di `app/(auth)/permissions.tsx:14`. Batas jujur: `expo-calendar` masih ada di `package.json:28` dan entri `READ_CALENDAR`/`WRITE_CALENDAR` baru hilang dari manifest setelah **build ulang**, jadi bukti ini lapisan kode — bukan APK |
+| F-02 | `lib/taskContract.ts`: `taskPayloadError` + `createTaskBatch` (tolak seluruh batch sebelum baris pertama bila ada payload haram; batalkan baris yang terlanjur tertulis bila server gagal). Server tidak punya transaksi untuk record user — `/api/batch` dijawab `403 "Batch requests are not allowed"` (terukur), jadi rollback klien adalah plafon jujur | `60c5cdd`, `6343fd3` | `npm run test:batch` → 8 assertion `GREEN` (F-02a…F-02h), penutup `Batch tulis task tidak meninggalkan baris yatim.`; `test:findings` dengan penulis PocketBase asli → `GREEN F-02 batch ditolak tanpa baris yatim — Task 5 dari 5 ditolak sebelum ditulis` |
+| F-03 | migrasi `1790909800_ownership_create_rule.js`: `createRule = '@request.auth.id != "" && user = @request.auth.id'` untuk `Tasks`, `Focus_Sessions`, `Workspace_Events` | `018f669` | Di backend uji (8099) **dan** di container yang dibangun segar dari `pb_migrations` (8097, `docker run` lalu `seed.mjs`): `GREEN F-03 penulisan atas nama user lain ditolak HTTP 400`; `pb-schema-verify` → `other sees 0 tasks; tulis atas nama user lain HTTP 400; own profile readable=true`. Lubangnya pernah dibuka lagi di server buang dan verifier langsung jadi MERAH |
+| CI | job baru `contract` (`test:enum` + `test:batch`); langkah "Bukti temuan device harness sudah tertutup" (`seed.mjs` + `findings.mjs`) di job `schema`; node `'20'`→`'22'` mengikuti `.nvmrc`; `findings.mjs` direpolarisasi (temuan tertutup = GREEN, keluar 0) | `396115b` | Run PR #12 `37627652192`: `Type-check pass 28s`, `Skema PocketBase + hook AI pass 33s`, `Kontrak enum + batch tulis task pass 24s`, `Lint perkakas shell pass 5s`, `Scan rahasia di file ter-track pass 5s`, `main hanya hasil merge PR skipping` |
+
+### 11.2 Dua gerbang yang saya temukan sendiri cacat selama M11
+
+1. `tools/pb/pb-schema-verify.mjs` memutuskan "server punya key atau tidak" dari
+   `process.env.GEMINI_API_KEY` **milik proses verifier**, sementara key dipasang di container.
+   Hasil terukur: `FAIL ... unexpected 502 {"message":"Layanan AI sedang tidak tersedia…"}` di
+   server yang sehat. Diganti jadi probe ke server dengan tiga cabang yang masing-masing menuntut
+   bukti: `server tanpa key -> HTTP 400 pesan konfigurasi`, `server dengan key (upstream menolak) ->
+   HTTP 502 generik tanpa detail vendor` (dan RED kalau body menyebut `googleapis`/`INVALID_ARGUMENT`),
+   `server dengan key hidup -> HTTP 200`. Kedua cabang diuji lawan dua container (8097 dengan key sampah,
+   8098 tanpa key) → `DONE ... semua pemeriksaan lulus` dua-duanya. Commit `cb40253`.
+2. `tools/test/ai-proxy.mjs` punya hijau yang tidak berarti: predikat "sampai upstream" mencocokkan
+   pesan hook **lama** (`Failed to communicate with Gemini API`) sehingga setelah hook diperkuat ia tidak
+   pernah benar, dan probe pertama menghabiskan jendela rate limit akun seed. Sekarang tiap probe yang
+   harus keluar ke Google memakai akun signup baru (`freshToken`), 413 dan pembagi burst dinilai
+   eksplisit (`passed <= 10`), dan probe yang tidak sampai upstream dinyatakan RED. Commit `71dbefe`.
+
+Pelajaran: gerbang juga wajib ditanya "kalau kodenya rusak, alat ini merah tidak?" — dua di antaranya
+rusak justru setelah kodenya diperbaiki.
+
+### 11.3 Yang masih menggantung
+
+- Push branch + PR ke `dev` dulu (aturan dua tahap di `AGENTS.md`), baru `dev` → `main`.
+  Merge ke `main` **menyentuh produksi**: branch ini mengubah `pb_hooks/**` dan `pb_migrations/**`,
+  yang masuk path filter `deploy.yml`, dan `createRule` baru harus benar-benar sampai ke
+  `pb_migrations` di VM. Butuh konfirmasi eksplisit sebelum itu.
+- Build ulang perangkat dibutuhkan untuk benar-benar melepas `expo-calendar` dan entri manifest
+  `READ_CALENDAR`/`WRITE_CALENDAR`; sampai sekarang F-06 hanya terbukti di lapisan kode.
+- Semua bukti yang butuh ponsel (F-05 drift, F-07 deep link, F-22 `dumpsys alarm`, F-06/F-27 dialog
+  sistem, F-08 residu logout, F-16 tombol no-op, F-28 banner, suite alarm A-1…A-7) menunggu dua
+  blokir lingkungan: izin USB adb (udev/plugdev) dan sakelar MIUI "Debugging USB (Setelan keamanan)".
+  Pengganti yang dipakai sesi ini: `npx expo export --platform android` (exit 0) sebagai smoke test bundel.
+- Pesan commit `6343fd3` salah ketik ("diperkubarnisasi", seharusnya "direpolarisasi"). Dibiarkan karena
+  aturan repo: tidak amend commit yang sudah ada tanpa diminta.
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 

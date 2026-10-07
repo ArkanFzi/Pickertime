@@ -1,10 +1,11 @@
 /**
  * Pickertime Gemini AI Engine
- * 
+ *
  * This module uses the secure PocketBase proxy endpoint
  * to ensure API keys are never exposed to the client app.
  */
 import { pb } from '@/lib/pocketbase';
+import { TASK_CATEGORIES } from '@/lib/taskContract';
 
 export type GeminiSuggestion = {
   task: string;
@@ -12,6 +13,21 @@ export type GeminiSuggestion = {
   duration: string;
   category: string;
 };
+
+export type PrepStep = {
+  icon: string;
+  text: string;
+};
+
+export type ScheduleItem = {
+  title: string;
+  desc: string;
+  duration: number;
+  category: string;
+};
+
+// Nilai select `Tasks.category` diambil dari kontrak tulis (lib/taskContract), bukan
+// disalin, supaya tidak ada dua daftar yang bisa berbeda.
 
 async function callGemini(prompt: string) {
   try {
@@ -31,12 +47,15 @@ async function callGemini(prompt: string) {
   }
 }
 
+// Semua fungsi di bawah mengembalikan null saat AI tidak bisa dipakai. Teks statis yang dulu
+// dikembalikan di sini tampil identik dengan hasil AI asli, jadi kegagalan backend justru
+// terbaca sebagai saran yang meyakinkan (F-28).
 export async function getNextBestAction(
   role: string,
   focusGoal: string,
   energyPref: string,
   currentTasks: any[]
-): Promise<GeminiSuggestion> {
+): Promise<GeminiSuggestion | null> {
   try {
     const prompt = `You are an expert productivity coach. Based on:
     Role: ${role}
@@ -49,16 +68,18 @@ export async function getNextBestAction(
 
     const result = await callGemini(prompt);
     const jsonMatch = result.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON object found in response');
-    return JSON.parse(jsonMatch[0]);
-  } catch (error) {
-    console.error('Gemini API Error:', error);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (typeof parsed?.task !== 'string' || typeof parsed?.desc !== 'string') return null;
     return {
-      task: 'Focus on your Top Priority',
-      desc: 'Based on your goal to ' + focusGoal,
-      duration: '60 mins',
-      category: 'Focus'
+      task: parsed.task,
+      desc: parsed.desc,
+      duration: typeof parsed.duration === 'string' ? parsed.duration : '',
+      category: typeof parsed.category === 'string' ? parsed.category : ''
     };
+  } catch (error) {
+    console.warn('getNextBestAction: saran AI tidak tersedia', error);
+    return null;
   }
 }
 
@@ -66,52 +87,39 @@ export async function getAIInsight(
   role: string,
   focusGoal: string,
   weeklyData: any
-): Promise<string> {
+): Promise<string | null> {
   try {
     const trendStr = weeklyData.trend ? `Recent focus minutes trend: ${weeklyData.trend.join(', ')}` : '';
     const prompt = `You are a productivity coach for a ${role} whose goal is ${focusGoal}. ${trendStr}. 
     Provide one very short, insightful 1-sentence advice or observation based on this trend. No quotes, no intro.`;
-    return await callGemini(prompt);
+    const insight = (await callGemini(prompt)).trim();
+    return insight || null;
   } catch (error) {
-    return "Keep protecting your deep work blocks. You're making progress!";
+    console.warn('getAIInsight: insight AI tidak tersedia', error);
+    return null;
   }
 }
 
 export async function getSmartAlarmPrep(
   taskTitle: string,
   role: string
-): Promise<Array<{ icon: string; text: string }>> {
+): Promise<PrepStep[] | null> {
   try {
     const prompt = `Suggest 3 preparation steps for a ${role} starting task: "${taskTitle}". 
     Return ONLY a JSON array of objects: [{"icon": "ionicons-icon-name", "text": "Short instruction"}]`;
 
     const result = await callGemini(prompt);
     const jsonMatch = result.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) throw new Error('No JSON array found in response');
-    return JSON.parse(jsonMatch[0]);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed)) return null;
+    const steps = parsed
+      .filter((s) => s && typeof s.text === 'string')
+      .map((s) => ({ icon: typeof s.icon === 'string' ? s.icon : 'ellipse-outline', text: s.text }));
+    return steps.length > 0 ? steps : null;
   } catch (error) {
-    const roleFallbacks: Record<string, Array<{ icon: string; text: string }>> = {
-      Student: [
-        { icon: 'laptop-outline', text: 'Open textbook & notes app' },
-        { icon: 'cafe-outline', text: 'Get water or coffee' },
-        { icon: 'phone-portrait-outline', text: 'Put phone face-down' },
-      ],
-      Professional: [
-        { icon: 'document-text-outline', text: 'Open relevant docs & tools' },
-        { icon: 'headset-outline', text: 'Put on noise-cancelling headphones' },
-        { icon: 'notifications-off-outline', text: 'Set Slack to DND' },
-      ],
-      Creator: [
-        { icon: 'color-palette-outline', text: 'Open creative tools' },
-        { icon: 'musical-note-outline', text: 'Start ambient playlist' },
-        { icon: 'cafe-outline', text: 'Get your beverage' },
-      ],
-    };
-    return roleFallbacks[role] || [
-      { icon: 'cafe-outline', text: 'Get your beverage ready' },
-      { icon: 'notifications-off-outline', text: 'Minimize distractions' },
-      { icon: 'play-outline', text: 'Mentally prepare for flow' }
-    ];
+    console.warn('getSmartAlarmPrep: langkah persiapan AI tidak tersedia', error);
+    return null;
   }
 }
 
@@ -119,24 +127,31 @@ export async function generateDailySchedule(
   role: string,
   focusGoal: string,
   energyPref: string
-): Promise<Array<{ title: string; desc: string; duration: number; category: string }>> {
+): Promise<ScheduleItem[] | null> {
   try {
     const prompt = `You are a productivity AI. Generate a realistic daily schedule with exactly 3 focused tasks for a ${role} whose main goal is "${focusGoal}" and prefers to work in the "${energyPref}".
     Return ONLY a JSON array of objects with this exact format:
     [
       { "title": "Short Task Name", "desc": "Short description", "duration": 60, "category": "Work" }
     ]
-    Duration must be an integer in minutes (e.g., 30, 60, 90). Category must be one of: Work, Study, Health, Personal, Creative.`;
+    Duration must be an integer in minutes (e.g., 30, 60, 90). Category must be one of: Work, Study, Health, Personal, Other.`;
 
     const result = await callGemini(prompt);
     const cleanJson = result.replace(/```json|```/g, '').trim();
-    return JSON.parse(cleanJson);
+    const parsed = JSON.parse(cleanJson);
+    if (!Array.isArray(parsed)) return null;
+
+    const items = parsed
+      .filter((i) => i && typeof i.title === 'string' && Number.isInteger(i.duration) && i.duration > 0)
+      .map((i) => ({
+        title: i.title,
+        desc: typeof i.desc === 'string' ? i.desc : '',
+        duration: i.duration,
+        category: TASK_CATEGORIES.includes(i.category) ? i.category : 'Other',
+      }));
+    return items.length > 0 ? items : null;
   } catch (error) {
-    console.error('Gemini API Error (generateDailySchedule):', error);
-    return [
-      { title: 'Morning Review', desc: 'Plan the day and set intentions.', duration: 30, category: 'Work' },
-      { title: 'Deep Work Session', desc: 'Focus on your most important project.', duration: 90, category: 'Work' },
-      { title: 'Skill Development', desc: 'Read or practice something new.', duration: 45, category: 'Study' },
-    ];
+    console.warn('generateDailySchedule: rencana AI tidak tersedia', error);
+    return null;
   }
 }
