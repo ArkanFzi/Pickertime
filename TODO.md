@@ -704,6 +704,10 @@ Status: harness jalan dan repeatable; 7 temuan terbukti dengan keluaran perintah
   `~/.local/share/pickertime-test/pb_data`, `pb_hooks`+`pb_migrations` di-bind-mount dari repo);
   `adb reverse tcp:8083 tcp:8083` dan `tcp:8090 tcp:8099`. Sisi ponsel selalu `127.0.0.1:<port>`
   sehingga `.env` tidak perlu diubah walau port host berpindah (8090/8081/8082 sudah dipakai layanan lain).
+  **Prasyarat yang mudah terlupa:** container uji harus dijalankan dengan
+  `-e GEMINI_API_KEY=INVALID-KEY-PROBE-ONLY`; tanpa itu request tak pernah keluar ke Google dan
+  seluruh probe proxy menjadi hijau palsu (lihat 10.3 baris F-13/F-14). Container ini tidak dipasang
+  kredensial superuser; semua alat masuk lewat signup publik.
 - Pembatas MIUI yang terukur (bukan asumsi):
   - `adb shell input tap|swipe|keyevent` → `SecurityException: INJECT_EVENTS`.
   - `adb shell pm clear <pkg>` → `SecurityException: CLEAR_APP_USER_DATA`.
@@ -734,13 +738,15 @@ Status: harness jalan dan repeatable; 7 temuan terbukti dengan keluaran perintah
 | id | klaim | cara bukti | hasil |
 |----|-------|-----------|-------|
 | F-01 | UI/prompt memakai kategori yang ditolak backend | `npm run test:enum` | `RED` di `app/(tabs)/schedule.tsx`, `app/edit-task.tsx`, `CATEGORY_COLORS` di `timeline.tsx`, prompt AutoPlan `lib/gemini.ts` (`Creative`/`School`/`General` tak ada). Catatan tambahan: `FILTERS` hijau tapi tidak memuat `Other` → task `Other` tak bisa difilter |
-| F-13/F-14 | proxy membocorkan pesan error upstream & tak membatasi panjang | `npm run test:ai-proxy` | merah; tipe payload **tidak** divalidasi (hipotesis awal saya soal ini salah dan sudah ditarik) |
+| F-13/F-14 | proxy membocorkan pesan error upstream & tak membatasi panjang & tak ada rate limit | `npm run test:ai-proxy` dengan backend uji berjalan `GEMINI_API_KEY=INVALID-KEY-PROBE-ONLY` | 4 `RED`: (a) body error vendor/Gemini ditelanjangi ke klien (`"API key not valid…INVALID_ARGUMENT"`), (b) prompt 200.000 karakter diteruskan utuh, (c) prompt bertipe objek diteruskan apa adanya, (d) 12 request paralel semuanya diteruskan, 0 ditahan. `GREEN`: token anonim → 401 dan prompt hilang → 400 lokal. **Kalau env key tidak dipasang, keempatnya tidak bisa dinilai** — alatnya keluar dengan `exit(2)` supaya tidak hijau palsu |
 | F-19 | tipe rusak hanya saat rute bertipe dibuat | `npx tsc --noEmit` dengan vs tanpa `.expo/types/router.d.ts` | 1 error `components/ExternalLink.tsx:13` vs 0 error |
 | F-22 | chip "Smart Alarm set · 10 min before" tanpa alarm | `adb shell dumpsys alarm \| grep -c elarisnoir` = **0**, vs render无条件 `app/(tabs)/timeline.tsx:95-101` | kartu task tetap mengklaim alarm terpasang. `scheduleTaskNotification` hanya dipanggil `store/useStore.ts:166,190`; `syncUpdateTask` (≈:205) tidak pernah cancel/re-arm |
 | F-25 | kartu UPCOMING mengarang | `grep -n "Starts in 45m" app/(tabs)/index.tsx` → :206 literal di luar kondisional; :205 fallback `'Team Sync'` | terbukti dua arah: server mati → "Q3 Product Strategy"+"Team Sync"+"0 of 0 Done" tanpa state error; server hidup → task asli **tetap** ditulis "Starts in 45m" |
 | F-05 | timer focus bukan wall clock | screencap + epoch ms; `am start -n com.android.settings/.Settings` untuk background | foreground 35,6 s → 35 s layar (bersih); setelah 21,4 s background: harusnya 23:35, tampil **23:31→23:51** = **±16 s hilang**. Akar: `setInterval(p=>p-1)` `app/focus.tsx:70-86`. Turunan: `handleSessionComplete` menulis `duration_seconds: initialSeconds` (rencana, bukan nyata) → insights tak akan pernah akurat |
 | F-07 | guard auth cuma di satu titik | hapus baris `pb_auth` (setara logout), cold start mendarat benar di Welcome, lalu `am start -a VIEW -d pickertime://timeline` | **tembus**: layar terlindungi + tab bar ter-render tanpa redirect. `grep -rl Redirect app/` = 1 file (`app/index.tsx`); `(tabs)/_layout.tsx` dan `(auth)/_layout.tsx` tanpa guard. Bukan bocor data — API rules menolak, daftar kosong |
 | F-11 | empty state timeline | deep link saat logout | **LULUS** — "No Tasks Today" + Auto-Plan/Manual Entry wajar (dicatat agar tidak dikira bug) |
+| F-06 | izin kalender diminta untuk fitur yang tidak ada | `grep -rn "Calendar\." --include=*.ts --include=*.tsx . \| grep -v node_modules` → hanya 1 baris (`requestCalendarPermissionsAsync`); `dumpsys package \| sed -n '/requested permissions/,/^User 0/p'` → `READ_CALENDAR` + `WRITE_CALENDAR` | UI menjual "automatically block time around your existing meetings" (`permissions.tsx:35`), nol implementasi |
+| F-27 | izin DND selalu "berhasil" | `requestDNDPermissions()` isinya `return true` (`lib/notifications.ts:103`); grep `InterruptionFilter\|NotificationPolicy\|access_notification_policy` = 0 hasil | "Auto-silence non-essential alerts" tidak ada wujudnya. Ditambah lagi `handleEnable()` (`permissions.tsx:72-82`) membuang semua nilai kembali → izin `required: true` pun tidak ditegakkan |
 
 ### 10.4 Yang TIDAK teruji (jangan dibaca sebagai sudah aman)
 
@@ -749,7 +755,8 @@ Status: harness jalan dan repeatable; 7 temuan terbukti dengan keluaran perintah
   alarm di MIUI, dan apakah ia bertahan setelah reboot).
 - Gate CI: `test:enum` dan `test:findings` **sengaja belum** dipasang di `.github/workflows/ci.yml`
   karena keduanya merah sampai M11 masuk — memasangnya sekarang menjebol tiap PR.
-- F-06 kalender (izin diminta, tak pernah dipakai) — `pm grant` tersedia sebagai jalur uji, belum dijalankan.
+- Sisi UI dari F-06/F-27 (menekan tombolnya dan melihat dialog sistem) belum diuji di perangkat;
+  yang terbukti sekarang adalah lapisan kode + manifest, dan `pm grant` tersedia sebagai jalur lanjutannya.
 
 ### 10.5 Batas jujur
 
