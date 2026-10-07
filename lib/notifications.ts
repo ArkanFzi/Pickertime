@@ -69,11 +69,14 @@ export async function scheduleTaskNotification(task: Task): Promise<string | nul
       return null;
     }
 
-    // Identifier = task.id, bukan id generasi baru, supaya alarm lama bisa dibatalkan
-    // walau dijadwalkan pada sesi aplikasi sebelumnya.
+    // Identifier = task.id supaya alarm lama bisa dibatalkan/diganti walau
+    // dijadwalkan pada sesi aplikasi sebelumnya.
     await cancelTaskNotification(task.id);
 
+    // Identifier ada di tingkat request, bukan di dalam trigger: `trigger.identifier`
+    // diabaikan expo (terukur: OS menyimpan UUID, bukan task.id).
     return await Notifications.scheduleNotificationAsync({
+      identifier: task.id,
       content: {
         title: `${task.title} Starting Soon`,
         body: `You have ${leadMinutes} minutes to prepare. Tap to open Smart Alarm.`,
@@ -84,8 +87,7 @@ export async function scheduleTaskNotification(task: Task): Promise<string | nul
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: triggerDate,
-        identifier: task.id,
-      } as any,
+      },
     });
   } catch (error) {
     console.log('Scheduling notification failed (Expo Go limitation):', error);
@@ -93,11 +95,27 @@ export async function scheduleTaskNotification(task: Task): Promise<string | nul
   }
 }
 
+// Kunci penghubung alarm↔task. `content.data.taskId` selalu kita kirim;
+// `identifier` baru sama dengan task.id sejak build ini, dan berupa UUID pada
+// alarm yang sempat dijadwalkan build lama.
+function taskRefOf(request: any): string {
+  const dataTaskId = request?.content?.data?.taskId;
+  if (typeof dataTaskId === 'string' && dataTaskId.length > 0) return dataTaskId;
+  return typeof request?.identifier === 'string' ? request.identifier : '';
+}
+
 export async function cancelTaskNotification(taskId: string): Promise<void> {
   try {
     const Notifications = await getNotificationsModule();
     if (!Notifications) return;
-    await Notifications.cancelScheduledNotificationAsync(taskId);
+    // Batal per identifier hasil pembacaan OS: cancelScheduledNotificationAsync(taskId)
+    // saja tidak menghapus alarm build lama yang identifier-nya UUID.
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    for (const request of scheduled) {
+      if (taskRefOf(request) === taskId) {
+        await Notifications.cancelScheduledNotificationAsync(request.identifier);
+      }
+    }
   } catch {
     // Tidak pernah terjadwal — bukan kegagalan yang perlu dilaporkan ke user.
   }
@@ -109,10 +127,10 @@ export async function listArmedAlarmTaskIds(): Promise<string[]> {
   try {
     const Notifications = await getNotificationsModule();
     if (!Notifications) return [];
+    // Item array sudah berupa NotificationRequest — tidak ada bungkus `.request`
+    // (terukur di perangkat; baca di sini dulu selalu kosong).
     const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-    return scheduled
-      .map((n: any) => n?.request?.trigger?.identifier ?? n?.request?.content?.data?.taskId)
-      .filter((id: any): id is string => typeof id === 'string' && id.length > 0);
+    return scheduled.map(taskRefOf).filter((id) => id.length > 0);
   } catch (error) {
     console.log('Reading scheduled notifications failed:', error);
     return [];
