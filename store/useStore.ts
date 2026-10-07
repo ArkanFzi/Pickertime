@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import { AuthModel } from 'pocketbase';
+import { AuthModel, RecordModel } from 'pocketbase';
 import { pb } from '@/lib/pocketbase';
 import { scheduleTaskNotification, cancelTaskNotification, listArmedAlarmTaskIds } from '@/lib/notifications';
+import { createTaskBatch, type TaskWriter, type TaskWritePayload } from '@/lib/taskContract';
 
 export type UserRole = 'Student' | 'Professional' | 'Freelancer' | 'Creator' | 'Researcher' | string;
 export type EnergyPref = 'Morning' | 'Afternoon' | 'Night Owl';
@@ -32,19 +33,23 @@ export interface Task {
 }
 
 // ─── Payload types untuk fungsi sinkronisasi ────────────────────────────────
-export interface CreateTaskPayload {
-  user: string;
-  title: string;
-  description?: string;
-  category: string;
-  priority: 'High' | 'Medium' | 'Low';
-  start_time?: string;
-  end_time?: string;
-  duration_minutes: number;
-  is_completed?: boolean;
-  has_alarm?: boolean;
-  alarm_minutes_before?: number;
-}
+// Bentuknya tinggal di lib/taskContract supaya yang dipakai UI, AutoPlan, dan gate
+// tools/test adalah tipe yang sama.
+export type CreateTaskPayload = TaskWritePayload;
+
+// Satu jalur tulis untuk task tunggal maupun batch — dua tempat yang sama-sama bisa
+// lupa memvalidasi adalah cara F-02 bertahan.
+const tasksWriter: TaskWriter<RecordModel> = {
+  create: (data) => pb.collection('Tasks').create(data),
+  remove: (id) => pb.collection('Tasks').delete(id),
+};
+
+const withTaskDefaults = (payload: CreateTaskPayload): CreateTaskPayload => ({
+  ...payload,
+  is_completed: payload.is_completed ?? false,
+  has_alarm: payload.has_alarm ?? true,
+  alarm_minutes_before: payload.alarm_minutes_before ?? 10,
+});
 
 interface AppState {
   // Auth
@@ -177,13 +182,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   // ─── syncAddTask ────────────────────────────────────────────────────────────
   syncAddTask: async (payload) => {
-    // 1. Kirim ke server terlebih dahulu
-    const data = await pb.collection('Tasks').create({
-      ...payload,
-      is_completed: payload.is_completed ?? false,
-      has_alarm: payload.has_alarm ?? true,
-      alarm_minutes_before: payload.alarm_minutes_before ?? 10,
-    });
+    // 1. Validasi + tulis lewat jalur batch yang sama (task tunggal = batch isi satu)
+    const [data] = await createTaskBatch(tasksWriter, [withTaskDefaults(payload)]);
 
     const newTask = data as unknown as Task;
 
@@ -204,18 +204,15 @@ export const useStore = create<AppState>((set, get) => ({
 
   // ─── syncAddMultipleTasks ───────────────────────────────────────────────────
   syncAddMultipleTasks: async (payloads) => {
-    const newTasks: Task[] = [];
-    
-    // Process sequentially to keep it simple, or Promise.all if supported by server
-    for (const payload of payloads) {
-      const data = await pb.collection('Tasks').create({
-        ...payload,
-        is_completed: payload.is_completed ?? false,
-        has_alarm: payload.has_alarm ?? true,
-        alarm_minutes_before: payload.alarm_minutes_before ?? 10,
-      });
-      const t = data as unknown as Task;
-      newTasks.push(t);
+    // createTaskBatch menolak seluruh batch sebelum baris pertama ditulis kalau ada
+    // payload haram, dan membatalkan baris yang terlanjur tertulis kalau server yang
+    // gagal. State lokal baru disentuh setelah semua berhasil (F-02).
+    const created = await createTaskBatch(tasksWriter, payloads.map(withTaskDefaults));
+    const newTasks = created as unknown as Task[];
+
+    set((state) => ({ tasks: [...newTasks, ...state.tasks] }));
+
+    for (const t of newTasks) {
       try {
         await get().syncTaskAlarm(t);
       } catch (e) {
@@ -223,8 +220,6 @@ export const useStore = create<AppState>((set, get) => ({
       }
     }
 
-    // Perbarui state lokal dengan tugas-tugas baru
-    set((state) => ({ tasks: [...newTasks, ...state.tasks] }));
     return newTasks;
   },
 

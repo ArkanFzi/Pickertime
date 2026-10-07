@@ -5,6 +5,7 @@
  * to ensure API keys are never exposed to the client app.
  */
 import { pb } from '@/lib/pocketbase';
+import { TASK_CATEGORIES } from '@/lib/taskContract';
 
 export type GeminiSuggestion = {
   task: string;
@@ -25,9 +26,8 @@ export type ScheduleItem = {
   category: string;
 };
 
-// Nilai select `Tasks.category` di snapshot skema. Output AutoPlan di luar daftar ini
-// dipaksa ke 'Other' — kalau tidak, backend menolaknya dengan 400 validation_invalid_value.
-const TASK_CATEGORIES = ['Work', 'Study', 'Health', 'Personal', 'Other'];
+// Nilai select `Tasks.category` diambil dari kontrak tulis (lib/taskContract), bukan
+// disalin, supaya tidak ada dua daftar yang bisa berbeda.
 
 async function callGemini(prompt: string) {
   try {
