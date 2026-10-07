@@ -1,38 +1,75 @@
 // pb_hooks/ai_proxy.pb.js
-
-/**
- * PocketBase JS Hook to securely proxy requests to Google's Gemini API.
- * 
- * This ensures that the GEMINI_API_KEY is never exposed to the client (mobile app).
- * Only authenticated users can access this endpoint.
- * 
- * Setup:
- * 1. Place this file inside the `pb_hooks` directory of your PocketBase server.
- * 2. Set the GEMINI_API_KEY environment variable on your server before starting PocketBase:
- *    export GEMINI_API_KEY="your_actual_key_here"
- *    ./pocketbase serve
- */
+//
+// Proxy Gemini untuk klien mobile: kunci API tidak pernah keluar dari server, dan
+// hanya pemakai yang login yang boleh memakainya ($apis.requireAuth()).
+//
+// Batas yang ditegakkan di sini (semuanya terukur oleh tools/test/ai-proxy.mjs):
+//   - tipe payload divalidasi sebelum diteruskan (prompt wajib string)
+//   - panjang prompt dibatasi supaya satu akun tidak bisa mengirim dokumen raksasa
+//   - kegagalan upstream dibalas generik; pesan vendor (kode, status, isi `res.raw`)
+//     hanya masuk ke log server
+//   - rate limit per akun per menit
+//
+// API yang dipakai dipilih yang tersedia baik di PocketBase 0.26 maupun 0.40:
+// `c.requestInfo().body` (bukan c.bind()/DynamicModel yang gagal di 0.40), `c.auth`
+// (bukan c.authRecord), dan `c.json()` untuk status non-standar (BadRequestError hanya
+// memberi 400).
+//
+// ⚠️ Dua perilaku JSVM PocketBase yang sudah menjebak dan jadi alasan bentuk kode di
+// bawah ini (semuanya diukur 2026-10-07 di server 0.40.4):
+//   1. Binding level-skrip TIDAK terlihat dari dalam closure handler — `const` di luar
+//      `routerAdd(...)` maupun `function` yang didefinisikan sebelum/ sesudahnya
+//      menghasilkan "ReferenceError: <nama> is not defined" saat request, dan
+//      PocketBase membalas 400 generik tanpa jejak di stdout. Karena itu semua konstanta
+//      dan helper hidup di dalam body handler.
+//   2. `$app.store()` bukan `Save/Get/Delete` seperti di Go: yang ada `get(key)`,
+//      `set(key, value)`, `has(key)`, `remove(key)`; TTL memakai default registrasi
+//      "cache" = 60 detik, dan `set` dengan tiga argumen menyimpan argumen keduanya.
+//      `$apis.requireRateLimit()` juga TIDAK ada di 0.40.4, jadi window-nya manual.
 
 routerAdd("POST", "/api/ai/gemini", (c) => {
-  // Authenticated record is guaranteed by $apis.requireAuth() below (c.auth works
-  // on both PB 0.26 and 0.40; c.authRecord / c.get("authRecord") are nil there).
+  const MAX_PROMPT_CHARS = 4000
+  const RATE_LIMIT_REQUESTS = 10
+  const RATE_LIMIT_KEY_PREFIX = 'ai:rate:'
 
-  // 1. Fetch API Key securely from Server Environment Variables
+  const logServerSide = (message, meta) => {
+    // Bentuk argumen logger berbeda antar versi PocketBase; kegagalan log tidak boleh
+    // menggagalkan respons ke klien.
+    try {
+      $app.logger.error(message, 'detail', String(meta).slice(0, 500))
+    } catch (e) {
+      // diabaikan dengan sengaja
+    }
+  }
+
   const apiKey = $os.getenv("GEMINI_API_KEY")
   if (!apiKey) {
     throw new BadRequestError("GEMINI_API_KEY is not configured on the server.")
   }
 
-  // 2. Parse the Request Body (requestInfo() is the form that works on PB 0.26 and 0.40;
-  //    c.bind()/DynamicModel throws "Object has no member 'bind'" on 0.40)
   const body = c.requestInfo().body || {}
   const prompt = body.prompt
 
-  if (!prompt) {
+  if (prompt === undefined || prompt === null || prompt === "") {
     throw new BadRequestError("Prompt is required.")
   }
+  if (typeof prompt !== "string") {
+    throw new BadRequestError("Prompt must be a string.")
+  }
+  if (prompt.length > MAX_PROMPT_CHARS) {
+    return c.json(413, { message: "Prompt terlalu panjang (maksimum " + MAX_PROMPT_CHARS + " karakter)." })
+  }
 
-  // 4. Send Request to Google Gemini API
+  // Fixed-window counter; store bersama supaya tidak bergantung pada berapa JSVM
+  // runtime yang dipakai, dan TTL 60 detik membuat jendela menutup sendiri.
+  const store = $app.store()
+  const rateKey = RATE_LIMIT_KEY_PREFIX + c.auth.id
+  const seen = Number(store.get(rateKey) || 0) + 1
+  store.set(rateKey, seen)
+  if (seen > RATE_LIMIT_REQUESTS) {
+    return c.json(429, { message: "Terlalu banyak permintaan AI. Tunggu sebentar lalu coba lagi." })
+  }
+
   // Rolling alias on purpose: the pinned names this hook used before (gemini-2.0-flash,
   // gemini-2.5-flash) have both been retired upstream, and gemini-flash-latest was
   // returning RESOURCE_EXHAUSTED on 5/5 probes while gemini-flash-lite-latest was 5/5.
@@ -57,9 +94,14 @@ routerAdd("POST", "/api/ai/gemini", (c) => {
   })
 
   if (res.statusCode !== 200) {
-    throw new BadRequestError("Failed to communicate with Gemini API: " + res.raw)
+    logServerSide("ai_proxy: upstream menolak", "status=" + res.statusCode + " raw=" + res.raw)
+    return c.json(502, { message: "Layanan AI sedang tidak tersedia. Coba lagi beberapa saat." })
   }
 
-  // 5. Return the JSON response to the client
-  return c.json(200, JSON.parse(res.raw))
+  try {
+    return c.json(200, JSON.parse(res.raw))
+  } catch (e) {
+    logServerSide("ai_proxy: respons upstream bukan JSON", res.raw)
+    return c.json(502, { message: "Layanan AI memberi respons yang tidak dapat dibaca." })
+  }
 }, $apis.requireAuth())
