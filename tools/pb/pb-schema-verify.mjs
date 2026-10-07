@@ -76,15 +76,21 @@ await t('POST /api/ai/gemini tanpa token harus 401', async () => {
   if (fetchWrap('gemini anon', r.status, 401) === null) throw new Error('status salah')
   return 'ok'
 })
-const keySet = process.env.GEMINI_API_KEY ? true : false
-console.log(`     ${tag} :: GEMINI_API_KEY ${keySet ? 'SET (lewati assertion 400)' : 'kosong (assert 400 konfigurasi)'}`)
-if (!keySet) {
-  await t('POST /api/ai/gemini dengan token harus 400 konfigurasi key', async () => {
-    const r = await fetch(BASE + '/api/ai/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: app.authStore.token }, body: JSON.stringify({ prompt: 'hi' }) })
-    const body = await r.text()
-    if (r.status !== 400 || !/GEMINI_API_KEY is not configured/.test(body)) { bad++; throw new Error('unexpected ' + r.status + ' ' + body.slice(0, 100)) }
-    return 'HTTP 400 + pesan konfigurasi key'
-  })
-}
+// Konfigurasi key dibaca dari jawaban SERVER, bukan dari env proses verifier.
+// Pelajaran terukur 2026-10-07: versi lama memakai `process.env.GEMINI_API_KEY` di sisi kita,
+// padahal container bisa dipasang key sampah tanpa shell ini tahu — akibatnya assertion
+// "harus 400 konfigurasi" merah palsu (server menjawab 502 karena key-nya memang ada).
+// Ketiga keadaan di bawah tetap menuntut bukti, jadi tidak ada jalur yang kembali vacuous.
+await t('POST /api/ai/gemini dengan token: konfigurasi/key upstream tertangani tanpa bocor', async () => {
+  const r = await fetch(BASE + '/api/ai/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: app.authStore.token }, body: JSON.stringify({ prompt: 'hi' }) })
+  const body = await r.text()
+  if (r.status === 400 && /GEMINI_API_KEY is not configured/.test(body)) return 'server tanpa key -> HTTP 400 pesan konfigurasi'
+  if (r.status === 502) {
+    if (/api\.googleapis|generativelanguage|INVALID_ARGUMENT|API key not valid|googleapis\.com/.test(body)) throw new Error('LEAK: body 502 menyebut detail upstream: ' + body.slice(0, 160))
+    return 'server dengan key (upstream menolak) -> HTTP 502 generik tanpa detail vendor'
+  }
+  if (r.status === 200) return 'server dengan key hidup -> HTTP 200'
+  throw new Error('unexpected ' + r.status + ' ' + body.slice(0, 160))
+})
 console.log(bad === 0 ? `DONE ${tag} :: semua pemeriksaan lulus` : `DONE ${tag} :: ${bad} pemeriksaan GAGAL`)
 process.exit(bad === 0 ? 0 : 1)
