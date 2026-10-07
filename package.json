@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test:preflight": "node tools/test/preflight.mjs",
     "test:seed": "node tools/test/seed.mjs",
+    "test:enum": "node tools/test/enum-contract.mjs",
+    "test:findings": "node tools/test/findings.mjs",
     "test:device:up": "bash tools/test/device-up.sh",
     "test:probe": "bash tools/test/device-probe.sh",
     "test:bundle": "node tools/test/bundle-url.mjs"
