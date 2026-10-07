@@ -21,23 +21,21 @@ const NEUTRAL_COLOR = '#9CA3AF';
 
 const FILTERS = ['All Tasks', 'Work', 'Study', 'Personal', 'Health', 'Other'];
 
-// Mock timeline for demo when no tasks
-const MOCK_TIMELINE: Array<{
+// Baris timeline selalu dibangun dari Task nyata. Dulu ada MOCK_TIMELINE berisi task
+// karangan ("Team Sync" dll) yang cuma dipakai sebagai tipe, dan gampang sekali
+// keliru dianggap fallback yang wajar.
+type TimelineItem = {
   time: string;
   type: 'task' | 'free' | 'done';
-  task?: { id?: string; title: string; timeLabel: string; priority?: string; category?: string };
+  task?: Task;
+  timeLabel?: string;
   duration?: string;
-}> = [
-  { time: '09:00', type: 'done', task: { id: 'm1', title: 'Morning Review', timeLabel: '09:00 – 09:30', category: 'Work' } },
-  { time: '10:00', type: 'task', task: { id: 'm2', title: 'Deep Work Block', timeLabel: '10:00 – 12:00 (2h)', priority: 'High', category: 'Work' } },
-  { time: '12:00', type: 'free', duration: '1h 30m' },
-  { time: '13:30', type: 'task', task: { title: 'Team Sync', timeLabel: '13:30 – 14:30', category: 'Work' } },
-  { time: '15:00', type: 'free', duration: '1h' },
-  { time: '16:00', type: 'task', task: { title: 'Strategy Review', timeLabel: '16:00 – 17:30', priority: 'Medium', category: 'Work' } },
-];
+};
 
-function TimelineTask({ item, onPress, onSmartAlarmPress }: { item: typeof MOCK_TIMELINE[0]; onPress?: () => void; onSmartAlarmPress?: () => void }) {
+function TimelineTask({ item, onPress, onSmartAlarmPress }: { item: TimelineItem; onPress?: () => void; onSmartAlarmPress?: () => void }) {
+  const { armedAlarms } = useStore();
   const color = CATEGORY_COLORS[item.task?.category || ''] || NEUTRAL_COLOR;
+  const alarmArmed = !!item.task && armedAlarms.includes(item.task.id);
 
   if (item.type === 'done') {
     return (
@@ -47,7 +45,7 @@ function TimelineTask({ item, onPress, onSmartAlarmPress }: { item: typeof MOCK_
         <View style={[styles.taskCard, styles.taskCardDone]}>
           <Ionicons name="checkmark-circle" size={16} color="rgba(52, 211, 153, 0.6)" style={{ alignSelf: 'flex-end' }} />
           <Text style={styles.taskTitleDone}>{item.task?.title}</Text>
-          <Text style={styles.taskTime}>{item.task?.timeLabel}</Text>
+          <Text style={styles.taskTime}>{item.timeLabel}</Text>
         </View>
       </View>
     );
@@ -88,20 +86,30 @@ function TimelineTask({ item, onPress, onSmartAlarmPress }: { item: typeof MOCK_
             <Text style={styles.taskTitle}>{item.task?.title}</Text>
             <View style={styles.taskMeta}>
               <Ionicons name="time-outline" size={11} color="rgba(255,255,255,0.45)" />
-              <Text style={styles.taskTime}>{item.task?.timeLabel}</Text>
+              <Text style={styles.taskTime}>{item.timeLabel}</Text>
             </View>
           </View>
         </View>
-        {/* Smart Alarm chip */}
-        <TouchableOpacity 
-          style={styles.alarmChip}
-          onPress={onSmartAlarmPress}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="notifications-outline" size={11} color="#00D4FF" />
-          <Text style={styles.alarmChipText}>Smart Alarm set · 10 min before</Text>
-          <Ionicons name="chevron-forward" size={11} color="rgba(255,255,255,0.3)" />
-        </TouchableOpacity>
+        {/* Chip hanya boleh mengklaim "set" kalau alarmnya benar-benar terdaftar di HP */}
+        {item.task?.has_alarm ? (
+          <TouchableOpacity
+            style={styles.alarmChip}
+            onPress={onSmartAlarmPress}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name={alarmArmed ? 'notifications' : 'notifications-off-outline'}
+              size={11}
+              color={alarmArmed ? '#00D4FF' : '#F59E0B'}
+            />
+            <Text style={[styles.alarmChipText, !alarmArmed && { color: '#F59E0B' }]}>
+              {alarmArmed
+                ? `Smart Alarm set · ${item.task.alarm_minutes_before} min before`
+                : 'Alarm diminta, tapi belum terdaftar di HP'}
+            </Text>
+            <Ionicons name="chevron-forward" size={11} color="rgba(255,255,255,0.3)" />
+          </TouchableOpacity>
+        ) : null}
       </TouchableOpacity>
     </View>
   );
@@ -109,7 +117,7 @@ function TimelineTask({ item, onPress, onSmartAlarmPress }: { item: typeof MOCK_
 
 export default function TimelineScreen() {
   const router = useRouter();
-  const { tasks, user, profile, syncFetchTasks, setActiveTask, syncAddMultipleTasks } = useStore();
+  const { tasks, user, profile, syncFetchTasks, setActiveTask, syncAddMultipleTasks, armedAlarms } = useStore();
   const [filter, setFilter] = useState('All Tasks');
   const [isAutoPlanning, setIsAutoPlanning] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -198,7 +206,7 @@ export default function TimelineScreen() {
 
     const sorted = [...filtered].sort((a,b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime());
     
-    const items: typeof MOCK_TIMELINE = [];
+    const items: TimelineItem[] = [];
     let lastEnd = new Date(sorted[0].start_time!);
     lastEnd.setHours(9, 0, 0, 0); // Start day at 9 AM for timeline view if empty before
 
@@ -219,13 +227,8 @@ export default function TimelineScreen() {
       items.push({
         time: start.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
         type: t.is_completed ? 'done' : 'task',
-        task: {
-          id: t.id,
-          title: t.title,
-          timeLabel: `${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} – ${end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
-          priority: t.priority,
-          category: t.category,
-        }
+        timeLabel: `${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} – ${end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`,
+        task: t
       });
 
       lastEnd = end;
@@ -251,7 +254,7 @@ export default function TimelineScreen() {
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/smart-alarm')} activeOpacity={0.8}>
             <Ionicons name="notifications-outline" size={20} color="rgba(255,255,255,0.7)" />
-            <View style={styles.notifDot} />
+            {armedAlarms.length > 0 && <View style={styles.notifDot} />}
           </TouchableOpacity>
           <View style={styles.avatar}>
             <Ionicons name="person" size={18} color="rgba(255,255,255,0.6)" />

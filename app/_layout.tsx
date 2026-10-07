@@ -29,7 +29,7 @@ if (!isExpoGo) {
 
 export default function RootLayout() {
   const router = useRouter();
-  const { setUser, setProfile } = useStore();
+  const { setUser, setProfile, setTasks } = useStore();
 
   const [loading, setLoading] = useState(true);
 
@@ -62,6 +62,7 @@ export default function RootLayout() {
       } else {
         setUser(null);
         setProfile(null);
+        setTasks([]);
       }
     });
 
