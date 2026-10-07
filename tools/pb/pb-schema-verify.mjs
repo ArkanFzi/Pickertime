@@ -57,7 +57,16 @@ if (task) {
       .catch(async () => { const l = await other.collection('Profiles').getFullList({ filter: 'email = "' + EMAIL + '"' }); throw new Error('leak: ' + l.length) })
     const mine = await other.collection('Tasks').getFullList()
     if (mine.length) throw new Error('LEAK: other user sees ' + mine.length + ' tasks')
-    return 'other sees 0 tasks; own profile readable=' + !!(await other.collection('Profiles').getOne(other.authStore.model.id).catch(() => null))
+    // F-03: isolasi bukan cuma soal baca — createRule harus mengikat kepemilikan.
+    let writeRejected = ''
+    try {
+      const spoof = await other.collection('Tasks').create({ user: uid, title: 'Verify spoof', description: 'd', category: 'Study', priority: 'Medium', start_time: iso, end_time: new Date(Date.now() + 36e5).toISOString(), duration_minutes: 30, is_completed: false, has_alarm: false, alarm_minutes_before: 10 })
+      throw new Error('SPOOF: user lain bisa menulis task atas nama ' + uid + ' (id=' + spoof.id + ')')
+    } catch (err) {
+      if (String(err.message).startsWith('SPOOF')) throw err
+      writeRejected = 'HTTP ' + err.status
+    }
+    return 'other sees 0 tasks; tulis atas nama user lain ' + writeRejected + '; own profile readable=' + !!(await other.collection('Profiles').getOne(other.authStore.model.id).catch(() => null))
   })
 }
 // ai_proxy hook: harus menolak tanpa auth, dan melaporkan konfigurasi jika tanpa key
