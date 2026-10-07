@@ -578,7 +578,7 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
 - Tunnel `api.elarisnoir.my.id` masih punya 520 laten terukur 1/475 (~0,2%, lihat M7.2);
   perbaikan buffer hanya terbukti menghilangkan peringatan log, bukan menghilangkan 520.
 - `pb-prod-smoke.mjs` menulis lalu menghapus baris nyata di produksi; bukan alat untuk dipanggil
-  berulang tanpa sadar (retry transien sudah ada, tapi副作用-nya tetap ada).
+  berulang tanpa sadar (retry transien sudah ada, tapi efek sampingnya tetap ada).
 - Kredensial git yang dipakai untuk P4 adalah token yang keputusannya "risiko diterima" (M6).
   Reopener M6 eksplisit menyebut operasi tulis ke `main` → keputusan itu berlaku lagi di P4.
 
@@ -691,7 +691,7 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
 
 ## M10 — Harness uji perangkat (dev build) + temuan yang terbukti di perangkat (2026-10-07)
 
-Status: harness jalan dan repeatable; 7 temuan terbukti dengan keluaran perintah.
+Status: harness jalan dan repeatable; matriks 10.3 berisi 11 baris (10 temuan merah, 1 lulus).
 **Perbaikan kode atas temuan ini BELUM satu baris pun dieksekusi** — akan disusun sebagai M11.
 
 ### 10.1 Basis terukur
@@ -723,9 +723,10 @@ Status: harness jalan dan repeatable; 7 temuan terbukti dengan keluaran perintah
 
 | perintah | fungsi | guard |
 |---|---|---|
-| `npm run test:preflight` | 8 gerbang lingkungan (adb state, `/data` free, dev-client terpasang, PB sehat, `.env` bukan produksi) | keluar bukan-0 sebelum apa pun jalan |
-| `npm run test:seed` | akun + 5 task + 1 sesi lewat **signup publik** | `if (/elarisnoir/.test(URL)) exit(1)` |
+| `npm run test:preflight` | 9 gerbang lingkungan (adb state, `/data` free, dev-client terpasang, PB sehat, `.env` bukan produksi, isi `adb reverse --list`) | keluar bukan-0 sebelum apa pun jalan |
+| `npm run test:seed` | akun + 5 task + 1 sesi lewat **signup publik**; idempoten (hapus dulu record milik akun seed) | `if (/elarisnoir/.test(URL)) exit(1)`; delete dibatasi `user = <id seed>` |
 | `npm run test:device:up` | preflight → reverse → Metro → deep link dev client | — |
+| `npm run test:device:routes` | jalan 11 rute lewat deep link, cek processes/pid/crash per rute + screenshot | yang ditegakkan hanya "app hidup & tidak crash" — **tidak** membuktikan datanya benar (lihat F-28: rute tampil sehat saat backend mati total) |
 | `npm run test:probe <label>` | dump alarm/notifikasi/izin/pid/crash yang **difilter ke paket ini** | crash aplikasi lain tidak ikut tercatat |
 | `npm run test:enum` | kontrak enum UI vs snapshot skema `Tasks.category` | — |
 | `npm run test:findings` | bukti F-01/F-02/F-03 lintas akun | membersihkan baris yang dibuatnya |
@@ -740,13 +741,14 @@ Status: harness jalan dan repeatable; 7 temuan terbukti dengan keluaran perintah
 | F-01 | UI/prompt memakai kategori yang ditolak backend | `npm run test:enum` | `RED` di `app/(tabs)/schedule.tsx`, `app/edit-task.tsx`, `CATEGORY_COLORS` di `timeline.tsx`, prompt AutoPlan `lib/gemini.ts` (`Creative`/`School`/`General` tak ada). Catatan tambahan: `FILTERS` hijau tapi tidak memuat `Other` → task `Other` tak bisa difilter |
 | F-13/F-14 | proxy membocorkan pesan error upstream & tak membatasi panjang & tak ada rate limit | `npm run test:ai-proxy` dengan backend uji berjalan `GEMINI_API_KEY=INVALID-KEY-PROBE-ONLY` | 4 `RED`: (a) body error vendor/Gemini ditelanjangi ke klien (`"API key not valid…INVALID_ARGUMENT"`), (b) prompt 200.000 karakter diteruskan utuh, (c) prompt bertipe objek diteruskan apa adanya, (d) 12 request paralel semuanya diteruskan, 0 ditahan. `GREEN`: token anonim → 401 dan prompt hilang → 400 lokal. **Kalau env key tidak dipasang, keempatnya tidak bisa dinilai** — alatnya keluar dengan `exit(2)` supaya tidak hijau palsu |
 | F-19 | tipe rusak hanya saat rute bertipe dibuat | `npx tsc --noEmit` dengan vs tanpa `.expo/types/router.d.ts` | 1 error `components/ExternalLink.tsx:13` vs 0 error |
-| F-22 | chip "Smart Alarm set · 10 min before" tanpa alarm | `adb shell dumpsys alarm \| grep -c elarisnoir` = **0**, vs render无条件 `app/(tabs)/timeline.tsx:95-101` | kartu task tetap mengklaim alarm terpasang. `scheduleTaskNotification` hanya dipanggil `store/useStore.ts:166,190`; `syncUpdateTask` (≈:205) tidak pernah cancel/re-arm |
+| F-22 | chip "Smart Alarm set · 10 min before" tanpa alarm | `adb shell dumpsys alarm \| grep -c elarisnoir` = **0**, vs render tanpa syarat `app/(tabs)/timeline.tsx:95-101` | kartu task tetap mengklaim alarm terpasang. `scheduleTaskNotification` hanya dipanggil `store/useStore.ts:166,190`; `syncUpdateTask` (≈:205) tidak pernah cancel/re-arm |
 | F-25 | kartu UPCOMING mengarang | `grep -n "Starts in 45m" app/(tabs)/index.tsx` → :206 literal di luar kondisional; :205 fallback `'Team Sync'` | terbukti dua arah: server mati → "Q3 Product Strategy"+"Team Sync"+"0 of 0 Done" tanpa state error; server hidup → task asli **tetap** ditulis "Starts in 45m" |
 | F-05 | timer focus bukan wall clock | screencap + epoch ms; `am start -n com.android.settings/.Settings` untuk background | foreground 35,6 s → 35 s layar (bersih); setelah 21,4 s background: harusnya 23:35, tampil **23:31→23:51** = **±16 s hilang**. Akar: `setInterval(p=>p-1)` `app/focus.tsx:70-86`. Turunan: `handleSessionComplete` menulis `duration_seconds: initialSeconds` (rencana, bukan nyata) → insights tak akan pernah akurat |
 | F-07 | guard auth cuma di satu titik | hapus baris `pb_auth` (setara logout), cold start mendarat benar di Welcome, lalu `am start -a VIEW -d pickertime://timeline` | **tembus**: layar terlindungi + tab bar ter-render tanpa redirect. `grep -rl Redirect app/` = 1 file (`app/index.tsx`); `(tabs)/_layout.tsx` dan `(auth)/_layout.tsx` tanpa guard. Bukan bocor data — API rules menolak, daftar kosong |
 | F-11 | empty state timeline | deep link saat logout | **LULUS** — "No Tasks Today" + Auto-Plan/Manual Entry wajar (dicatat agar tidak dikira bug) |
 | F-06 | izin kalender diminta untuk fitur yang tidak ada | `grep -rn "Calendar\." --include=*.ts --include=*.tsx . \| grep -v node_modules` → hanya 1 baris (`requestCalendarPermissionsAsync`); `dumpsys package \| sed -n '/requested permissions/,/^User 0/p'` → `READ_CALENDAR` + `WRITE_CALENDAR` | UI menjual "automatically block time around your existing meetings" (`permissions.tsx:35`), nol implementasi |
 | F-27 | izin DND selalu "berhasil" | `requestDNDPermissions()` isinya `return true` (`lib/notifications.ts:103`); grep `InterruptionFilter\|NotificationPolicy\|access_notification_policy` = 0 hasil | "Auto-silence non-essential alerts" tidak ada wujudnya. Ditambah lagi `handleEnable()` (`permissions.tsx:72-82`) membuang semua nilai kembali → izin `required: true` pun tidak ditegakkan |
+| F-28 | kegagalan backend/AI ditambal teks yang menyamar sebagai output AI, tanpa state error | `docker stop pt-pb-test` di tengah sesi (sisi host `curl /api/health` = `000`), lalu deep link `/welcome` → `/smart-alarm`; screenshot sebelum/sesudah dibaca; `docker start` kembali (host pulih `200`) | Dua lapis, keduanya terbukti dari satu probe: **(a) store menelan diam-diam** — `store/useStore.ts:290-291` satu-satunya tempat kata `error` di file itu dan isinya hanya `console.error`; tidak ada field error di state, `set()` dilewati saat gagal sehingga daftar **membeku di data lama** (Timeline Preview masih menampilkan "Doing: Kerjakan slide laporan"). **(b) UI menambal dengan string yang bentuknya sama persis dengan hasil AI** — kartu tetap berbunyi `Insight: Keep protecting your deep work blocks. You're making progress!` (`lib/gemini.ts:76`, return di blok `catch`) dan `Recommended Prep: Open relevant docs & tools / Put on noise-cancelling headphones / Set Slack to DND` (`lib/gemini.ts:100-102`, fallback per-role), padahal log Metro pada detik yang sama mencatat `WARN AI Proxy Error: [ClientResponseError 0]` dan `ERROR Gemini API Error: [Error: Failed to fetch AI suggestion from backend proxy.]`. Bedanya di dev build masih terlihat lewat LogBox; klaim "di produksi tidak bisa dibedakan sama sekali" adalah **inferensi dari kode** (tidak ada build release yang diuji), bukan hasil ukur. Catatan: countdown "0m" di screenshot sesudah **bukan** bug — memang menit terakhir task |
 
 ### 10.4 Yang TIDAK teruji (jangan dibaca sebagai sudah aman)
 
@@ -764,6 +766,16 @@ Satu perangkat, satu akun seed, satu sesi dev-build; angka drift diukur dari `sc
 (granularitas ±1 s, bukan osiloscope). Tidak ada satu pun klaim di 10.3 yang berasal dari pembacaan
 kode saja — kecuali baris "akar" yang memang penunjuk lokasi, dan itu disebut sebagai kode, bukan hasil ukur.
 
+Cara baca screenshot punya batas sendiri: yang dibandingkan adalah **teks yang tampil**, dan teks itu
+sendiri bisa dikarang aplikasi (F-25, F-28). Screenshot membuktikan "apa yang dilihat pengguna",
+bukan "apa yang benar".
+
+Prasyarat runtime alat (terukur, bukan asumsi): shell default mesin ini `node 18.20.8`, sedangkan
+`test:preflight` menolak node < 20 dan `test:auth:inject` butuh `node:sqlite` (>= 22.5). Di node 18
+perintahnya mati sebelum skrip jalan: `node: bad option: --experimental-sqlite`. `device-routes.sh`
+sudah menyiasati dengan `PT_NODE_BIN` (default `~/.nvm/versions/node/v22.23.2/bin`); alat lain belum,
+jadi jalankan lewat `nvm use 22` atau panggil biner node 22 langsung.
+
 ### 10.6 Koreksi diri selama sesi (biar tidak diulang)
 
 1. Dugaan "hook AI tak memvalidasi tipe payload" → **salah**, ditarik.
@@ -775,6 +787,17 @@ kode saja — kecuali baris "akar" yang memang penunjuk lokasi, dan itu disebut 
    scan dulu tanpa pembatas path.
 4. Layar "logged out + data mock" sempat saya baca sebagai hilangnya sesi; ternyata `pt-pb-test`
    sudah `Exited (0)` 3 jam. Cek `docker ps -a` sebelum menyimpulkan aplikasi rusak.
+5. `ERROR Fetch tasks error: [ClientResponseError 0]` di `/smart-alarm` sempat saya catat sebagai bug
+   aplikasi; penyebabnya **terowongan saya sendiri** — aturan `adb reverse` gugur setiap USB
+   re-enumerasi, jadi ponsel tidak menjangkau `127.0.0.1:8090`. Ditarik, dan jadi gerbang ke-9
+   `test:preflight` (periksa isi `adb reverse --list`, bukan hanya port di host).
+6. "No upcoming tasks" di `/smart-alarm` juga saya tuduh salah; ternyata semua task seed sudah lewat
+   (dibuat `+3m/+7m` pada jam 11 pagi, dilihat jam 3 sore). Ditarik. Perbaikan sebenarnya di alat:
+   `test:seed` sekarang idempoten dan selalu menghitung ulang offset dari `Date.now()`.
+   Pelajaran gabungan 4–6: sebelum menuduh aplikasi, buktikan **lapisan transport dan umur data** dulu.
+7. Klaim awal saya di 10.2 ("route smoke menangkap transport yang mati") salah saya tulis sendiri
+   sebelum diukur — smoke itu cuma mengecek proses/pid/crash. Dibetulkan di tabel sebelum di-commit:
+   alat tidak boleh diberi kredit yang belum dibuktikan.
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
