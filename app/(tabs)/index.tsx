@@ -5,17 +5,8 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
-import { useStore } from '@/store/useStore';
-import { pb } from '@/lib/pocketbase';
+import { useStore, Task } from '@/store/useStore';
 import { getNextBestAction, GeminiSuggestion } from '@/lib/gemini';
-
-const NEXT_ACTION_BY_ROLE: Record<string, { task: string; desc: string; duration: string; category: string }> = {
-  Student: { task: 'Chapter 4 Review', desc: 'Optimal deep study block based on your morning peak energy.', duration: '90 mins', category: 'Study' },
-  Professional: { task: 'Q3 Product Strategy', desc: 'Deep work block recommended based on your peak energy window.', duration: '90 mins', category: 'Strategy' },
-  Freelancer: { task: 'Client Proposal Draft', desc: 'Prime creative window for focused writing.', duration: '60 mins', category: 'Work' },
-  Creator: { task: 'Video Script Review', desc: 'Your engagement data shows peak creativity now.', duration: '45 mins', category: 'Content' },
-  Researcher: { task: 'Literature Review', desc: 'Ideal block for deep analytical work.', duration: '120 mins', category: 'Research' },
-};
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -33,17 +24,25 @@ function getEnergyStatus(energyPref: string): string {
   return 'Building Momentum';
 }
 
+function startMsOf(task: Task) {
+  return task.start_time ? new Date(task.start_time).getTime() : 0;
+}
+
+function endMsOf(task: Task) {
+  const start = startMsOf(task);
+  return task.end_time ? new Date(task.end_time).getTime() : start + task.duration_minutes * 60000;
+}
+
 export default function DashboardScreen() {
   const router = useRouter();
-  const { profile, tasks, setTasks, user, syncFetchTasks } = useStore();
+  const { profile, tasks, user, syncFetchTasks, setActiveTask } = useStore();
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
+  const [now, setNow] = useState(() => new Date());
   const [aiSuggestion, setAiSuggestion] = useState<GeminiSuggestion | null>(null);
+  const [aiFailed, setAiFailed] = useState(false);
   const [loadingAI, setLoadingAI] = useState(false);
 
-  const role = profile?.role || 'Professional';
-  const fallbackAction = NEXT_ACTION_BY_ROLE[role] || NEXT_ACTION_BY_ROLE['Professional'];
-  const nextAction = aiSuggestion || fallbackAction;
   const greeting = getGreeting();
   const energyStatus = getEnergyStatus(profile?.energy_pref || 'Morning');
 
@@ -55,6 +54,51 @@ export default function DashboardScreen() {
   const circumference = 2 * Math.PI * radius;
   const strokeOffset = circumference - (circumference * progressPct) / 100;
 
+  // Satu kartu = satu sumber data. Dulu judul task nyata ditempel "90 mins · Strategy"
+  // dari fallback karangan, sehingga angka palsu terlihat seperti milik user (F-25).
+  const pendingTasks = tasks
+    .filter((t) => t.start_time && !t.is_completed)
+    .sort((a, b) => startMsOf(a) - startMsOf(b));
+  const focusTask = pendingTasks[0] ?? null;
+
+  const minutesToStart = focusTask ? Math.round((startMsOf(focusTask) - now.getTime()) / 60000) : 0;
+  const isRunningNow = focusTask !== null && startMsOf(focusTask) <= now.getTime() && endMsOf(focusTask) >= now.getTime();
+  const isOverdue = focusTask !== null && endMsOf(focusTask) < now.getTime();
+  const minutesLate = focusTask ? Math.round((now.getTime() - endMsOf(focusTask)) / 60000) : 0;
+
+  const upcomingLabel = !focusTask
+    ? 'Nothing scheduled'
+    : isOverdue
+      ? `Overdue ${minutesLate}m`
+      : isRunningNow
+        ? 'In progress'
+        : minutesToStart <= 0
+          ? 'Starting now'
+          : `Starts in ${minutesToStart}m`;
+
+  const upcomingWindow = focusTask ? Math.max(1, endMsOf(focusTask) - startMsOf(focusTask)) : 1;
+  const upcomingElapsedPct = focusTask && isRunningNow
+    ? Math.min(100, Math.max(0, Math.round(((now.getTime() - startMsOf(focusTask)) / upcomingWindow) * 100)))
+    : 0;
+
+  const actionCard = aiSuggestion
+    ? { title: aiSuggestion.task, desc: aiSuggestion.desc, duration: aiSuggestion.duration, category: aiSuggestion.category, fromAI: true }
+    : focusTask
+      ? {
+        title: focusTask.title,
+        desc: focusTask.description || 'Your next scheduled task today.',
+        duration: `${focusTask.duration_minutes} mins`,
+        category: focusTask.category,
+        fromAI: false,
+      }
+      : {
+        title: 'No tasks yet',
+        desc: 'Add your first task to start tracking focus today.',
+        duration: '',
+        category: '',
+        fromAI: false,
+      };
+
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
@@ -63,6 +107,12 @@ export default function DashboardScreen() {
       ])
     ).start();
 
+    // Hitung mundur harus bergerak walau tidak ada perubahan data.
+    const tick = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(tick);
+  }, []);
+
+  useEffect(() => {
     if (user) {
       loadTasks();
     }
@@ -70,16 +120,11 @@ export default function DashboardScreen() {
 
   async function loadTasks() {
     if (!user) return;
-    try {
-      await syncFetchTasks();
-      const currentTasks = useStore.getState().tasks;
-      fetchAISuggestion(currentTasks);
-    } catch (error) {
-      console.error('Load tasks error:', error);
-    }
+    await syncFetchTasks();
+    fetchAISuggestion(useStore.getState().tasks);
   }
 
-  async function fetchAISuggestion(currentTasks: any[]) {
+  async function fetchAISuggestion(currentTasks: Task[]) {
     if (!profile) return;
     setLoadingAI(true);
     const suggestion = await getNextBestAction(
@@ -89,10 +134,9 @@ export default function DashboardScreen() {
       currentTasks
     );
     setAiSuggestion(suggestion);
+    setAiFailed(suggestion === null);
     setLoadingAI(false);
   }
-
-  const nextTask = tasks.find((t) => !t.is_completed);
 
   return (
     <View style={styles.container}>
@@ -129,27 +173,39 @@ export default function DashboardScreen() {
           <View style={styles.nextActionCard}>
             <View style={styles.nextActionGlow} />
             <Text style={styles.sectionBadge}>
-              {loadingAI ? '🤖 Thinking...' : '⚡ Next Best Action'}
+              {loadingAI ? '🤖 Thinking...' : actionCard.fromAI ? '⚡ AI Suggestion' : '⚡ Next Up'}
             </Text>
             <Text style={styles.nextActionTitle}>
-              {nextTask ? nextTask.title : nextAction.task}
+              {actionCard.title}
             </Text>
             <Text style={[styles.nextActionDesc, loadingAI && { opacity: 0.5 }]}>
-              {nextAction.desc}
+              {actionCard.desc}
             </Text>
-            <View style={styles.nextActionMeta}>
-              <View style={styles.metaItem}>
-                <Ionicons name="time-outline" size={14} color="rgba(255,255,255,0.5)" />
-                <Text style={styles.metaText}>{nextAction.duration}</Text>
+            {(actionCard.duration || actionCard.category) ? (
+              <View style={styles.nextActionMeta}>
+                {actionCard.duration ? (
+                  <View style={styles.metaItem}>
+                    <Ionicons name="time-outline" size={14} color="rgba(255,255,255,0.5)" />
+                    <Text style={styles.metaText}>{actionCard.duration}</Text>
+                  </View>
+                ) : null}
+                {actionCard.category ? (
+                  <View style={styles.metaItem}>
+                    <Ionicons name="layers-outline" size={14} color="rgba(255,255,255,0.5)" />
+                    <Text style={styles.metaText}>{actionCard.category}</Text>
+                  </View>
+                ) : null}
               </View>
-              <View style={styles.metaItem}>
-                <Ionicons name="layers-outline" size={14} color="rgba(255,255,255,0.5)" />
-                <Text style={styles.metaText}>{nextAction.category}</Text>
-              </View>
-            </View>
+            ) : null}
+            {aiFailed && !loadingAI ? (
+              <Text style={styles.aiNote}>AI is unavailable right now — this card shows your real schedule.</Text>
+            ) : null}
             <TouchableOpacity
               style={styles.startFocusBtn}
-              onPress={() => router.push('/focus')}
+              onPress={() => {
+                if (focusTask) setActiveTask(focusTask);
+                router.push('/focus');
+              }}
               activeOpacity={0.85}
             >
               <Ionicons name="play" size={14} color="#0A0F1D" />
@@ -202,11 +258,11 @@ export default function DashboardScreen() {
               </View>
               <View>
                 <Text style={styles.upcomingTitle} numberOfLines={1}>
-                  {nextTask ? nextTask.title : 'Team Sync'}
+                  {focusTask ? focusTask.title : 'No scheduled task'}
                 </Text>
-                <Text style={styles.upcomingTime}>Starts in 45m</Text>
+                <Text style={styles.upcomingTime}>{upcomingLabel}</Text>
                 <View style={styles.progressBar}>
-                  <View style={styles.progressFill} />
+                  <View style={[styles.progressFill, { width: `${upcomingElapsedPct}%` }]} />
                 </View>
               </View>
             </TouchableOpacity>
@@ -315,6 +371,7 @@ const styles = StyleSheet.create({
   sectionBadge: { fontSize: 11, fontWeight: '700', color: '#00D4FF', marginBottom: 10, letterSpacing: 0.5 },
   nextActionTitle: { fontSize: 22, fontWeight: '800', color: '#fff', marginBottom: 6 },
   nextActionDesc: { fontSize: 13, color: 'rgba(255,255,255,0.55)', lineHeight: 19, marginBottom: 16 },
+  aiNote: { fontSize: 11, color: '#F59E0B', lineHeight: 16, marginBottom: 12 },
   nextActionMeta: {
     flexDirection: 'row', gap: 20, marginBottom: 18,
     backgroundColor: 'rgba(10,15,29,0.5)',
@@ -365,7 +422,7 @@ const styles = StyleSheet.create({
   upcomingTitle: { fontSize: 14, fontWeight: '700', color: '#fff', marginTop: 12, marginBottom: 4 },
   upcomingTime: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 12 },
   progressBar: { width: '100%', height: 4, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 2 },
-  progressFill: { width: '33%', height: 4, backgroundColor: '#00D4FF', borderRadius: 2 },
+  progressFill: { width: '0%', height: 4, backgroundColor: '#00D4FF', borderRadius: 2 },
   quickActionsLabel: {
     fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.4)',
     letterSpacing: 1.5, marginTop: 4, marginLeft: 4,
