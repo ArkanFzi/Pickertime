@@ -693,6 +693,10 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
 
 Status: harness jalan dan repeatable; matriks 10.3 berisi 11 baris (10 temuan merah, 1 lulus).
 **Perbaikan kode atas temuan ini BELUM satu baris pun dieksekusi** — akan disusun sebagai M11.
+Sudah masuk branch: harness sesi ini lewat PR #8 ke `dev` (merge `924f96c`) lalu PR #9 `dev` → `main`
+(merge `f2639b9`); keduanya CI hijau dan **tidak** men-trigger `deploy.yml` (diff cuma `tools/test/`,
+`package.json`, `TODO.md`, `AGENTS.md` — di luar path filter deploy). PR #7 sebelumnya melompati `dev`
+sehingga `dev` tertinggal dari produksi; aturannya ditegakkan lagi di `AGENTS.md`.
 
 ### 10.1 Basis terukur
 
