@@ -808,8 +808,10 @@ jadi jalankan lewat `nvm use 22` atau panggil biner node 22 langsung.
 
 ## M11 — Perbaikan temuan M10 (branch `fix/ai-proxy-hardening`, 2026-10-07)
 
-Status: 15 commit di branch, **belum di-push dan belum ada run CI untuk commit ini**. Semua gerbang
-di bawah dijalankan di host pada sesi ini; angka dikutip apa adanya dari keluaran alat (H1).
+Status: 16 commit (`fix/ai-proxy-hardening` + koreksi gerbang + dokumentasi ini) sudah merge ke `dev`
+lewat PR #12 (`feade67`), CI hijau semua — lima job lulus, termasuk job baru `contract` dan gate
+findings di backend hasil migrasi. Semua angka di bawah dijalankan di host pada sesi ini dan dikutip
+apa adanya dari keluaran alat (H1).
 
 ### 11.1 Per temuan: apa yang diubah + bukti
 
@@ -826,7 +828,7 @@ di bawah dijalankan di host pada sesi ini; angka dikutip apa adanya dari keluara
 | F-06 + F-27 | `requestCalendarPermissions()` dan `requestDNDPermissions()` (isinya `return true`) dihapus; layar izin tinggal satu item wajib, hasil izin dibaca sungguh: denial memunculkan banner + tombol "Try Again", "nanti" tidak lagi berpura-pura sukses, preview "Team Sync" dikarang-dikarang dihapus | `0d7437d` | `grep -rn "expo-calendar\|Calendar\." app lib store` → **0**; `grep -rn "requestDNDPermissions" app lib store` → 1 hasil, komentar di `app/(auth)/permissions.tsx:14`. Batas jujur: `expo-calendar` masih ada di `package.json:28` dan entri `READ_CALENDAR`/`WRITE_CALENDAR` baru hilang dari manifest setelah **build ulang**, jadi bukti ini lapisan kode — bukan APK |
 | F-02 | `lib/taskContract.ts`: `taskPayloadError` + `createTaskBatch` (tolak seluruh batch sebelum baris pertama bila ada payload haram; batalkan baris yang terlanjur tertulis bila server gagal). Server tidak punya transaksi untuk record user — `/api/batch` dijawab `403 "Batch requests are not allowed"` (terukur), jadi rollback klien adalah plafon jujur | `60c5cdd`, `6343fd3` | `npm run test:batch` → 8 assertion `GREEN` (F-02a…F-02h), penutup `Batch tulis task tidak meninggalkan baris yatim.`; `test:findings` dengan penulis PocketBase asli → `GREEN F-02 batch ditolak tanpa baris yatim — Task 5 dari 5 ditolak sebelum ditulis` |
 | F-03 | migrasi `1790909800_ownership_create_rule.js`: `createRule = '@request.auth.id != "" && user = @request.auth.id'` untuk `Tasks`, `Focus_Sessions`, `Workspace_Events` | `018f669` | Di backend uji (8099) **dan** di container yang dibangun segar dari `pb_migrations` (8097, `docker run` lalu `seed.mjs`): `GREEN F-03 penulisan atas nama user lain ditolak HTTP 400`; `pb-schema-verify` → `other sees 0 tasks; tulis atas nama user lain HTTP 400; own profile readable=true`. Lubangnya pernah dibuka lagi di server buang dan verifier langsung jadi MERAH |
-| CI | job baru `contract` (`test:enum` + `test:batch`); langkah "Bukti temuan device harness sudah tertutup" (`seed.mjs` + `findings.mjs`) di job `schema`; node `'20'`→`'22'` mengikuti `.nvmrc`; `findings.mjs` direpolarisasi (temuan tertutup = GREEN, keluar 0) | `396115b` | Belum ada run CI untuk branch ini — baris ini baru bisa dinyatakan terukur setelah PR ke `dev` hijau |
+| CI | job baru `contract` (`test:enum` + `test:batch`); langkah "Bukti temuan device harness sudah tertutup" (`seed.mjs` + `findings.mjs`) di job `schema`; node `'20'`→`'22'` mengikuti `.nvmrc`; `findings.mjs` direpolarisasi (temuan tertutup = GREEN, keluar 0) | `396115b` | Run PR #12 `37627652192`: `Type-check pass 28s`, `Skema PocketBase + hook AI pass 33s`, `Kontrak enum + batch tulis task pass 24s`, `Lint perkakas shell pass 5s`, `Scan rahasia di file ter-track pass 5s`, `main hanya hasil merge PR skipping` |
 
 ### 11.2 Dua gerbang yang saya temukan sendiri cacat selama M11
 
