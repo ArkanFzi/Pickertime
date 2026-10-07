@@ -881,12 +881,13 @@ rusak justru setelah kodenya diperbaiki.
   hidup dan `requireAuth` masih yang pertama menolak.
 - Gerbang agen ikut memeriksa **superuser** setelah restart dan hijau: itu bukti tidak langsung bahwa
   invarian M8.1 (kredensial superuser = env container) tidak pecah, dan jalur backup tidak putus diam-diam.
-- **Yang belum terbukti di produksi**: string `createRule` yang tersimpan di `Tasks`, `Focus_Sessions`,
-  `Workspace_Events`. Semua alat di repo ini sengaja menolak URL produksi (`if (/elarisnoir/.test(URL)) exit(1)`)
-  dan membacanya butuh kredensial superuser, jadi ini jalurnya kamu. Bentuknya cukup satu request baca-saja:
-  masuk ke `_superusers` lalu `GET /api/collections/Tasks` (dan dua koleksi lainnya) — nilai yang diharapkan
-  `@request.auth.id != "" && user = @request.auth.id`. Jangan taruh password di argumen perintah (H8);
-  lewatkan lewat stdin/variabel env yang tidak dicetak.
+- **Sudah terbukti di produksi (dibaca 2026-10-07 14:36Z dari host, baca-saja)**: `GET /api/collections`
+  dengan superuser dari `~/.config/pickertime/su.env` (lewat env, tidak ada rahasia di argumen — H8)
+  mengembalikan untuk `Tasks`, `Focus_Sessions` **dan** `Workspace_Events`:
+  `create = @request.auth.id != "" && user = @request.auth.id` (list/view/update/delete sama),
+  `Profiles.createRule` kosong (publik, memang untuk signup) dan empat rule lainnya `id = @request.auth.id`.
+  `jumlah koleksi di server: 10`, `health 200`. Jadi `1790909800_ownership_create_rule.js` benar-benar
+  sampai ke `pb_migrations` di VM — lubang F-03 tertutup di produksi, bukan hanya di backend uji.
 
 ## M11.5 — Verifikasi ulang M11 di perangkat (2026-10-07 malam, ponsel yang sama)
 
