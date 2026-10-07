@@ -961,7 +961,8 @@ pembatalan alarm UUID terbukti, bukan hanya dibaca dari kode.
 "Smart Alarm set" padahal OS tidak akan pernah menyalakannya. Sumber kebenaran chip adalah registry
 expo, bukan AlarmManager; di MIUI penghentian paksa/pembersihan latar adalah kejadian biasa.
 Yang masih terbuka: A-1…A-7 (notifikasi benar-benar bunyi tepat waktu) dan jadwal ulang alarm setelah
-proses dibunuh — keduanya butuh perubahan kode, bukan hanya pengukuran.
+proses dibunuh — keduanya butuh perubahan kode, bukan hanya pengukuran. **Ditambal kemudian pada hari
+yang sama: lihat M11.6, A-1 sudah terbukti sampai layar dan satu cacat channel ditemukan di jalur itu.**
 
 ### Temuan kosmetik/baru kecil dari sesi perangkat ini
 
@@ -976,6 +977,89 @@ proses dibunuh — keduanya butuh perubahan kode, bukan hanya pengukuran.
   (Duration 60 m → 120 m terukur di `m11-32`). Gotcha perkakas: jangan mulai swipe di area dial.
 - `adb shell input text` tidak men-dekode `%20` jadi spasi — judul task uji terbaca
   `Uji%20F-22%20alarm%20nyata`. Kesalahan pemanggil, bukan aplikasi.
+
+## M11.6 — Suite alarm A-1 dijalankan sampai benar-benar bunyi (2026-10-07 22:24–23:03, ponsel yang sama)
+
+Cara memasangnya: `start_time` satu task digeser ke `sekarang + lead + 5 menit` lewat PATCH ke backend
+uji (`/tmp/pt-a1.mjs shift <id> 10`, alat sesi — bukan bagian dari repo), lalu alarmnya **dipasang oleh
+aplikasi**: deep link `pickertime://edit-task?id=…` → "Update Task" → `syncUpdateTask` → `syncTaskAlarm`.
+Yang diuji tetap jalur aplikasi; alat hanya mengubah jadwal di server seperti yang akan dilakukan user
+dari layar lain.
+
+### A-1: alarm terdaftar di OS, menghasilkan notifikasi, dan dikonsumsi setelah api (terbukti)
+
+Tiga sumber independen untuk satu kejadian yang sama:
+
+1. AlarmManager: `RTC_WAKEUP #0: Alarm{ccde76a type 0 when 1791387000000 my.id.elarisnoir.pickertime}` /
+   `tag=*walarm*:expo.modules.notifications.NOTIFICATION_EVENT` / `when=2026-10-07 22:30:00.000`.
+2. NotificationManager: `NotificationRecord(... pkg=my.id.elarisnoir.pickertime ... tag=yv5v65cw6yr156z ...)`
+   dengan `android.title=String (Kerjakan slide laporan Starting Soon)` dan
+   `mSoundNotificationKey=0|my.id.elarisnoir.pickertime|0|yv5v65cw6yr156z|10502`.
+3. Layar (`a1-05-shade.png`): "Kerjakan slide laporan Starting Soon — You have 10 minutes to prepare.
+   Tap to open Smart Alarm." muncul di shade, dan siklus kedua mengulangnya di `a1-07-shade2.png`.
+
+Setelah api, `grep "RTC_WAKEUP.*elarisnoir"` kosong dan `dumpsys alarm` tinggal baris statistik
+(`u0a502:my.id.elarisnoir.pickertime +70ms running, 1 wakeups`) → alarmnya dikonsumsi OS, bukan sekadar
+hilang. Klaim "alarm benar-benar bunyi" yang sejak M10 tertulis terbuka sekarang tertutup untuk jalur ini.
+
+**Gotcha perkakas baru**: `dumpsys alarm | grep -c elarisnoir` mencetak 2 bahkan ketika tidak ada alarm
+aktif (baris statistik proses ikut cocok). Predikat yang benar adalah
+`grep "RTC_WAKEUP.*elarisnoir"` — angka mentah dari `grep -c` di sini menyesatkan.
+
+### F-31 (ditemukan + diperbaiki, terukur dua arah): alarm jatuh ke channel "Miscellaneous" milik expo
+
+- Sebelum perbaikan: `Notification(channel=expo_notifications_fallback_notification_channel ...)` dengan
+  `importance=4`. Channel itu bernama `mName=Miscellaneous` di sistem — user melihat "Lainnya" untuk
+  alarm yang seharusnya jadi fitur utama aplikasi.
+- Sebab: `content` tidak pernah mengirim `channelId`, dan `setNotificationChannelAsync('default', …)`
+  hanya dipanggil di dalam `requestNotificationPermissions()`, yaitu jalur onboarding yang tidak dilewati
+  user yang sudah login. Channel punya kita (MAX, getar `[0,250,250,250]`, lampu `#00D4FF`) tidak pernah
+  dipakai satu alarm pun.
+- Perbaikan (`ab102a6`): `ensureDefaultChannel()` dipanggil saat penjadwalan, dan `channelId` dipasang di
+  **trigger**. Salah menaruhnya langsung ketahuan oleh tipe, bukan oleh tebakan:
+  `error TS2353: Object literal may only specify known properties, and 'channelId' does not exist in type
+  'NotificationContentInput'` — field itu ada di `DateTriggerInput` (`node_modules/expo-notifications/build/Notifications.types.d.ts:325-329`).
+- Sesudah perbaikan, siklus alarm yang sama: `Notification(channel=default ...)` dengan `importance=5`,
+  dan dump mencatat `mId='default', mName=Smart Alarm, mImportance=5, mLightColor=-16722689,
+  mVibration=[0, 250, 250, 250]` — dibuat saat penjadwalan, tanpa melewati layar onboarding.
+
+### F-32 (ditemukan, belum diputuskan): "Smart Alarm" adalah notifikasi, bukan alarm
+
+Kedua channel memakai `AudioAttributes: usage=USAGE_NOTIFICATION content=CONTENT_TYPE_SONIFICATION` dan
+`mBypassDnd=false`. Konsekuensinya mengikuti kelas sistem, bukan kelas jam weker: volumenya volume
+notifikasi, tidak bisa menembus DND, dan tidak ada full-screen intent. Di ponsel uji `zen_mode=4`
+("alarms only") sedang aktif dan `mVibrateNotificationKey=null` pada kedua siklus — jadi harness ini
+**tidak** bisa mengklaim "terdengar/bergetar", hanya "notifikasi terpasang dan mengambil slot suara".
+Yang terbukti di repo ini hanya sampai di situ; menutup sisanya butuh keputusan produk (minta akses
+DND + `accessOverrideDnd`, atau pakai kanal alarm sungguhan), bukan satu baris kode.
+
+### F-33 (ditemukan, belum diperbaiki): layar Create Task tidak pernah bisa memasang alarm defaultnya
+
+`app/(tabs)/schedule.tsx:111-115` membulatkan start ke **perempat jam terdekat**
+(`Math.round(m/15)*15`) sementara lead alarm dikunci 10 menit di `:196`. Jarak start−now maksimal 7,5
+menit < 10 menit, dan `scheduleTaskNotification` mengembalikan `null` saat
+`triggerDate <= Date.now()` (`lib/notifications.ts`), jadi alarm dari slot default mati secara konstruksi.
+Terukur: task "Uji-Jadwal-Bulat" disimpan pada 23:02 dengan `start_time=2026-10-07 16:00:00.000Z`
+(= 23:00, sudah lewat) → `grep "RTC_WAKEUP.*elarisnoir"` kosong, chip membaca "belum terdaftar".
+Perbaikannya pilihan produk (bulatkan ke slot berikutnya? biarkan user memilih lead?) — tidak kutambal
+diam-diam.
+
+### F-16: "Save Anyway" hampir kuklaim mati, dan itu salah
+
+Dua tap di (360,1243) dan (360,1240) tidak menghasilkan apa pun, sementara "Save for Later" di
+(360,1131) langsung membuat record (`total=4` → `total=5`). Kesimpulan yang benar bukan "tombol no-op"
+melainkan "koordinatnya salah": PIL menemukan blok terisi pada baris 945–1053, jadi pusat tombol itu
+≈ (360,999) — 240 px di atas perkiraan mata. Kesalahan yang sama terjadi di M11.5 dan sekarang punya
+prosedur tetap: **ukur dulu dengan PIL, baru klaim no-op**. F-16 tetap terbuka; belum ada satu pun
+tombol yang terbukti mati dengan koordinat terukur.
+
+### Sisa M11.6
+
+- Chip untuk task yang alarmnya **sudah api** masih berbunyi "Alarm diminta, tapi belum terdaftar di HP"
+  (`a1-08`), padahal yang benar "sudah lewat". Bedanya perlu state, bukan pembacaan ulang OS.
+- A-2…A-7 belum dijalankan: jadwal ulang setelah proses dibunuh, snooze, dan aksi tap-notifikasi.
+- Data uji tertinggal di backend uji (bukan produksi): task `rzbusi008v4bbjq` "Uji-Jadwal-Bulat" dan
+  `yv5v65cw6yr156z` yang start-nya sudah digeser dua kali. Tidak dihapus.
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 

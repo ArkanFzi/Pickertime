@@ -16,6 +16,23 @@ async function getNotificationsModule() {
   }
 }
 
+// Channel 'default' dulu hanya dibuat di dalam requestNotificationPermissions(),
+// yang cuma jalan sekali di layar onboarding. User yang sudah login tidak pernah
+// ke sana, dan tanpa channelId expo menjatuhkan alarm ke channel
+// 'expo_notifications_fallback_notification_channel' ("Miscellaneous") — terukur:
+// getar dan warna lampu channel kita tidak pernah dipakai.
+export async function ensureDefaultChannel(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) return;
+  await Notifications.setNotificationChannelAsync('default', {
+    name: 'Smart Alarm',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#00D4FF',
+  });
+}
+
 export async function requestNotificationPermissions(): Promise<boolean> {
   try {
     const Notifications = await getNotificationsModule();
@@ -33,14 +50,7 @@ export async function requestNotificationPermissions(): Promise<boolean> {
       return false;
     }
 
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#00D4FF',
-      });
-    }
+    await ensureDefaultChannel();
 
     return true;
   } catch (error) {
@@ -73,6 +83,8 @@ export async function scheduleTaskNotification(task: Task): Promise<string | nul
     // dijadwalkan pada sesi aplikasi sebelumnya.
     await cancelTaskNotification(task.id);
 
+    await ensureDefaultChannel();
+
     // Identifier ada di tingkat request, bukan di dalam trigger: `trigger.identifier`
     // diabaikan expo (terukur: OS menyimpan UUID, bukan task.id).
     return await Notifications.scheduleNotificationAsync({
@@ -87,6 +99,9 @@ export async function scheduleTaskNotification(task: Task): Promise<string | nul
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: triggerDate,
+        // `channelId` ada di trigger (DateTriggerInput), bukan di content —
+        // tanpa ini alarm jatuh ke channel fallback expo.
+        channelId: 'default',
       },
     });
   } catch (error) {
