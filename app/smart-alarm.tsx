@@ -5,12 +5,13 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, Task } from '@/store/useStore';
-import { getSmartAlarmPrep, getAIInsight } from '@/lib/gemini';
+import { getSmartAlarmPrep, getAIInsight, PrepStep } from '@/lib/gemini';
 
 const SNOOZE_MINUTES = 5;
 
-
-const PREP_STEPS: Record<string, Array<{ icon: string; text: string }>> = {
+// Daftar lokal, BUKAN hasil AI. Hanya dipakai kalau panggilan AI gagal, dan judul
+// kartunya berubah jadi "Standard Prep" supaya tidak dikira rekomendasi personal.
+const PREP_STEPS: Record<string, PrepStep[]> = {
   Student: [
     { icon: 'laptop-outline', text: 'Open textbook & notes app' },
     { icon: 'cafe-outline', text: 'Get water or coffee' },
@@ -41,7 +42,8 @@ const PREP_STEPS: Record<string, Array<{ icon: string; text: string }>> = {
 export default function SmartAlarmScreen() {
   const router = useRouter();
   const { profile, tasks, syncToggleTask, syncSnoozeTask, syncFetchTasks, user, setActiveTask } = useStore();
-  const [prepSteps, setPrepSteps] = useState<Array<{ icon: string; text: string }>>([]);
+  const [prepSteps, setPrepSteps] = useState<PrepStep[]>([]);
+  const [prepFromAI, setPrepFromAI] = useState(false);
   const [loadingSteps, setLoadingSteps] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [snoozing, setSnoozing] = useState(false);
@@ -67,7 +69,7 @@ export default function SmartAlarmScreen() {
   const minutesUntil = Math.max(0, Math.floor(diffMs / 60000));
 
   const role = profile?.role || 'Professional';
-  const [aiInsight, setAiInsight] = useState<string>('');
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
   
   const fadeAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(0))).current;
   const slideAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(20))).current;
@@ -94,6 +96,10 @@ export default function SmartAlarmScreen() {
 
     if (nextTask) {
       fetchDynamicPrep(nextTask.title);
+    } else {
+      setPrepSteps([]);
+      setPrepFromAI(false);
+      setAiInsight(null);
     }
   }, [nextTask?.id]);
 
@@ -102,10 +108,11 @@ export default function SmartAlarmScreen() {
     // Fetch Prep Steps and Insight in parallel
     const [steps, insight] = await Promise.all([
       getSmartAlarmPrep(title, role),
-      profile ? getAIInsight(profile.role, profile.focus_goal || 'Stay productive', {}) : Promise.resolve('')
+      profile ? getAIInsight(profile.role, profile.focus_goal || 'Stay productive', {}) : Promise.resolve(null)
     ]);
-    setPrepSteps(steps);
-    if (insight) setAiInsight(insight);
+    setPrepSteps(steps ?? PREP_STEPS[role] ?? []);
+    setPrepFromAI(steps !== null);
+    setAiInsight(insight);
     setLoadingSteps(false);
   }
 
@@ -192,10 +199,10 @@ export default function SmartAlarmScreen() {
             <Ionicons name="hardware-chip-outline" size={16} color="#A78BFA" />
           </View>
           <Text style={styles.insightText}>
-            <Text style={styles.insightBold}>Insight: </Text>
-            {aiInsight || (nextTask 
+            <Text style={styles.insightBold}>{aiInsight ? 'Insight: ' : 'Reminder: '}</Text>
+            {aiInsight ?? (nextTask
               ? `You have ${minutesUntil} minutes before "${nextTask.title}". Use this time to prepare and clear distractions.`
-              : 'Add upcoming tasks to receive AI personalized insights.')}
+              : 'Add a scheduled task to see your countdown here.')}
           </Text>
         </Animated.View>
 
@@ -203,7 +210,7 @@ export default function SmartAlarmScreen() {
         <Animated.View style={Anim(2)}>
           <View style={styles.prepHeader}>
             <Ionicons name="list-outline" size={16} color="#00D4FF" />
-            <Text style={styles.prepTitle}>Recommended Prep</Text>
+            <Text style={styles.prepTitle}>{prepFromAI ? 'AI Recommended Prep' : 'Standard Prep'}</Text>
             {loadingSteps && <Text style={{fontSize: 10, color: '#00D4FF', marginLeft: 8}}>🤖 AI Thinking...</Text>}
           </View>
           <View style={styles.prepList}>

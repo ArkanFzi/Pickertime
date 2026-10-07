@@ -9,11 +9,13 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useStore } from '@/store/useStore';
 
 const CATEGORIES = [
+  // Identik dengan select `Tasks.category` di snapshot skema; nilai di luar daftar ini
+  // ditolak backend dengan 400 validation_invalid_value.
   { id: 'Work', color: '#00D4FF' },
   { id: 'Study', color: '#A78BFA' },
   { id: 'Health', color: '#34D399' },
   { id: 'Personal', color: '#F59E0B' },
-  { id: 'Creative', color: '#F87171' },
+  { id: 'Other', color: '#F87171' },
 ];
 
 const PRIORITIES = ['High', 'Medium', 'Low'];
