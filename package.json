@@ -15,7 +15,8 @@
     "test:ai-proxy": "node tools/test/ai-proxy.mjs",
     "test:device:up": "bash tools/test/device-up.sh",
     "test:probe": "bash tools/test/device-probe.sh",
-    "test:bundle": "node tools/test/bundle-url.mjs"
+    "test:bundle": "node tools/test/bundle-url.mjs",
+    "test:auth:inject": "node --experimental-sqlite tools/test/auth-inject.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
