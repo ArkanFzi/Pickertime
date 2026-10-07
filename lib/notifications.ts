@@ -1,4 +1,3 @@
-import * as Calendar from 'expo-calendar';
 import { Platform } from 'react-native';
 import { Task } from '@/store/useStore';
 
@@ -128,13 +127,4 @@ export async function cancelAllTaskNotifications(): Promise<void> {
   } catch (error) {
     console.log('Cancel notifications error:', error);
   }
-}
-
-export async function requestCalendarPermissions(): Promise<boolean> {
-  const { status } = await Calendar.requestCalendarPermissionsAsync();
-  return status === 'granted';
-}
-
-export async function requestDNDPermissions(): Promise<boolean> {
-  return true;
 }

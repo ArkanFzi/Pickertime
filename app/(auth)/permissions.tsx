@@ -6,14 +6,14 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 // expo-notifications static import removed — SDK 53 dropped push support in Expo Go.
 // Local notification permissions are handled via the lazy-loaded helper in @/lib/notifications.
-import { 
-  requestNotificationPermissions, 
-  requestCalendarPermissions, 
-  requestDNDPermissions 
-} from '@/lib/notifications';
+import { requestNotificationPermissions } from '@/lib/notifications';
 
 
 
+// Calendar Sync dan DND/Focus Control dulu ada di daftar ini, tapi keduanya tidak punya
+// implementasi sama sekali: `requestDNDPermissions()` cuma `return true` dan tidak ada satu
+// pun kode yang membaca kalender (F-06, F-27). Meminta izin untuk fitur yang tidak ada
+// lebih jujur diganti dengan tidak memintanya.
 const PERMISSIONS = [
   {
     id: 'notifications',
@@ -22,41 +22,16 @@ const PERMISSIONS = [
     bgColor: 'rgba(0,212,255,0.12)',
     borderColor: 'rgba(0,212,255,0.3)',
     title: 'Smart Notifications',
-    subtitle: 'Alerts for transitions & breaks',
-    desc: 'Required for context-aware alarms that gently pull you out of deep focus blocks before your next meeting.',
+    subtitle: 'Smart Alarm warnings before tasks start',
+    desc: 'Pickertime schedules a warning a few minutes before each task. Without this permission the alarm stays listed on the task but never sounds.',
     required: true,
-  },
-  {
-    id: 'calendar',
-    icon: 'calendar-outline',
-    iconColor: 'rgba(255,255,255,0.6)',
-    bgColor: 'rgba(255,255,255,0.05)',
-    borderColor: 'rgba(255,255,255,0.10)',
-    title: 'Calendar Sync',
-    subtitle: 'Google, Outlook, Apple',
-    desc: 'Optional. Allows Pickertime to automatically block time around your existing meetings.',
-    required: false,
-  },
-  {
-    id: 'dnd',
-    icon: 'moon-outline',
-    iconColor: 'rgba(255,255,255,0.6)',
-    bgColor: 'rgba(255,255,255,0.05)',
-    borderColor: 'rgba(255,255,255,0.10)',
-    title: 'DND / Focus Control',
-    subtitle: 'System-level silencer',
-    desc: 'Auto-silence non-essential alerts during your designated "Deep Flow" or "Pomodoro" sessions.',
-    required: false,
   },
 ];
 
 export default function PermissionsScreen() {
   const router = useRouter();
-  const [enabled, setEnabled] = useState<Record<string, boolean>>({
-    notifications: true,
-    calendar: false,
-    dnd: false,
-  });
+  const [enabled, setEnabled] = useState(true);
+  const [denied, setDenied] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   React.useEffect(() => {
@@ -69,17 +44,16 @@ export default function PermissionsScreen() {
   }, []);
 
   async function handleEnable() {
-    if (enabled.notifications) {
-      await requestNotificationPermissions();
+    if (!enabled) {
+      // Switch dimatikan berarti user memilih "nanti" — jangan berpura-pura berhasil.
+      router.replace('/');
+      return;
     }
-    if (enabled.calendar) {
-      await requestCalendarPermissions();
-    }
-    if (enabled.dnd) {
-      await requestDNDPermissions();
-    }
-    // Update profile with permissions if needed
-    router.replace('/');
+    // Dulu hasil ketiga request() dibuang, jadi izin yang ditolak pun terbaca sebagai
+    // langkah yang selesai dengan baik (F-27).
+    const granted = await requestNotificationPermissions();
+    setDenied(!granted);
+    if (granted) router.replace('/');
   }
 
 
@@ -106,7 +80,7 @@ export default function PermissionsScreen() {
 
         <Text style={styles.title}>System Access</Text>
         <Text style={styles.subtitle}>
-          Step 3/4: Enable integrations to allow Pickertime to actively manage your schedule and protect your focus.
+          Step 3/4: Pickertime needs notification access to sound the Smart Alarm before a task starts.
         </Text>
 
         {/* Permission Cards */}
@@ -123,16 +97,16 @@ export default function PermissionsScreen() {
                 </View>
               </View>
               <Switch
-                value={enabled[perm.id]}
-                onValueChange={(val) => setEnabled((prev) => ({ ...prev, [perm.id]: val }))}
+                value={enabled}
+                onValueChange={setEnabled}
                 trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(0,212,255,0.3)' }}
-                thumbColor={enabled[perm.id] ? '#00D4FF' : 'rgba(255,255,255,0.8)'}
+                thumbColor={enabled ? '#00D4FF' : 'rgba(255,255,255,0.8)'}
                 ios_backgroundColor="rgba(255,255,255,0.1)"
               />
             </View>
             <View style={styles.permDescBox}>
               <Text style={styles.permDesc}>
-                {perm.required ? '' : <Text style={styles.optional}>Optional. </Text>}
+                {perm.required ? <Text style={styles.requiredTag}>Required. </Text> : null}
                 {perm.desc}
               </Text>
             </View>
@@ -152,15 +126,31 @@ export default function PermissionsScreen() {
                 <Text style={styles.alarmTitle}>Deep Work Concluding</Text>
                 <View style={styles.nowBadge}><Text style={styles.nowText}>Now</Text></View>
               </View>
-              <Text style={styles.alarmDesc}>5 mins until "Team Sync". Wrap up your current thought process.</Text>
+              <Text style={styles.alarmDesc}>Example of how a Smart Alarm looks before your next task starts.</Text>
             </View>
           </View>
         </View>
 
+        {denied ? (
+          <View style={styles.deniedBox}>
+            <Ionicons name="alert-circle-outline" size={16} color="#F59E0B" />
+            <Text style={styles.deniedText}>
+              Notification access was denied, so Smart Alarm will not sound. Grant it in system
+              settings, or continue now and enable it later from the task screen.
+            </Text>
+          </View>
+        ) : null}
+
         {/* Actions */}
         <TouchableOpacity style={styles.primaryBtn} onPress={handleEnable} activeOpacity={0.85}>
-          <Text style={styles.primaryBtnText}>Enable Selected Access</Text>
-          <Ionicons name="checkmark" size={18} color="#0A0F1D" />
+          <Text style={styles.primaryBtnText}>
+            {denied ? 'Try Again' : 'Enable Selected Access'}
+          </Text>
+          <Ionicons
+            name={denied ? 'refresh' : 'checkmark'}
+            size={18}
+            color="#0A0F1D"
+          />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.skipFullBtn} onPress={() => router.replace('/')}>
@@ -213,7 +203,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)',
   },
   permDesc: { fontSize: 12, color: 'rgba(255,255,255,0.6)', lineHeight: 18 },
-  optional: { color: 'rgba(0,212,255,0.8)', fontWeight: '600' },
+  requiredTag: { color: '#F59E0B', fontWeight: '600' },
   sectionLabel: { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.35)', letterSpacing: 1.5, marginBottom: 10, marginTop: 8 },
   alarmPreview: {
     backgroundColor: 'rgba(255,255,255,0.04)',
@@ -240,6 +230,13 @@ const styles = StyleSheet.create({
   },
   nowText: { fontSize: 10, color: '#00D4FF', fontWeight: '700' },
   alarmDesc: { fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 17 },
+  deniedBox: {
+    flexDirection: 'row', gap: 10, alignItems: 'flex-start',
+    backgroundColor: 'rgba(245,158,11,0.10)',
+    borderWidth: 1, borderColor: 'rgba(245,158,11,0.35)',
+    borderRadius: 16, padding: 14, marginBottom: 16,
+  },
+  deniedText: { flex: 1, fontSize: 12, color: '#F59E0B', lineHeight: 18 },
   primaryBtn: {
     backgroundColor: '#00D4FF', borderRadius: 18, paddingVertical: 17,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
