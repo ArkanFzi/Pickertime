@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Animated,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, Animated, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -145,6 +145,13 @@ export default function TimelineScreen() {
     setIsAutoPlanning(true);
     try {
       const generated = await generateDailySchedule(profile.role, profile.focus_goal, profile.energy_pref);
+      // null = AI benar-benar tidak menghasilkan apa-apa. Dulu kasus ini tetap membuat
+      // tiga task nyata ("Morning Review" dll) dari teks statis, jadi user mengira
+      // itulah rencana AI-nya.
+      if (!generated) {
+        Alert.alert('Rencana AI tidak tersedia', 'Layanan AI gagal memberikan usulan. Tidak ada task yang dibuat. Coba lagi beberapa saat.');
+        return;
+      }
       
       const payloads: CreateTaskPayload[] = [];
       let startTime = new Date(nowTime);
@@ -170,8 +177,9 @@ export default function TimelineScreen() {
       }
       
       await syncAddMultipleTasks(payloads);
-    } catch (err) {
+    } catch (err: any) {
       console.error('AutoPlan failed:', err);
+      Alert.alert('AutoPlan gagal', err?.message || 'Task usulan AI tidak bisa disimpan. Coba lagi.');
     } finally {
       setIsAutoPlanning(false);
     }

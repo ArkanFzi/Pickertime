@@ -18,6 +18,8 @@ export default function InsightsScreen() {
   const router = useRouter();
   const { profile, user, snoozeCount, syncFetchTasks } = useStore();
   const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [aiFailed, setAiFailed] = useState(false);
+  const [aiDismissed, setAiDismissed] = useState(false);
 
   const [loadingAI, setLoadingAI] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
@@ -141,6 +143,8 @@ export default function InsightsScreen() {
       { trend: trendData || focusTrend } // Use fresh data if provided
     );
     setAiInsight(insight);
+    setAiFailed(insight === null);
+    if (insight) setAiDismissed(false);
     setLoadingAI(false);
   }
 
@@ -265,32 +269,42 @@ export default function InsightsScreen() {
 
         {/* AI Suggestion */}
         <Animated.View style={Animated_(3)}>
-          <Text style={styles.sectionTitle}>AI Suggestions</Text>
-          <View style={styles.suggestionCard}>
-            <View style={styles.suggestionGlow} />
-            <View style={styles.suggestionRow}>
-              <View style={styles.suggestionIcon}>
-                <Ionicons name="bulb-outline" size={16} color="#00D4FF" />
-              </View>
-              <View style={styles.suggestionText}>
-                <Text style={styles.suggestionTitle}>
-                  {loadingAI ? '🤖 Analyzing Pattern...' : 'Optimize Your Schedule'}
-                </Text>
-                <Text style={styles.suggestionBody}>
-                  {aiInsight || 'Complete a few focus sessions to get personalized advice.'}
-                </Text>
-              </View>
+          {!aiDismissed && (
+            <>
+              <Text style={styles.sectionTitle}>AI Suggestions</Text>
+              <View style={styles.suggestionCard}>
+                <View style={styles.suggestionGlow} />
+                <View style={styles.suggestionRow}>
+                  <View style={styles.suggestionIcon}>
+                    <Ionicons name="bulb-outline" size={16} color="#00D4FF" />
+                  </View>
+                  <View style={styles.suggestionText}>
+                    <Text style={styles.suggestionTitle}>
+                      {loadingAI ? '🤖 Analyzing Pattern...' : aiFailed ? 'AI advice unavailable' : 'Optimize Your Schedule'}
+                    </Text>
+                    <Text style={styles.suggestionBody}>
+                      {aiInsight ?? (aiFailed
+                        ? 'The AI service did not answer, so there is no recommendation to show. The numbers below are still your real data.'
+                        : 'Complete a few focus sessions to get personalized advice.')}
+                    </Text>
+                  </View>
 
-            </View>
-            <View style={styles.suggestionActions}>
-              <TouchableOpacity style={styles.adjustBtn} onPress={() => router.push('/schedule')} activeOpacity={0.8}>
-                <Text style={styles.adjustBtnText}>Adjust Schedule</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.dismissBtn} onPress={() => setAiInsight(null)} activeOpacity={0.8}>
-                <Text style={styles.dismissBtnText}>Dismiss</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+                </View>
+                <View style={styles.suggestionActions}>
+                  <TouchableOpacity style={styles.adjustBtn} onPress={() => router.push('/schedule')} activeOpacity={0.8}>
+                    <Text style={styles.adjustBtnText}>Adjust Schedule</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dismissBtn}
+                    onPress={() => { setAiDismissed(true); setAiInsight(null); }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.dismissBtnText}>Dismiss</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </>
+          )}
 
           {/* Alarm Effectiveness */}
           <View style={styles.alarmEffCard}>

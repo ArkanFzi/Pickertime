@@ -111,9 +111,11 @@ interface AppState {
   setIsRunning: (val: boolean) => void;
 
   /**
-   * Mengambil daftar task dari PocketBase untuk hari ini dan menyimpannya di Zustand
+   * Mengambil daftar task dari PocketBase untuk hari ini dan menyimpannya di Zustand.
+   * Kegagalan dicatat di `tasksError` supaya layar tidak diam-diam menampilkan data basi.
    */
   syncFetchTasks: () => Promise<void>;
+  tasksError: string | null;
 
   // Snooze analytics
   snoozeCount: number;
@@ -133,6 +135,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   // ─── Tasks (operasi lokal) ──────────────────────────────────────────────────
   tasks: [],
+  tasksError: null,
   setTasks: (tasks) => set({ tasks }),
   addTask: (task) => set((state) => ({ tasks: [task, ...state.tasks] })),
   updateTask: (id, updates) =>
@@ -285,10 +288,11 @@ export const useStore = create<AppState>((set, get) => ({
         sort: 'start_time',
       });
       if (records) {
-        set({ tasks: records as any });
+        set({ tasks: records as any, tasksError: null });
       }
     } catch (err) {
       console.error('Fetch tasks error:', err);
+      set({ tasksError: 'Daftar tugas gagal dimuat dari server. Isi yang tampil bisa basi.' });
     }
   },
 
