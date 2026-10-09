@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
 import { useStore, Task } from '@/store/useStore';
 import { getNextBestAction, GeminiSuggestion } from '@/lib/gemini';
+import { AiFailure, AI_FAILURE_TEXT } from '@/lib/aiContract';
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -40,7 +41,7 @@ export default function DashboardScreen() {
 
   const [now, setNow] = useState(() => new Date());
   const [aiSuggestion, setAiSuggestion] = useState<GeminiSuggestion | null>(null);
-  const [aiFailed, setAiFailed] = useState(false);
+  const [aiFailure, setAiFailure] = useState<AiFailure | null>(null);
   const [loadingAI, setLoadingAI] = useState(false);
 
   const greeting = getGreeting();
@@ -127,14 +128,14 @@ export default function DashboardScreen() {
   async function fetchAISuggestion(currentTasks: Task[]) {
     if (!profile) return;
     setLoadingAI(true);
-    const suggestion = await getNextBestAction(
+    const { value, failure } = await getNextBestAction(
       profile.role || 'Professional',
       profile.focus_goal || 'Productivity',
       profile.energy_pref || 'Morning',
       currentTasks
     );
-    setAiSuggestion(suggestion);
-    setAiFailed(suggestion === null);
+    setAiSuggestion(value);
+    setAiFailure(failure);
     setLoadingAI(false);
   }
 
@@ -197,8 +198,17 @@ export default function DashboardScreen() {
                 ) : null}
               </View>
             ) : null}
-            {aiFailed && !loadingAI ? (
-              <Text style={styles.aiNote}>AI is unavailable right now — this card shows your real schedule.</Text>
+            {aiFailure && !loadingAI ? (
+              <View>
+                <Text style={styles.aiNote}>
+                  {AI_FAILURE_TEXT[aiFailure.kind]} — this card still shows your real schedule.
+                </Text>
+                {aiFailure.retryable ? (
+                  <TouchableOpacity style={styles.aiRetry} onPress={() => fetchAISuggestion(tasks)} activeOpacity={0.8}>
+                    <Text style={styles.aiRetryText}>Try again</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             ) : null}
             <TouchableOpacity
               style={styles.startFocusBtn}
@@ -371,7 +381,13 @@ const styles = StyleSheet.create({
   sectionBadge: { fontSize: 11, fontWeight: '700', color: '#00D4FF', marginBottom: 10, letterSpacing: 0.5 },
   nextActionTitle: { fontSize: 22, fontWeight: '800', color: '#fff', marginBottom: 6 },
   nextActionDesc: { fontSize: 13, color: 'rgba(255,255,255,0.55)', lineHeight: 19, marginBottom: 16 },
-  aiNote: { fontSize: 11, color: '#F59E0B', lineHeight: 16, marginBottom: 12 },
+  aiNote: { fontSize: 11, color: '#F59E0B', lineHeight: 16, marginBottom: 8 },
+  aiRetry: {
+    alignSelf: 'flex-start', marginBottom: 12, paddingVertical: 6, paddingHorizontal: 10,
+    borderRadius: 10, borderWidth: 1, borderColor: 'rgba(245,158,11,0.45)',
+    backgroundColor: 'rgba(245,158,11,0.10)',
+  },
+  aiRetryText: { fontSize: 11, fontWeight: '700', color: '#F59E0B' },
   nextActionMeta: {
     flexDirection: 'row', gap: 20, marginBottom: 18,
     backgroundColor: 'rgba(10,15,29,0.5)',

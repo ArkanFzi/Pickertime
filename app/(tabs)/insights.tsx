@@ -8,6 +8,7 @@ import { LineChart } from 'react-native-chart-kit';
 import { useStore } from '@/store/useStore';
 import { pb } from '@/lib/pocketbase';
 import { getAIInsight } from '@/lib/gemini';
+import { AiFailure, AI_FAILURE_TEXT } from '@/lib/aiContract';
 import { localWeekStart, localWeekStartEpoch } from '@/lib/localDay';
 
 const { width } = Dimensions.get('window');
@@ -19,7 +20,7 @@ export default function InsightsScreen() {
   const router = useRouter();
   const { profile, user, snoozeCount, syncFetchTasks } = useStore();
   const [aiInsight, setAiInsight] = useState<string | null>(null);
-  const [aiFailed, setAiFailed] = useState(false);
+  const [aiFailure, setAiFailure] = useState<AiFailure | null>(null);
   const [aiDismissed, setAiDismissed] = useState(false);
 
   const [loadingAI, setLoadingAI] = useState(false);
@@ -151,14 +152,14 @@ export default function InsightsScreen() {
   async function fetchAIInsight(trendData?: number[]) {
     if (!profile) return;
     setLoadingAI(true);
-    const insight = await getAIInsight(
+    const { value, failure } = await getAIInsight(
       profile.role || 'Professional',
       profile.focus_goal || 'Productivity',
       { trend: trendData || focusTrend } // Use fresh data if provided
     );
-    setAiInsight(insight);
-    setAiFailed(insight === null);
-    if (insight) setAiDismissed(false);
+    setAiInsight(value);
+    setAiFailure(failure);
+    if (value) setAiDismissed(false);
     setLoadingAI(false);
   }
 
@@ -292,17 +293,22 @@ export default function InsightsScreen() {
                   </View>
                   <View style={styles.suggestionText}>
                     <Text style={styles.suggestionTitle}>
-                      {loadingAI ? '🤖 Analyzing Pattern...' : aiFailed ? 'AI advice unavailable' : 'Optimize Your Schedule'}
+                      {loadingAI ? '🤖 Analyzing Pattern...' : aiFailure ? 'AI advice unavailable' : 'Optimize Your Schedule'}
                     </Text>
                     <Text style={styles.suggestionBody}>
-                      {aiInsight ?? (aiFailed
-                        ? 'The AI service did not answer, so there is no recommendation to show. The numbers below are still your real data.'
+                      {aiInsight ?? (aiFailure
+                        ? `${AI_FAILURE_TEXT[aiFailure.kind]} The numbers below are still your real data.`
                         : 'Complete a few focus sessions to get personalized advice.')}
                     </Text>
                   </View>
 
                 </View>
                 <View style={styles.suggestionActions}>
+                  {aiFailure?.retryable && !loadingAI ? (
+                    <TouchableOpacity style={styles.adjustBtn} onPress={() => fetchAIInsight()} activeOpacity={0.8}>
+                      <Text style={styles.adjustBtnText}>Try again</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   <TouchableOpacity style={styles.adjustBtn} onPress={() => router.push('/schedule')} activeOpacity={0.8}>
                     <Text style={styles.adjustBtnText}>Adjust Schedule</Text>
                   </TouchableOpacity>

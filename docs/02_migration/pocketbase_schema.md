@@ -87,6 +87,55 @@ API Rules untuk tiga koleksi base: `list`/`view`/`update`/`delete` =
 Aturan ini sudah diverifikasi: user lain mendapat 0 record dan tidak bisa membaca profil
 user lain.
 
+## Proxy AI (`pb_hooks/ai_proxy.pb.js`) — kontrak, bukan vendor
+
+Route-nya **`POST /api/ai/complete`**. Nama itu sengaja menyebut pekerjaan, bukan penyedia:
+pindah provider cukup mengganti blok upstream di dalam handler, kontrak di bawah ini tetap.
+`GEMINI_API_KEY` hanya hidup di lingkungan server PocketBase dan tidak pernah masuk bundel.
+
+Permintaan (harus token user; anonim = 401):
+
+```json
+{ "prompt": "…", "json": true }
+```
+
+`prompt` string ≤ 4000 karakter; `json` boolean sejati (type-check eksplisit — string `"true"`
+ditolak 400 dan tidak diteruskan ke upstream) dan hanya menyebabkan hook meminta
+`responseMimeType: "application/json"`.
+
+Respons sukses **200** selalu `text` + penanda terpotong, tanpa bentuk JSON vendor:
+
+```json
+{ "text": "…", "truncated": false }
+```
+
+`truncated` = `true` ketika upstream menutup kandidat dengan `finishReason: "MAX_TOKENS"` —
+jawaban setengah tidak lagi disebarkan sebagai jawaban utuh.
+
+Kesalahan selalu membawa `code` yang bisa dibaca mesin + `message` untuk manusia; detail mentah
+vendor hanya masuk log server (`$app.logger`), tidak pernah ke klien:
+
+| HTTP | `code` | Kapan |
+|---|---|---|
+| 400 | `blocked` | `promptFeedback` memblokir prompt |
+| 400 | — | `prompt` hilang/bukan string, `json` bukan boolean, atau `GEMINI_API_KEY` belum dipasang (`BadRequestError` polos PocketBase) |
+| 401 | — | tanpa token (route lama pun tetap 401 untuk anonim) |
+| 410 | `moved` | `POST /api/ai/gemini` — jalur lama, build lama diberi tahu secara jujur |
+| 413 | `too_long` | `prompt` > 4000 karakter, ditahan **sebelum** memanggil upstream |
+| 429 | `rate_limited` | > 10 request/menit per user (jendela tetap; lihat F-81) |
+| 502 | `unavailable` | upstream menolak / respons bukan JSON |
+
+Yang tanpa `code` tetap bisa dikenali: `describeAiError` menurunkan kind dari status, dan 400
+berpesan `… not configured …` dipetakan ke `not_configured`.
+Sisi aplikasi memetakan `code` ini ke `AiFailure` di `lib/aiContract.ts`
+(`describeAiError`), jadi membandingkan pesan error tidak pernah diperlukan.
+
+Perubahan perilaku apa pun di file ini **men-deploy**: `deploy.yml` punya path filter
+`pb_hooks/**` pada merge ke `main`. Urutan aman = hook terpasang dulu, baru aplikasi memanggil
+nama baru; jalur lama sengaja dibiarkan terdaftar supaya gerbang verifikasi di VM
+(`tools/deploy/pickertime-pb-agent.sh`, yang menuntut 401 anonim dari salah satu rute) tidak
+bail saat build lama masih memakai `/api/ai/gemini`.
+
 ## Jebakan yang sudah ditemukan (jangan diulang)
 
 1. **`created`/`updated` tidak otomatis dibuat saat koleksi dibuat lewat API.** Kalau
@@ -160,4 +209,5 @@ node tools/pb/pb-schema-verify.mjs http://127.0.0.1:8090 <label>
 
 Skrip itu menandatangani user baru, menjalankan seluruh permukaan API yang dipakai
 aplikasi (`app/(auth)/*`, `store/useStore.ts`, `app/focus.tsx`, `app/(tabs)/insights.tsx`),
-menguji isolasi antar user, dan memeriksa `POST /api/ai/gemini`.
+menguji isolasi antar user, dan memeriksa `POST /api/ai/complete` (jalur lama
+`POST /api/ai/gemini` diuji tetap 401 untuk anonim dan 410 `code: "moved"` untuk yang login).

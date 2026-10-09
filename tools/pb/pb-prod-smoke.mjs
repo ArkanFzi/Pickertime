@@ -126,8 +126,8 @@ await t('anon Tasks.create must fail', async () => {
   }
 })
 
-await t('POST /api/ai/gemini anon must be 401', async () => {
-  const r = await fetch(BASE + '/api/ai/gemini', {
+await t('POST /api/ai/complete anon must be 401', async () => {
+  const r = await fetch(BASE + '/api/ai/complete', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'ping' }),
   })
   if (r.status !== 401) {
@@ -138,11 +138,38 @@ await t('POST /api/ai/gemini anon must be 401', async () => {
   return 'HTTP 401'
 })
 
-await t('POST /api/ai/gemini authed (real key, live Gemini)', async () => {
+// Jalur lama masih dipasang sebagai 410 (F-60) karena gerbang agen VM membacanya dan build
+// lama masih memanggilnya; keduanya harus terbukti, bukan diam-diam.
+await t('POST /api/ai/gemini (jalur lama) 401 anon + 410 moved when authed', async () => {
+  const anonRes = await fetch(BASE + '/api/ai/gemini', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'ping' }),
+  })
+  await anonRes.text()
+  if (anonRes.status !== 401) {
+    const err = new Error('anon expected 401, got ' + anonRes.status)
+    err.status = anonRes.status
+    throw err
+  }
   const r = await fetch(BASE + '/api/ai/gemini', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: app.authStore.token }, body: JSON.stringify({ prompt: 'ping' }),
+  })
+  const text = await r.text()
+  if (r.status !== 410 || !/"code"\s*:\s*"moved"/.test(text)) {
+    const err = new Error('authed expected 410 code=moved, got ' + r.status + ' ' + text.slice(0, 140))
+    err.status = r.status
+    throw err
+  }
+  return '401 anon; 410 code=moved'
+})
+
+await t('POST /api/ai/complete authed (real key, live Gemini)', async () => {
+  const r = await fetch(BASE + '/api/ai/complete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: app.authStore.token },
-    body: JSON.stringify({ prompt: 'Reply with exactly one short word: ok' }),
+    body: JSON.stringify({
+      prompt: 'Reply with a JSON array of exactly 2 task objects: [ { "title": "short", "duration": 45 } ]',
+      json: true,
+    }),
   })
   const text = await r.text()
   if (r.status !== 200) {
@@ -152,10 +179,16 @@ await t('POST /api/ai/gemini authed (real key, live Gemini)', async () => {
   }
   let json
   try { json = JSON.parse(text) } catch { throw new Error('non-JSON body: ' + text.slice(0, 160)) }
-  const cand = json?.candidates?.[0]
-  const snippet = (cand?.content?.parts || []).map((p) => p.text || '').join('').slice(0, 60)
-  if (!cand) throw new Error('no candidates: ' + text.slice(0, 200))
-  return 'finishReason=' + cand.finishReason + ' text="' + snippet + '"'
+  // Kontrak klien adalah { text, truncated }; bentuk vendor tidak boleh keluar (F-42/F-60).
+  if ('candidates' in json || 'promptFeedback' in json) throw new Error('body masih bentuk vendor: ' + text.slice(0, 160))
+  if (typeof json.text !== 'string' || json.text === '') throw new Error('tanpa text: ' + text.slice(0, 160))
+  if (json.truncated !== false) throw new Error('truncated bukan false: ' + JSON.stringify(json).slice(0, 160))
+  // Ini bukti F-42a+F-42b ujung-ke-ujung: kalau hanya parts[0] yang diambil, atau model
+  // tidak dipaksa menjawab JSON, array di bawah tidak akan ter-parse.
+  const parsed = JSON.parse(json.text)
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('bukan array: ' + json.text.slice(0, 160))
+  const judul = parsed.map((i) => String(i?.title ?? '?')).join(',')
+  return 'chars=' + json.text.length + ' items=' + parsed.length + ' titles=' + judul.slice(0, 60)
 })
 
 console.log('--- cleanup ---')

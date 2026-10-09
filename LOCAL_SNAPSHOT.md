@@ -11,7 +11,7 @@ Proyek ini telah sepenuhnya bertransisi dari infrastruktur Supabase lama menuju 
 *   **Supabase Dihapus:** Seluruh referensi, file SQL (`lib/database.sql`), dan *library* Supabase telah dihilangkan dari kode dan dokumentasi.
 *   **Secure AI Proxy:** Fitur Gemini AI kini diproxy melalui server lokal.
     *   Terdapat *script* `pb_hooks/ai_proxy.pb.js` yang harus ditaruh di server PocketBase Anda.
-    *   Aplikasi *frontend* (`lib/gemini.ts`) kini memanggil `/api/ai/gemini` menggunakan `pb.send()`, mengamankan `GEMINI_API_KEY` dari *frontend*.
+    *   Aplikasi *frontend* (`lib/gemini.ts`) kini memanggil `/api/ai/complete` menggunakan `pb.send()`, mengamankan `GEMINI_API_KEY` dari *frontend*.
 *   **Environment Variables:** File `.env.example` dan `.env` telah disesuaikan agar hanya meminta `EXPO_PUBLIC_PB_URL`.
 
 ---

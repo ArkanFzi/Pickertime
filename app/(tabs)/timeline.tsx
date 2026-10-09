@@ -152,12 +152,15 @@ export default function TimelineScreen() {
     if (!user || !profile) return;
     setIsAutoPlanning(true);
     try {
-      const generated = await generateDailySchedule(profile.role, profile.focus_goal, profile.energy_pref);
+      const { value: generated, failure } = await generateDailySchedule(profile.role, profile.focus_goal, profile.energy_pref);
       // null = AI benar-benar tidak menghasilkan apa-apa. Dulu kasus ini tetap membuat
       // tiga task nyata ("Morning Review" dll) dari teks statis, jadi user mengira
       // itulah rencana AI-nya.
       if (!generated) {
-        Alert.alert('Rencana AI tidak tersedia', 'Layanan AI gagal memberikan usulan. Tidak ada task yang dibuat. Coba lagi beberapa saat.');
+        Alert.alert(
+          'Rencana AI tidak tersedia',
+          failure?.message ?? 'Layanan AI gagal memberikan usulan. Tidak ada task yang dibuat. Coba lagi beberapa saat.'
+        );
         return;
       }
       
