@@ -1296,6 +1296,56 @@ Batas gerbang (ditulis juga di kepala `docs-contract.mjs`):
   koleksi* begitu F-57 resnap.
 - Tidak ada perubahan skema, kode aplikasi, atau path pemicu deploy di PR ini.
 
+## M17 — Gelombang 4 kelompok 1: kebenaran state (2026-10-09, branch `fix/kebenaran-state`)
+
+Langkah 6 urutan yang direncanakan (gelombang 4–5, satu PR per kelompok). Kelompok ini yang
+**bisa dinilai tanpa menyentuh skema**: F-50, F-64, F-65. F-63 dicek lebih dulu dan ternyata
+sudah tertutup PR #24; yang masih bolong dari kelompok itu adalah rumus indeks kolom heatmap,
+dan itu ikut ditutup di sini. Sisa gelombang 4 dipisah karena alasan terukur: F-49 + F-61
+permukaan mati (menyentuh `package.json`, perlu build ulang untuk sisa F-06/F-27), F-52 + F-57
+menyentuh `pb_migrations/**` yang merupakan path pemicu `deploy.yml`.
+
+Alat yang berubah: dua modul murni baru (`lib/periods.ts` 86 baris, `lib/snoozeLedger.ts` 73
+baris), satu helper di `lib/localDay.ts` (`localWeekDayIndex`), `test:findings` 16 -> **19**
+baris hijau, `test:enum` 7 -> **8** sumber.
+
+| ID | Yang diubah | Bukti terukur |
+|---|---|---|
+| **F-50** | `syncUpdateTask` + `syncToggleTask` + `syncSnoozeTask` menyimpan **respons server**, bukan payload klien. | Probe hidup: kirim `"2026-10-09T13:06:37.341Z"` -> balasan `"2026-10-09 13:06:37.341Z"`, geser **0 ms**, respons **16** kunci memuat **11** kunci tipe `Task`. Mutasi kembali ke `{ ...t, ...updates }` -> tepat **1** `RED F-50`. |
+| **F-64** | Satu sumber kosakata periode; chip energi pindah dari `app/(tabs)/index.tsx:19-26`; kalimat kartu membandingkan pref vs data; gerbang enum baru mengikat `ENERGY_PREFS` ke select `Profiles.energy_pref`. | `bucketOfHour` 0..23 -> **6/6/12**; **13** kasus chip energi = perilaku lama; **1** merah saat `Afternoon` diubah 12–18; **2** merah saat `PREF_BUCKET['Night Owl']` dipindah; `ENERGY_PREFS` `'Night Owl' -> 'Night'` -> `RED lib/periods.ts :: … tidak ada di select server`. |
+| **F-65** | Rasio snooze dibuang; ledger per hari dipersist **per user** (`snooze_ledger:<id>`), dipotong awal minggu, kartu membaca angka absolut. | hari ini 2 / kemarin 1 / sejak kemarin 3 / batas sesudah semua hari 0; roundtrip identik; **12** bentuk sampah storage ditolak; **3** mutasi (buang `setItem`, longgarkan validasi `parseLedger`, kartu tidak membaca ledger) -> **3** merah terpisah. |
+| **F-63** (penjaga, bukan perbaikan baru) | `(d.getDay() === 0 ? 6 : d.getDay() - 1)` di `loadRealData()` diganti `localWeekDayIndex()`. | Sweep **2184** titik waktu (1 Sep – 30 Nov 2026 per jam) vs rumus independen `(getDay()+6)%7` -> **0** meleset; mutasi `floor -> round` -> **1092** titik meleset (`2026-09-01T05:00:00.000Z -> 2`, harapan 1). |
+
+Anti-vakum: **9** mutasi berpasangan file+gerbang, **9** tertangkap (`rc=1`, merah pada ID yang
+benar), **0** hijau-palsu; pemulihan diverifikasi `md5` pada 5 berkas lalu kedua gerbang diulang
+dan hijau. Detail lengkap + batas gerbang ada di `docs/04_audit/action_plan_2026-10-08.md`
+§"Status 2026-10-09 (malam 2)".
+
+**Bukti perangkat yang belum ada** (dicatat sebagai sisa, tidak diklaim selesai): `useStore`
+mengimpor AsyncStorage + `@/lib/pocketbase` sehingga tidak bisa dimuat node — bagian persist
+F-65 dan "state = respons server" F-50 dinilai dari sumber per fungsi, bukan dari perilaku.
+Ponsel tidak terpasang sesi ini (`adb devices` = daftar kosong), tapi bundel RN-nya dibuktikan:
+Metro `:8083` memproduce **8,1 MB** tanpa satu pun `UnableToResolveError`, `lib/periods.ts` dan
+`lib/snoozeLedger.ts` ikut ter-bundle, `bucketOfHour`/`periodMatchSentence`/`localWeekDayIndex`
+ter-referensi, dan `snooze_ledger:` ada di kode; `incrementSnooze`, `snoozeRate` dan string UI
+`"Snooze Rate"` **tidak** ada lagi setelah komentar dibuang (tanpa membuang komentar, ketiganya
+masih "ADA" — positif-palsih dari komentarku sendiri di `lib/snoozeLedger.ts:1-2`, jadi pola
+bundel harus dibaca bersama komentar, bukan sendirian).
+Perlu dites di ponsel: (1) snooze lalu tutup-buka aplikasi, angka hari ini masih ada; (2) dua
+akun di satu ponsel tidak saling mewarisi ledger; (3) edit jam task lalu alarm mengikuti jadwal
+baru tanpa reload layar.
+
+### Sisa M17
+
+- **F-49, F-61** -> kelompok 2 (permukaan mati). Keputusan yang harus diambil di sana: pasang
+  `Tasks`/`Focus_Sessions` subscribe per user, atau cabut polyfill `react-native-sse` + komentar
+  "Realtime Subscriptions" + dependensinya.
+- **F-52, F-57** -> kelompok 3 (skema). F-57 (resnap snapshot) adalah prasyarat kalau gerbang
+  dokumen mau diperluas dari "himpunan rule" menjadi "rule per koleksi" — lihat batas 1 di
+  kepala `tools/test/docs-contract.mjs`.
+- Tidak ada perubahan skema, `pb_hooks/**`, atau path pemicu deploy pada PR ini; merge ke `dev`
+  dan nanti ke `main` tidak men-deploy apa pun.
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan

@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { AuthModel, RecordModel } from 'pocketbase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { pb } from '@/lib/pocketbase';
 import { scheduleTaskNotification, cancelTaskNotification, listArmedAlarmTaskIds } from '@/lib/notifications';
 import { createTaskBatch, resolveLeadMinutes, type TaskWriter, type TaskWritePayload } from '@/lib/taskContract';
-import { localDayStartEpoch } from '@/lib/localDay';
+import { localDayStartEpoch, localWeekStartEpoch } from '@/lib/localDay';
+import { bumpSnooze, emptyLedger, parseLedger, pruneBefore, serializeLedger, type SnoozeLedger } from '@/lib/snoozeLedger';
+import type { EnergyPref } from '@/lib/periods';
 
 export type UserRole = 'Student' | 'Professional' | 'Freelancer' | 'Creator' | 'Researcher' | string;
-export type EnergyPref = 'Morning' | 'Afternoon' | 'Night Owl';
 
 export interface Profile {
   id: string;
@@ -134,9 +136,10 @@ interface AppState {
   syncFetchTasks: () => Promise<void>;
   tasksError: string | null;
 
-  // Snooze analytics
-  snoozeCount: number;
-  incrementSnooze: () => void;
+  // Snooze analytics — ledger per hari kalender perangkat, dipersist per user (F-65).
+  snoozes: SnoozeLedger;
+  hydrateSnoozes: () => Promise<void>;
+  recordSnooze: () => Promise<void>;
 
   // Onboarding
   onboardingComplete: boolean;
@@ -230,9 +233,12 @@ export const useStore = create<AppState>((set, get) => ({
     const data = await pb.collection('Tasks').update(id, updates);
     const updatedTask = data as unknown as Task;
 
-    // 2. Hanya jika server berhasil, perbarui state lokal
+    // 2. State diisi dari respons server, bukan dari payload klien (F-50). Payload
+    // klien mengandung tanggal bentuk ISO ber-"T" sementara server membalas bentuk
+    // spasi ("2026-10-07 13:55:00.000Z") — menyimpan `updates` berarti dua format
+    // beredar di satu array, dan yang tersimpan bukan apa yang server pakai.
     set((state) => ({
-      tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+      tasks: state.tasks.map((t) => (t.id === id ? updatedTask : t)),
     }));
 
     // 3. Jadwal berubah = alarm lama salah. Pasang ulang sesuai kondisi terbaru.
@@ -250,18 +256,15 @@ export const useStore = create<AppState>((set, get) => ({
     const newValue = !task.is_completed;
 
     // 1. Kirim ke server
-    await pb.collection('Tasks').update(id, { is_completed: newValue });
+    const after = (await pb.collection('Tasks').update(id, { is_completed: newValue })) as unknown as Task;
 
-    // 2. Hanya jika server berhasil, perbarui state lokal
+    // 2. Hanya jika server berhasil, perbarui state lokal — dari respons server (F-50)
     set((state) => ({
-      tasks: state.tasks.map((t) =>
-        t.id === id ? { ...t, is_completed: newValue } : t
-      ),
+      tasks: state.tasks.map((t) => (t.id === id ? after : t)),
     }));
 
     // 3. Task selesai tidak boleh membangunkan user nanti
-    const after = get().tasks.find((t) => t.id === id);
-    if (after) await get().syncTaskAlarm(after);
+    await get().syncTaskAlarm(after);
   },
 
   // ─── syncSnoozeTask ─────────────────────────────────────────────────────────
@@ -284,18 +287,19 @@ export const useStore = create<AppState>((set, get) => ({
     const updates = { start_time: newStart, end_time: newEnd };
 
     // 1. Kirim ke server
-    await pb.collection('Tasks').update(id, updates);
+    const afterSnooze = (await pb.collection('Tasks').update(id, updates)) as unknown as Task;
 
-    // 2. Hanya jika server berhasil, perbarui state lokal
+    // 2. State dari respons server (F-50) — payload snooze berisi ISO ber-"T",
+    // server membalas bentuk spasi; menyimpan yang pertama membuat array `tasks`
+    // punya dua format untuk kolom yang sama.
     set((state) => ({
-      tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+      tasks: state.tasks.map((t) => (t.id === id ? afterSnooze : t)),
     }));
 
     // 3. Alarm harus ikut bergeser, tidak boleh berbunyi pada jadwal lama
-    const afterSnooze = get().tasks.find((t) => t.id === id);
-    if (afterSnooze) await get().syncTaskAlarm(afterSnooze);
+    await get().syncTaskAlarm(afterSnooze);
 
-    get().incrementSnooze();
+    await get().recordSnooze();
   },
 
   // ─── syncDeleteTask ─────────────────────────────────────────────────────────
@@ -337,8 +341,32 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // ─── Snooze Analytics ───────────────────────────────────────────────────────
-  snoozeCount: 0,
-  incrementSnooze: () => set((state) => ({ snoozeCount: state.snoozeCount + 1 })),
+  snoozes: emptyLedger(),
+
+  // Kunci storage per user: ledger tidak boleh ikut pindah saat akun lain dipakai
+  // di perangkat yang sama (invarian isolasi user yang sama dengan F-03).
+  hydrateSnoozes: async () => {
+    const id = get().user?.id;
+    if (!id) return;
+    try {
+      const raw = await AsyncStorage.getItem(`snooze_ledger:${id}`);
+      set({ snoozes: pruneBefore(parseLedger(raw), localWeekStartEpoch()) });
+    } catch (err) {
+      console.warn('[snooze] gagal membaca ledger tersimpan:', err);
+    }
+  },
+
+  recordSnooze: async () => {
+    const next = bumpSnooze(get().snoozes, localDayStartEpoch());
+    set({ snoozes: next });
+    const id = get().user?.id;
+    if (!id) return;
+    try {
+      await AsyncStorage.setItem(`snooze_ledger:${id}`, serializeLedger(next));
+    } catch (err) {
+      console.warn('[snooze] gagal persist, angkanya hilang lagi saat aplikasi dibuka ulang:', err);
+    }
+  },
 
   // ─── Focus Session ──────────────────────────────────────────────────────────
   activeTask: null,

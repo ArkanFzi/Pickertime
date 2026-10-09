@@ -347,3 +347,47 @@ baris di HEAD) saya tulis ulang dari potongan `sed -n '5,20p'` dan §4 "Masa Dep
 hilang beserta judul aslinya. Ketahuan dari `git diff` (11 masuk / 7 keluar) lalu dipulihkan
 `git checkout HEAD -- <file>` dan diverifikasi `wc -l` = 23 + `git status` bersih sebelum edit
 satu baris yang sebenarnya. Untuk berkas yang sudah ada: baca seluruhnya, atau pakai `Edit`.
+
+---
+
+## Status 2026-10-09 (malam 2) — gelombang 4 kelompok 1: kebenaran state
+
+Langkah 6 urutan yang direncanakan, **kelompok 1 dari 3**. Yang ditutup di sini: **F-50, F-64,
+F-65**, plus satu penjaga untuk **F-63** yang ternyata sudah beres di PR #24. Sisa gelombang 4
+dipecah dua kelompok lagi karena alasan yang terukur, bukan ukuran diff: **F-49 + F-61** adalah
+permukaan mati (menyentuh `package.json` dan perlu build ulang untuk menutup sisa F-06/F-27),
+sedangkan **F-52 + F-57** menyentuh `pb_migrations/**` — dan `deploy.yml` punya path filter
+`pb_migrations/**`, jadi kelompok skema itulah yang nanti men-deploy saat masuk `main`.
+
+| ID | Keadaan | Bukti terukur |
+|---|---|---|
+| **F-50** | **ditutup** — `syncUpdateTask`, `syncToggleTask`, `syncSnoozeTask` mengisi array `tasks` dari **respons server**, bukan payload klien. Audit cuma menyebut yang pertama; dua lainnya satu kelas (sama-sama menulis tanggal ISO ber-"T" ke state) dan diperbaiki bersamaan supaya "dua format beredar" tidak menyisakan satu. | Diukur hidup di backend uji: kirim `start_time = "2026-10-09T13:06:37.341Z"` -> server membalas `"2026-10-09 13:06:37.341Z"`, **geser 0 ms**, respons **16** kunci (`alarm_minutes_before, category, collectionId, collectionName, created, description, duration_minutes, end_time, has_alarm, id, is_completed, priority, start_time, title, updated, user`) yang memuat **11** kunci tipe `Task` di store — jadi menimpa seluruh elemen state tidak menghapus field. Mutasi `{ ...t, ...updates }` kembali -> `RED F-50 … masih menambal state dengan payload klien`. |
+| **F-64** | **ditutup** — kosakata periode pindah ke `lib/periods.ts` (**86** baris): `TIME_BUCKETS`, `ENERGY_PREFS`, `bucketOfHour`, `PREF_BUCKET`, `PREF_PEAK_HOURS`, `energyStatus`, `emptyHeatmap`, `periodMatchSentence`. Insights tidak lagi menulis `h >= 6 && h < 12`; jendela chip energi yang dulu hidup sendiri di `app/(tabs)/index.tsx:19-26` ikut pindah. Kartu sekarang membandingkan pref dengan data, contoh nyata: `3 of 10 sessions this week were in the morning, but you picked Night Owl.` | `bucketOfHour` dinilai per jam 0..23 -> **6/6/12** (Evening mencakup lewat tengah malam); **13** kasus chip energi dinilai eksplisit dan sama dengan perilaku lama, termasuk `Afternoon,17 -> "Building Momentum"` (jendela pref sengaja 12–17, beda dari heatmap 12–18). Mutasi: `Afternoon: [[12,17]] -> [[12,18]]` -> merah; `PREF_BUCKET['Night Owl'] -> 'Afternoon'` -> merah **2** alasan (peta + kalimat); buang `bucketOfHour(` dari Insights -> merah "gerbang kehilangan pegangan". Gerbang enum baru (`test:enum` jadi **8** sumber): `ENERGY_PREFS` wajib persis select `Profiles.energy_pref`; mutasi `'Night Owl' -> 'Night'` -> `RED lib/periods.ts :: ENERGY_PREFS :: "Night" tidak ada di select server -> create/update Profiles ditolak 400`. |
+| **F-65** | **ditutup** — rasio dibuang, bukan dihaluskan. `lib/snoozeLedger.ts` (**73** baris) menyimpan jumlah per hari kalender perangkat; store mempersist ke AsyncStorage dengan kunci **per user** (`snooze_ledger:<id>`) dan memangkas ke awal minggu saat hydrate; kartu Insights membaca dua angka absolut (`snoozesOn` hari ini, `sumSince` sejak Senin) dan tidak lagi menyentuh `stats.totalCount`. | Ledger: hari ini **2** / kemarin **1** / sejak kemarin **3** / batas sesudah semua hari **0**; `bumpSnooze` terbukti tidak mengubah objek lama; roundtrip `serialize -> parse` identik; **12** bentuk sampah storage ditolak (`null`, `''`, `'bukan json'`, `'{'`, `'[]'`, `'3'`, `'{"a":"x"}'`, nilai `null`/`-3`/`1.5`/`1e999`, kunci non-numerik). Mutasi: buang `AsyncStorage.setItem` -> `RED F-65 … tidak menulis storage`; longgarkan validasi `parseLedger` -> merah 4 kasus; ganti pembaca ledger dengan `stats.totalCount` -> `RED … kartu Insights tidak membaca ledger`. |
+| **F-63** | **sudah tertutup lebih dulu** (PR #24) — `getWeekRange()` (`app/(tabs)/insights.tsx:366-371`) memakai `localWeekStart()`, sama seperti `loadRealData()`. Yang belum terjaga adalah **indeks kolom** heatmap: masih ditulis `(d.getDay() === 0 ? 6 : d.getDay() - 1)` di dalam `forEach` sesi, satu rumus ketiga di samping helper. Sekarang `localWeekDayIndex()` (`lib/localDay.ts`) dan dinilai. | Sweep **2184** titik waktu (1 Sep – 30 Nov 2026, per jam) dicocokkan dengan rumus independen `(getDay()+6)%7`: **0** meleset. Mutasi `Math.floor -> Math.round` -> `RED F-64 … 1092 titik waktu keluar dari kolomnya, contoh 2026-09-01T05:00:00.000Z -> 2 (harapan 1)` — ini bug pembulatan **jam**, bukan hari, dan hanya terbendet karena sweep-nya per jam. |
+
+Perkakas keadaan akhir, semuanya `rc=0`: `typecheck`; `test:findings` **19** baris hijau
+(sebelum PR ini 16); `test:enum` **8** sumber; `test:docs`; `test:batch`. Anti-vakum: **9**
+mutasi, **9** menghasilkan `rc=1` dengan merah pada ID yang benar dan **0** hijau-palsu;
+pemulihan diverifikasi `md5` pada **5** berkas (`store/useStore.ts`, `lib/periods.ts`,
+`lib/snoozeLedger.ts`, `lib/localDay.ts`, `app/(tabs)/insights.tsx`) lalu kedua gerbang
+dijalankan ulang dan hijau lagi. Skrip mutasinya sekali-pakai (`tools/test/tmp/`), jadi angka
+di atas tidak bisa diulang dari repo — yang bisa diulang adalah gerbangnya.
+
+Yang berubah di layar, supaya tidak perlu dibaca dari diff:
+
+- Kartu "Snooze Rate … %" -> "Snooze" dengan angka hari ini dan "N since Monday".
+- Kalimat "Best Time to Focus" sekarang menyebut preferensi user; dulu cuma
+  `x of y focus sessions this week were in the evening.`
+- Chip energi dashboard **tidak** berubah — 13 kasus jam dinilai justru untuk memastikan
+  pemindahan kode tidak mengubah perilakunya.
+- Tidak ada perubahan skema, `pb_hooks/**`, atau path pemicu deploy pada PR ini.
+
+Batas yang jujur: `store/useStore.ts` mengimpor AsyncStorage dan `@/lib/pocketbase` sehingga
+**tidak bisa dimuat node**. Karena itu dua hal dinilai dari **sumber**, bukan dari perilaku:
+"state diisi respons server" (F-50) dan "ledger dipersist per user" (F-65). potongannya
+dipotong **per fungsi** (`syncUpdateTask`/`syncToggleTask`/`syncSnoozeTask`), bukan grep global,
+karena `updateTask` — aksi lokal — memang berhak menambal `{ ...t, ...updates }`. Perulangan yang
+masih butuh bukti perangkat: buka aplikasi ulang lalu angka snooze masih ada, dan dua akun di
+satu ponsel tidak saling mewarisi ledger. Kedua kalimat itu juga yang ditulis baris hijau
+gerbang, bukan diklaim selesai.
