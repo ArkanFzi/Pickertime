@@ -582,3 +582,69 @@ penghapusan field write-only (`Focus_Sessions.completed`, `Workspace_Events.is_p
 `Profiles.avatar_url`) yang berarti **membuang data** lewat migrasi baru; nasib `Workspace_Events`
 (F-62); penyempitan `EVENTS` untuk `RESET_FOCUS` sementara kontrol Pause/Resume di
 `app/focus.tsx:71-76` nyata tapi tidak pernah menulis event — itu kurang tulis, bukan skema longgar.
+
+---
+
+## Status 2026-10-09 (malam 5) — F-71 terukur, F-69 dikunci (gelombang 3.5 sebagian)
+
+Pemilik memilih **tahan `main`**: satu deploy nanti membawa kelompok 3 + kunci model. Jadi yang
+dikerjakan di sini hanya bagian F-69 yang tidak butuh keputusan vendor — mengunci nama model.
+Router `AI_PROVIDER` (F-73), pagar anggaran (F-72) dan Vertex via metadata server (F-74) masih
+terbuka.
+
+**Cara ukur yang direncanakan action plan ini salah, dan itu penting.** Perintahnya:
+`GET /v1beta/models/gemini-flash-lite-latest` dengan key produksi, catat `baseModelVersion`.
+Dijalankan di VM (`hermes-openclaw-vm`) dengan key dibaca dari `/opt/pickertime/.env` **di dalam
+proses** — tidak pernah dicetak, tidak pernah jadi argemen (H8): respons metadata untuk model
+apa pun hanya berisi `description, displayName, inputTokenLimit, maxTemperature, name,
+outputTokenLimit, supportedGenerationMethods, temperature, thinking, topK, topP, version`. **Tidak
+ada `baseModelId`**, **tidak ada field retirement/pensiun di 62 model yang terdaftar**, dan untuk
+alias `version` hanyalah label manusia (`"Gemini Flash-Lite Latest"`). Kesimpulan yang harus masuk
+register: *isi alias tidak bisa diaudit dari endpoint metadata*; satu-satunya pengukuran yang
+berfungsi adalah `modelVersion` pada respons `generateContent`.
+
+| Dipanggil | `modelVersion` balasan | latency | token | 
+|---|---|---|---|
+| `gemini-flash-lite-latest` | `gemini-3.5-flash-lite` | 597 ms | 23+25=48 |
+| `gemini-3.5-flash-lite` | `gemini-3.5-flash-lite` | 589 ms | 23+25=48 |
+| `gemini-3.1-flash-lite` | `gemini-3.1-flash-lite` | 689 ms | 23+19=42 |
+
+**Koreksi ke §3.5 dokumen ini:** premis "kalau alias saat ini resolve ke jalur 2.5, perilakunya
+berubah/putus pada 20 Oktober 2026" diuji dan **hari ini tidak berlaku** — alias resolve ke jalur
+3.5 (`gemini-3.5-flash-lite`). Yang tetap berlaku adalah alasan strukturalnya: mapping itu di tangan
+Google, dan tanggal pemadaman **tidak** bisa dibaca dari API mana pun yang kuakses, jadi ia tidak
+kupakai sebagai dasar keputusan. Pin ke `gemini-3.5-flash-lite` dipilih justru karena **nol
+perubahan**: `modelVersion`, jumlah token dan teks outputnya identik dengan panggilan alias
+(baris 1 vs baris 2 tabel di atas), sementara `gemini-3.1-flash-lite` satu generasi lebih lama dan
+berbeda perilakunya (689 ms, 42 token, judul beda).
+
+**Yang diubah.** `pb_hooks/ai_proxy.pb.js:97-98`: `const MODEL = "gemini-3.5-flash-lite"` dan URL
+dibangun dari `MODEL`. Sengaja **tanpa** override env: kalau nilainya bisa diganti lewat env,
+seseorang bisa memasang `-latest` lagi tanpa menyentuh kode dan tanpa tertangkap CI. Gerbang
+`GREEN F-69` di `tools/test/findings.mjs` memeriksa bentuk kodenya (MODEL ada, tidak kena
+`-latest`, URL dibangun dari MODEL, **0** literal `models/*:generateContent` di baris kode), dan
+**3** mutasi membuktikan ketiganya hidup: alias di `MODEL` -> merah; hapus `MODEL` + inline alias
+-> merah dengan tiga alasan; inline **nama yang benar** tanpa `MODEL` -> tetap merah, karena gerbang
+kehilangan sumbernya.
+
+**Bukti tidak berhenti di teks.** Hook dimuat PocketBase (`POST /api/ai/complete` dan jalur lama
+sama-sama **401** anonim di `pt-pb-test`; `docker logs --since 10m` **0** baris error), kontrak
+respons utuh (`pb-schema-verify` `rc=0`, **21** `OK`, **0** gagal; yang login dapat **502**
+`code=unavailable` generik tanpa menyebut vendor, jalur lama **410** `code=moved`), dan `test:findings`
+naik **24 → 25** hijau. Catatan M8.1 yang mengulang dirinya sendiri: `pb-schema-verify` sempat mati
+di baris 28 dengan `ClientResponseError 400 "Failed to authenticate."` di `pt-pb-test` — penyebabnya
+kredensial superuser container itu = env container (panjang **13**/**39**), bukan literal CI; ini
+bukan regresi kode dan tidak boleh dicatat sebagai temuan skema.
+
+Jebakan kedua di sesi yang sama, dan ini **bug perkakas**, bukan environment: `pb-schema-verify`
+menjatuhkan `BASE = undefined` kalau argumen pertamanya lupa diberikan, lalu tetap mencetak
+`OK undefined :: superuser.auth :: ok` (pemeriksaan itu tidak menyentuh jaringan) sebelum mati di
+request pertama dengan `ClientResponseError status 0` pada
+`/api/collections/_superusers/auth-with-password`. Run itu sempat saya baca sebagai "regresi hook"
+padahal pemanggilnya yang salah — persis kelas kegagalan yang dikejar H1. Perbaikannya di file yang
+sama: tanpa `argv[2]` -> keluar **2** dengan baris pemakaian; `BASE` yang memuat `elarisnoir` ->
+keluar **1** **sebelum** satu request pun keluar, karena perkakas ini menulis dan menghapus record
+dan selama ini tidak punya guard produksi (yang punya hanya `snapshot-f57.mjs:18`). Keduanya diuji
+langsung: `rc=2` dan `rc=1` dengan pesan yang benar. Setelah edit, pemanggilan yang sah tetap
+`rc=0` dengan **21** `OK` / **0** `FAIL` (angka tidak berubah), dan `test:findings` tetap **25**
+hijau — blok F-60 membaca isi file ini, jadi perubahannya ikut dinilai gerbang.

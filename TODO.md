@@ -1480,6 +1480,67 @@ Yang sengaja **tidak** diselesaikan di kelompok ini:
   dibalas **410**. Tabel lengkap + kenapa file snapshot yang di-resnap **tidak** dijalankan ulang
   ada di `docs/04_audit/action_plan_2026-10-08.md` §"Konsekuensi `dev` → `main`".
 
+## M20 — F-71 diukur, F-69/K-5 nama model dikunci (2026-10-09, branch `fix/kunci-model`)
+
+Keputusan pemilik sesi ini: **`main` ditahan**, satu deploy nanti membawa kelompok 3 **dan**
+kunci model. Jadi F-69 (putusan provider) dikerjakan sampai batas yang tidak butuh keputusan
+vendor: nama model dikunci, router/`AI_PROVIDER` (F-73) tetap terbuka.
+
+**Cara ukur F-71 (dan kenapa cara yang direncanakan gagal).** Action plan menyuruh
+`GET /v1beta/models/gemini-flash-lite-latest` lalu baca `baseModelVersion`. Diperukur dengan key
+produksi di VM (`hermes-openclaw-vm`, key dibaca dari `/opt/pickertime/.env` **di dalam proses**,
+tidak pernah dicetak, tidak pernah jadi argemen — H8): respons metadata hanya memuat
+`description, displayName, inputTokenLimit, maxTemperature, name, outputTokenLimit,
+supportedGenerationMethods, temperature, thinking, topK, topP, version` — **tidak ada**
+`baseModelId` dan **tidak ada** field retirement; `version` untuk alias isinya label manusia
+`"Gemini Flash-Lite Latest"`. `GET /v1beta/models?pageSize=200` mendaftar **62** model dan yang
+bernama `flash` semuanya juga tanpa field pensiun. Artinya isi alias **tidak bisa** dibaca dari
+metadata; satu-satunya jalan adalah `generateContent` dan membaca `modelVersion` respons. Itu yang
+dipakai:
+
+| Model yang dipanggil | `modelVersion` respons | latency | token (prompt+cand) | catatan |
+|---|---|---|---|---|
+| `gemini-flash-lite-latest` (alias lama hook) | `gemini-3.5-flash-lite` | **597 ms** | 23+25 = **48** | JSON valid, `finishReason=STOP` |
+| `gemini-3.5-flash-lite` | `gemini-3.5-flash-lite` | **589 ms** | 23+25 = **48** | output **identik** dengan baris di atas |
+| `gemini-3.1-flash-lite` | `gemini-3.1-flash-lite` | **689 ms** | 23+19 = **42** | judul berbeda, tetap JSON valid |
+
+Dua hal langsung terbaca dari tabel: alias hari ini **tidak** berada di jalur 2.5 (kekhawatiran
+"pemadaman 2026-10-20" di §3.5 action plan jadi **bukan** keadaan sekarang — kucatat sebagai
+koreksi, bukan dibuang: risiko struktural alias tetap ada, dan tanggal itu sendiri tidak bisa
+diukur dari API), dan mempin ke `gemini-3.5-flash-lite` = **nol perubahan perilaku** karena
+`modelVersion` + jumlah token + teks outputnya sama persis.
+
+| ID | Putusan | Bukti terukur |
+|---|---|---|
+| **F-69/K-5** | `pb_hooks/ai_proxy.pb.js:97-98` sekarang `const MODEL = "gemini-3.5-flash-lite"` dan URL dibangun dari `MODEL`. Tidak ada override env: namanya harus lewat PR, supaya tidak bisa diam-diam kembali ke alias. | `grep -n` hanya dua baris itu yang menyebut model; **0** literal `models/<x>:generateContent` di baris kode (komentar tidak dihitung — `tanpaKomentar()` sudah ada untuk itu). |
+| **Gerbang F-69** | Blok baru di `tools/test/findings.mjs` (statis, tanpa jaringan): `const MODEL` harus ada, nilainya tidak boleh kena `/-latest\b/`, harus cocok bentuk `gemini-…`, dan URL harus dibangun dari `MODEL`. | `test:findings` **24 → 25** baris hijau; pesan hijaunya menyebut nama model hasil ukur. |
+| **Anti-vakum** | **3** mutasi pada hook: V1 `MODEL = "gemini-flash-lite-latest"` -> `RED F-69 … adalah alias rolling (K-5 melarang)`, `rc=1`. V2 hapus `const MODEL` + inline alias ke URL -> `rc=1` dengan **tiga** alasan sekaligus (MODEL hilang, alias di URL, URL tidak dibangun dari MODEL). V3 inline nama **benar** (`gemini-3.5-flash-lite` tanpa `MODEL`) -> `rc=1` "URL upstream tidak lagi dibangun dari MODEL" — ini yang penting: mutasi yang kelihatan aman pun tertangkap. | Hook dipulihkan tiap kali dan diverifikasi `md5sum -c` (`pb_hooks/ai_proxy.pb.js: OK`). |
+| **Hook masih dimuat PocketBase** | Edit JSVM bisa mati diam-diam. | `POST /api/ai/complete` anonim -> **401** dan `POST /api/ai/gemini` anonim -> **401** di `pt-pb-test` (rute terdaftar = hook ke-parse); `docker logs --since 10m pt-pb-test | grep -iE "error|panic|exception"` -> **0** baris. |
+| **Kontrak AI tidak berubah** | `pb-schema-verify` jalan penuh di `pt-pb-test`. | `rc=0`, **21** baris `OK`, **0** gagal; `POST /api/ai/complete` dengan token -> **502** generik `code=unavailable` **tanpa** menyebut `generativelanguage`/`googleapis` (key di container itu memang ditolak upstream, dan justru itu yang dinilai gate-nya); jalur lama -> **410** `code=moved` bagi yang login. |
+
+Jebakan yang tercatat (kelas M8.1, lagi-lagi): `pb-schema-verify` di `pt-pb-test` mati dengan
+`ClientResponseError 400 "Failed to authenticate."` di **baris 28** — bukan regresi kode, tapi
+ kredensial superuser container itu = nilai env container (`PB_ADMIN_EMAIL`/`PB_ADMIN_PASSWORD`,
+terukur panjang **13**/**39**), bukan literal `ci-only-password-123` milik CI. Dibaca lewat
+`docker inspect` ke environment proses (bukan argemen), baru `rc=0`. Cara cepat membedakan
+"backend rusak" vs "kredensial salah": cek dulu **200/401 di rute** sebelum menyalahkan skema.
+Kesalahan kedua di sesi yang sama, sifatnya berbeda: perkakas itu dijalankan **tanpa argumen
+pertama**, jadi `BASE = undefined` dan run mati sebagai `ClientResponseError status 0` pada
+`/api/collections/_superusers/auth-with-password` — sementara baris pertamanya tetap mencetak
+`OK undefined :: superuser.auth :: ok` karena pemeriksaan itu tidak menyentuh jaringan. Akibatnya
+satu kali run dibaca sebagai "regresi hook" padahal pemanggilnya yang salah. Diperbaiki di file
+yang sama: tanpa `argv[2]` -> keluar **2** dengan baris pemakaian, dan `BASE` yang memuat
+`elarisnoir` -> keluar **1** sebelum satu request pun keluar (perkakas ini menulis & menghapus
+record; guard yang sama sudah ada di `snapshot-f57.mjs:18`). Setelah edit: `rc=0`, **21** `OK`,
+**0** `FAIL` — jumlah yang sama seperti sebelum edit, dan `test:findings` tetap **25** hijau
+(blok F-60 membaca isi file ini, jadi perubahannya dinilai dua gerbang sekaligus).
+
+Sweep keadaan akhir grup ini, semua `rc=0`: `typecheck`; `test:findings` **25** hijau **0** merah;
+`test:snapshot` **2** hijau; `test:docs`; `test:enum`; `test:batch`; `bash -n` **13** berkas shell
+`syntax_bad=0`; gerbang H4 xtrace `0`; scan rahasia `0` berkas. Branch ini menambah **satu** file
+pemicu `deploy.yml` (`pb_hooks/ai_proxy.pb.js`) di atas empat yang sudah dicatat di M19 — jadi
+deploy nanti membawa kelompok 3 + kunci model dalam satu aksi.
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan

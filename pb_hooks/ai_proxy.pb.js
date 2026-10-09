@@ -84,10 +84,18 @@ routerAdd("POST", "/api/ai/complete", (c) => {
     return replyError(429, "rate_limited", "Terlalu banyak permintaan AI. Tunggu sebentar lalu coba lagi.")
   }
 
-  // Rolling alias on purpose: the pinned names this hook used before (gemini-2.0-flash,
-  // gemini-2.5-flash) have both been retired upstream, and gemini-flash-latest was
-  // returning RESOURCE_EXHAUSTED on 5/5 probes while gemini-flash-lite-latest was 5/5.
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
+  // F-69/K-5: nama model DIKUNCI, alias `-latest` dilepas. Isinya diukur hari ini dengan key
+  // produksi di VM (generateContent, membaca `modelVersion` respons, prompt sama):
+  //   gemini-flash-lite-latest -> modelVersion gemini-3.5-flash-lite, 597 ms, 48 token
+  //   gemini-3.5-flash-lite    -> modelVersion gemini-3.5-flash-lite, 589 ms, 48 token, output sama
+  //   gemini-3.1-flash-lite    -> modelVersion gemini-3.1-flash-lite, 689 ms, 42 token
+  // Jadi pin ke nama ini = nol perubahan perilaku sekarang, dan menutup jalan berpindah diam-diam.
+  // Alias dulu dipakai karena nama terkunci sebelumnya (gemini-2.0-flash, gemini-2.5-flash)
+  // dipensiunkan upstream — itu alasan memasang pagar di CI (gerbang F-69 di findings.mjs),
+  // bukan alasan memakai alias. `GET /v1beta/models/<alias>` tidak membuka isinya: field
+  // `version` hanya label "Gemini Flash-Lite Latest" dan tidak ada field retirement sama sekali.
+  const MODEL = "gemini-3.5-flash-lite"
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent"
 
   // topK dulu 1 = greedy decoding, yang membuat temperature dan topP tidak berpengaruh
   // sama sekali (F-44). Sekarang 32 supaya knob sampling di atasnya benar-benar hidup;

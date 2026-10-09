@@ -1177,6 +1177,40 @@ let f50row = null
   }
 }
 
+// F-69/K-5: nama model AI harus DIKUNCI, alias rolling dilarang. Isi alias hari ini diukur
+// dengan key produksi di VM (bukan dibaca dari dokumentasi): `gemini-flash-lite-latest`
+// membalas modelVersion `gemini-3.5-flash-lite` (597 ms, 48 token) dan panggilan langsung ke
+// `gemini-3.5-flash-lite` menghasilkan modelVersion yang sama (589 ms, 48 token, output identik),
+// sementara `gemini-3.1-flash-lite` = 689 ms, 42 token. Yang dinilai di sini bentuk kodenya,
+// supaya `-latest` tidak bisa kembali tanpa tertangkap CI.
+{
+  const rusak = []
+  const kode = tanpaKomentar(srcHook)
+  const m = /const MODEL = "([^"]*)"/.exec(kode)
+  if (!m) {
+    rusak.push('hook tidak lagi punya `const MODEL = "..."` — nama model kemungkinan di-inline lagi ke URL')
+  } else {
+    const model = m[1]
+    if (!model) rusak.push('MODEL kosong')
+    if (/-latest\b/.test(model)) rusak.push(`MODEL = "${model}" adalah alias rolling (K-5 melarang)`)
+    if (!/^gemini-[a-z0-9.]+(-[a-z0-9.]+)*$/.test(model)) rusak.push(`MODEL = "${model}" bukan nama model yang dikenal bentuknya`)
+  }
+  // Nama model hanya boleh hidup di satu tempat: kalau ada literal `models/<x>:generateContent`
+  // lain di kode, pagar di atas bisa dilewati diam-diam.
+  const literal = [...kode.matchAll(/models\/([^"' ]+):generateContent/g)].map((x) => x[1])
+  for (const nama of literal) {
+    if (/-latest/.test(nama)) rusak.push(`URL upstream masih memuat alias: models/${nama}:generateContent`)
+  }
+  if (!/models\/" \+ MODEL \+ ":generateContent/.test(kode)) {
+    rusak.push('URL upstream tidak lagi dibangun dari MODEL — gerbang ini kehilangan satu-satunya sumber nama model')
+  }
+  if (rusak.length) {
+    line('RED', 'F-69', `nama model tidak terkunci: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-69', `MODEL="${m[1]}" terkunci (tanpa alias), URL upstream dibangun dari MODEL, 0 literal models/*:generateContent di kode`)
+  }
+}
+
 // Baris bukti dari pemeriksaan lain dibersihkan di akhir.
 const bukti = [f34row, f79row, spoofed].filter(Boolean)
 for (const t of bukti) {
