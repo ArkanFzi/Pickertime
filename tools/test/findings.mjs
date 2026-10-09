@@ -310,6 +310,13 @@ try {
 // pembungkus data user dan bentuk kontrak proxy. Tiap blok menyebut diskriminatornya,
 // jadi versi lama yang rusak harus menghasilkan RED — bukan sekadar tidak hijau.
 const baca = (rel) => readFileSync(join(AKAR, rel), 'utf8')
+// Komentar boleh menyebut nama fitur yang justru dilarang ada di kode. Untuk pemeriksaan
+// "apakah X dipakai", yang dibaca hanya baris kode.
+const tanpaKomentar = (isi) =>
+  isi.split('\n').filter((b) => {
+    const awal = b.trimStart()
+    return !(awal.startsWith('//') || awal.startsWith('*') || awal.startsWith('/*'))
+  }).join('\n')
 const srcGemini = baca('lib/gemini.ts')
 const srcHook = baca('pb_hooks/ai_proxy.pb.js')
 const srcIndex = baca('app/(tabs)/index.tsx')
@@ -877,6 +884,196 @@ let f50row = null
     line('RED', 'F-65', `snooze masih bukan ukuran nyata: ${rusak.join(' | ')}`)
   } else {
     line('GREEN', 'F-65', `ledger per hari: hari ini 2, kemarin 1, sejak kemarin 3; ${sampahDitolak} bentuk sampah storage ditolak; persist per user + dipotong awal minggu (perilaku lintas-buka aplikasi masih butuh bukti perangkat)`)
+  }
+}
+
+// ── Gelombang 4 kelompok 2: permukaan mati (F-49, F-61) ──────────────────────────────
+// Yang dinilai: apakah kode mengaku punya fitur yang tidak pernah ia panggil, dan apakah
+// simbol/dependensi yang dituduh mati masih dipakai. Blok realtime sengaja dibuat gerbang
+// KOHERENSI, bukan larangan: kalau nanti realtime dipasang dengan bukti perangkat, blok ini
+// tetap hijau selama polyfill dan pelanggannya ada bersama.
+
+{
+  const rusak = []
+  const srcPb = baca('lib/pocketbase.ts')
+  const srcStoreF49 = baca('store/useStore.ts')
+  const pkg = JSON.parse(baca('package.json'))
+  const jumlahPelanggan = (() => {
+    let n = 0
+    const jalan2 = (d) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        if (e.isDirectory()) {
+          if (!LEWATI.has(e.name)) jalan2(join(d, e.name))
+        } else if (/\.tsx?$/.test(e.name)) {
+          // Komentar dibuang dulu: komentar yang MELARANG realtime (lib/pocketbase.ts:5)
+          // akan terhitung sebagai pemanggilan dan membuat gerbang merah pada kode yang benar.
+          const isi = readFileSync(join(d, e.name), 'utf8')
+          n += (tanpaKomentar(isi).match(/\.realtime\.(subscribe|connect)\(/g) || []).length
+        }
+      }
+    }
+    for (const dir of ['app', 'store', 'lib', 'components']) jalan2(join(AKAR, dir))
+    return n
+  })()
+  const polyfillAda = /react-native-sse|global\.EventSource/.test(tanpaKomentar(srcPb))
+  const dependensiAda = !!pkg.dependencies?.['react-native-sse']
+  if (polyfillAda && jumlahPelanggan === 0) {
+    rusak.push('polyfill EventSource dipasang padahal tidak ada satu pun `.realtime.subscribe()` — klaim fitur tanpa pemakai')
+  }
+  if (!polyfillAda && jumlahPelanggan > 0) {
+    rusak.push(`${jumlahPelanggan} panggilan realtime tapi EventSource tidak dipolyfill — di React Native langganan itu tidak akan pernah menerima event`)
+  }
+  if (polyfillAda !== dependensiAda) {
+    rusak.push(`polyfill di lib/pocketbase.ts=${polyfillAda} tapi react-native-sse di package.json=${dependensiAda} — salah satu harus ikut berubah`)
+  }
+  if (/digunakan oleh realtime/i.test(srcStoreF49) && jumlahPelanggan === 0) {
+    rusak.push('komentar store masih mengklaim task diisi "realtime subscription" yang tidak ada')
+  }
+  if (rusak.length) {
+    line('RED', 'F-49', `permukaan realtime tidak konsisten: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-49', `${jumlahPelanggan} pelanggan realtime, ${polyfillAda ? 'polyfill ada' : 'polyfill dicabut'}, dependensi=${dependensiAda}, komentar store tidak lagi mengklaim fitur yang belum ada`)
+  }
+}
+
+{
+  // F-49(b): apa yang dulu jadi dasar keputusan diuji ulang ke server, supaya alasan "cabut"
+  // tidak pelan-pelan jadi asumsi. Dua hal: langganan per-record benar-benar mengirim event,
+  // dan langganan koleksi milik A TIDAK menerima record B — isolasi F-03 di jalur SSE.
+  const rusak = []
+  const judulF49 = 'F-49 langganan realtime'
+  await bersihkanSisa(judulF49)
+  const rowA = await A.pb.collection('Tasks').create({ ...taskPayload({ title: judulF49 }), user: A.id })
+  const rowB = await B.pb.collection('Tasks').create({ ...taskPayload({ title: `${judulF49} B` }), user: B.id })
+  // Koneksi SSE mini. Node 22 tidak punya EventSource, jadi stream dibaca manual — urutannya
+  // persis yang dilakukan pocketbase@0.26.9: GET /api/realtime TANPA header auth (klien
+  // EventSource tidak bisa mengirim header), lalu POST {clientId, subscriptions} dengan
+  // Authorization dari authStore.
+  const sambung = (token) => {
+    const c = { frames: [], ac: new AbortController(), status: 0, salah: [] }
+    c.stream = (async () => {
+      try {
+        const res = await fetch(`${BASE}/api/realtime`, { headers: { Accept: 'text/event-stream' }, signal: c.ac.signal })
+        c.status = res.status
+        if (res.status !== 200) { c.salah.push(`GET /api/realtime -> ${res.status}`); return }
+        const dec = new TextDecoder()
+        let buf = ''
+        for await (const chunk of res.body) {
+          buf += dec.decode(chunk, { stream: true })
+          let i
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const f = { event: '', data: '', id: '' }
+            for (const baris of buf.slice(0, i).split('\n')) {
+              if (baris.startsWith('event:')) f.event = baris.slice(6).trim()
+              else if (baris.startsWith('data:')) f.data += baris.slice(5).trim()
+              else if (baris.startsWith('id:')) f.id = baris.slice(3).trim()
+            }
+            c.frames.push(f)
+            buf = buf.slice(i + 2)
+          }
+        }
+      } catch (err) {
+        if (!c.ac.signal.aborted) c.salah.push(`stream SSE berhenti: ${err.message}`)
+      }
+    })()
+    c.tunggu = async (pred, ms) => {
+      const akhir = Date.now() + ms
+      while (Date.now() < akhir) {
+        const f = c.frames.find(pred)
+        if (f) return f
+        await new Promise((r) => setTimeout(r, 50))
+      }
+      return null
+    }
+    c.langganan = async (subscriptions) => {
+      const connect = await c.tunggu((f) => f.event === 'PB_CONNECT', 5000)
+      const clientId = connect ? (connect.id || JSON.parse(connect.data || '{}').clientId) : null
+      if (!clientId) throw new Error('tidak ada clientId dari PB_CONNECT')
+      const res = await fetch(`${BASE}/api/realtime`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: token } : {}) },
+        body: JSON.stringify({ clientId, subscriptions }),
+      })
+      if (res.status !== 204) throw new Error(`POST /api/realtime -> ${res.status}, harapan 204`)
+      return clientId
+    }
+    return c
+  }
+  const kA = sambung(A.pb.authStore.token)
+  const kB = sambung(B.pb.authStore.token)
+  let lapang = ''
+  try {
+    const topic = `Tasks/${rowA.id}`
+    await kA.langganan([topic, 'Tasks'])
+    const mulainya = Date.now()
+    await A.pb.collection('Tasks').update(rowA.id, { priority: 'High' })
+    const ev = await kA.tunggu((f) => f.event === topic, 4000)
+    if (!ev) throw new Error(`event ${topic} tidak datang dalam 4000ms`)
+    const muat = JSON.parse(ev.data)
+    if (muat.action !== 'update') throw new Error(`action = ${muat.action}, harapan update`)
+    if (!muat.record || muat.record.priority !== 'High') throw new Error('record event tidak memuat perubahan')
+    lapang = `A menerima ${topic} action=update dalam ${Date.now() - mulainya}ms (record ${Object.keys(muat.record).length} kunci)`
+
+    // Kontrol isolasi: B melanggan koleksi yang sama dan HARUS melihat perubahan miliknya,
+    // sementara stream A tidak boleh melihat record B sama sekali. Tanpa kontrol ini, "0 frame"
+    // di stream A bisa berarti apa saja — termasuk stream yang memang tidak mengirim apa-apa.
+    await kB.langganan(['Tasks'])
+    const ubahB = Date.now()
+    await B.pb.collection('Tasks').update(rowB.id, { priority: 'Low' })
+    const evB = await kB.tunggu((f) => f.event === 'Tasks' && (f.data || '').includes(rowB.id), 4000)
+    if (!evB) throw new Error('kontrol gagal: B tidak menerima event miliknya sendiri lewat langganan "Tasks"')
+    const latensiB = Date.now() - ubahB
+    await new Promise((r) => setTimeout(r, 300))
+    const bocor = kA.frames.filter((f) => (f.data || '').includes(rowB.id)).length
+    if (bocor > 0) throw new Error(`${bocor} frame record B lewat ke langganan "Tasks" milik A — isolasi jalur SSE bocor`)
+    lapang += `, B menerima event miliknya dalam ${latensiB}ms, stream A memuat ${bocor} frame record B`
+    if (kA.salah.length || kB.salah.length) throw new Error([...kA.salah, ...kB.salah].join('; '))
+  } catch (err) {
+    rusak.push(err.message)
+  } finally {
+    kA.ac.abort()
+    kB.ac.abort()
+    await A.pb.collection('Tasks').delete(rowA.id).catch(() => {})
+    await B.pb.collection('Tasks').delete(rowB.id).catch(() => {})
+    await Promise.all([kA.stream.catch(() => {}), kB.stream.catch(() => {})])
+  }
+  if (rusak.length) {
+    line('RED', 'F-49b', `realtime di server uji tidak berperilaku seperti yang didokumentasikan: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-49b', `server mendukung realtime (${lapang}); langganan "Tasks" per-user tidak menerima record user lain — yang tidak terbukti adalah sisi React Native + tunnel, itu alasan F-49 dicabut bukan dipasang`)
+  }
+}
+
+{
+  const rusak = []
+  const srcSignUp = baca('app/(auth)/sign-up.tsx')
+  const srcStoreF61 = baca('store/useStore.ts')
+  const pkg = JSON.parse(baca('package.json'))
+  const jejakSso = (srcSignUp.match(/logo-apple|logo-google|ssoBtn|ssoRow|continue with/g) || []).length
+  if (jejakSso) {
+    rusak.push(`${jejakSso} jejak tombol SSO di sign-up padahal keduanya tidak punya onPress dan /api/oauth2/auth?provider=google -> 404 di backend uji`)
+  }
+  if (/avatar_url/.test(srcStoreF61)) {
+    rusak.push('`avatar_url` masih dideklarasikan di tipe Profile — tidak ada satu pun tempat yang membacanya atau mengunggah berkas')
+  }
+  if (/onboardingComplete/.test(srcStoreF61)) {
+    rusak.push('`onboardingComplete` masih ada di state — tidak ada layar yang membaca maupun menulisnya')
+  }
+  const CABUT = ['expo-calendar', 'react-native-sse']
+  for (const nama of CABUT) {
+    if (pkg.dependencies?.[nama]) rusak.push(`${nama} masih di dependencies padahal nol import`)
+  }
+  // Klaim lama F-61 menyebut WEEK_LABELS "tak terpakai" — salah terukur: ia label sumbu
+  // grafik. Kalau nanti memang dihapus, deklarasinya harus ikut, bukan setengah.
+  const deklarasi = /const WEEK_LABELS\s*=/.test(srcInsights)
+  const pakai = (srcInsights.match(/WEEK_LABELS/g) || []).length
+  if (deklarasi && pakai < 2) {
+    rusak.push(`WEEK_LABELS dideklarasikan tapi hanya ${pakai}x muncul di insights.tsx — dipakai atau hapus sekalian`)
+  }
+  if (rusak.length) {
+    line('RED', 'F-61', `permukaan mati masih tersisa: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-61', `SSO tanpa handler dicabut (${jejakSso} jejak), ${CABUT.length} dependensi nol-impor dicabut, state mati (avatar_url, onboardingComplete) hilang dari store, WEEK_LABELS=${pakai}x (masih hidup, jangan ikut "bersih-bersih")`)
   }
 }
 

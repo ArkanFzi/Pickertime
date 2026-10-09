@@ -226,25 +226,6 @@ export default function SignUpScreen() {
             </View>
           </View>
 
-          {/* Divider */}
-          <View style={styles.dividerRow}>
-            <View style={styles.divider} />
-            <Text style={styles.dividerText}>or continue with</Text>
-            <View style={styles.divider} />
-          </View>
-
-          {/* SSO Buttons */}
-          <View style={styles.ssoRow}>
-            <TouchableOpacity style={styles.ssoBtn} activeOpacity={0.7}>
-              <Ionicons name="logo-apple" size={18} color="#fff" />
-              <Text style={styles.ssoBtnText}>Apple</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.ssoBtn} activeOpacity={0.7}>
-              <Ionicons name="logo-google" size={16} color="#fff" />
-              <Text style={styles.ssoBtnText}>Google</Text>
-            </TouchableOpacity>
-          </View>
-
           {/* CTA */}
           <TouchableOpacity
             style={styles.primaryBtn}
@@ -337,17 +318,6 @@ const styles = StyleSheet.create({
   },
   chipText: { fontSize: 12, fontWeight: '500', color: 'rgba(255,255,255,0.6)' },
   chipTextActive: { color: '#00D4FF' },
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
-  divider: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
-  dividerText: { fontSize: 12, color: 'rgba(255,255,255,0.35)', fontWeight: '500' },
-  ssoRow: { flexDirection: 'row', gap: 12, marginBottom: 24 },
-  ssoBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, paddingVertical: 14, borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
-  },
-  ssoBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
   primaryBtn: {
     backgroundColor: '#00D4FF', borderRadius: 18, paddingVertical: 17,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,

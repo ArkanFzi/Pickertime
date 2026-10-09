@@ -391,3 +391,85 @@ karena `updateTask` — aksi lokal — memang berhak menambal `{ ...t, ...update
 masih butuh bukti perangkat: buka aplikasi ulang lalu angka snooze masih ada, dan dua akun di
 satu ponsel tidak saling mewarisi ledger. Kedua kalimat itu juga yang ditulis baris hijau
 gerbang, bukan diklaim selesai.
+
+---
+
+## Status 2026-10-09 (malam 3) — gelombang 4 kelompok 2: permukaan mati
+
+Langkah 6 urutan yang direncanakan, **kelompok 2 dari 3**. Kelompok 1 (F-50, F-64, F-65) sudah
+tergabung ke `dev` sebagai merge PR #29 (`6aac31b`), dengan seluruh gerbang hijau di CI
+(`Type-check`, `Skema PocketBase + hook AI`, `Kontrak enum + batch tulis task`, `Kontrak dokumen
+terhadap skema`, `Lint perkakas shell`, `Scan rahasia di file ter-track` = 6 pass, `main hanya
+hasil merge PR` = skipping karena PR ini tidak menyentuh `main`).
+
+Yang dinilai di kelompok ini: **F-49** dan **F-61** — dua temuan yang isinya bukan "kode salah"
+tapi "kode yang berbohong". Karena itu bentuk perbaikannya beda: yang dibutuhkan adalah gerbang
+yang menahan diri sendiri dari bohong berikutnya, bukan tes perilaku.
+
+### F-49 — keputusannya "cabut", dan alasannya diukur dua arah
+
+Dua sisi dari satu fitur diukur terpisah:
+
+- **Sisi server: terbukti bekerja.** `GET /api/realtime` -> `200` `text/event-stream`, frame
+  `PB_CONNECT` membawa clientId (di `id:` dan di `data.clientId`). `POST /api/realtime` dengan
+  body `{clientId, subscriptions:["Tasks/<id>","Tasks"]}` + header `Authorization` dari
+  `authStore` -> `204`, dan `action=update` datang dalam **3–6 ms** dengan `record` **16** kunci.
+  Ini persis urutan yang dilakukan `pocketbase@0.26.9` (dibaca dari `sendSubscriptions()` di
+  `node_modules/pocketbase/dist/pocketbase.es.mjs`; SDK 0.26.9 mengirim ke `/api/realtime`,
+  bukan `/api/realtime/subscriptions`).
+- **Sisi isolasi: terbukti aman.** Klien B melanggan koleksi yang sama dan menerima record
+  miliknya; stream A — yang juga melanggan `Tasks` — memuat **0** frame berisi id record B.
+  Probe tambahan: langganan **tanpa** `Authorization` tidak menerima apa pun. Jadi realtime di
+  PocketBase 0.40.4 tidak membuka jalur baru lintas user; aturan list yang sama berlaku di SSE.
+- **Sisi React Native: tidak terbukti, dan tidak bisa dibuktikan sesi ini.** Yang dibutuhkan:
+  `react-native-sse` benar-benar terhubung di dev client, reconnect saat aplikasi
+  latar/depn, dan — yang paling penting — apakah Cloudflare Tunnel meneruskan SSE tanpa buffer.
+  `adb` tidak ada, tidak ada perangkat tersambung, dan backend produksi tidak boleh ditembak
+  perkakas uji. Memasang fitur yang bagian tak-terbuktinya justru terbesar = mengulang F-49
+  dengan kode yang lebih banyak.
+
+Maka yang dibuang: polyfill, komentar, dependensi. Yang disimpan: **probenya jadi gerbang
+`F-49b` di `tools/test/findings.mjs`** — keputusan "cabut" sekarang punya dasar yang bisa
+dijalankan ulang, dan siapa pun yang memasang realtime nanti sudah punya spesifikasi wire yang
+terbukti (endpoint, bentuk body, topik `Koleksi/<id>`, `204`, bentuk event, dan syarat auth).
+Gerbang F-49 sendiri dibuat **koherensi**, bukan larangan: polyfill tanpa pelanggan merah,
+pelanggan tanpa polyfill merah, keduanya ada = hijau. Ini penting supaya pencabutan hari ini
+tidak jadi aturan permanen yang harus "dihapus dulu" saat fiturnya nanti dipasang.
+
+### F-61 — satu klaim audit ternyata salah, dan itu dicatat sebagai koreksi
+
+| Item | Putusan | Alasan terukur |
+|---|---|---|
+| Tombol "Apple"/"Google" | **dihapus** (beserta divider + 6 gaya) | `TouchableOpacity`-nya **tidak punya `onPress`** sama sekali — bukan stub tertunda; dan `POST /api/oauth2/auth?provider=google` -> **404** di backend uji. |
+| `avatar_url` di tipe `Profile` | **dihapus dari klien** | **0** pembaca, **0** unggah berkas. Field di skema tetap ada — itu keputusan kelompok 3. |
+| `onboardingComplete` + setter | **dihapus** | `grep -rn setOnboardingComplete app components lib` -> **tidak ada** (rc=1). |
+| `expo-calendar` | **dihapus dari dependencies** | Nol import, tidak muncul di `app.json > plugins`, tapi `expo prebuild` tetap menaruh `READ_CALENDAR` + `WRITE_CALENDAR` di manifest. Sesudah dicabut: `diff` manifest = **persis dua baris izin itu hilang**, sisanya identik (7 -> 5 `uses-permission`). |
+| `WEEK_LABELS` | **TIDAK dihapus — klaim audit salah** | Masih dipakai sebagai `labels:` di `LineChart` (`insights.tsx:213`). Gerbang sekarang menahan dua arah: deklarasi tanpa pemakaian -> merah. |
+| `PAUSE_FOCUS` / `RESET_FOCUS` | **ditinggalkan, sengaja** | `test:enum` mengikat union ke `EVENTS` di migrasi **dua arah**, dan `PAUSE_FOCUS` bukan nilai mati — ada kontrol Pause/Resume nyata (`app/focus.tsx:71-76`) yang belum pernah menulis event. Menyempitkan = perubahan `pb_migrations/**` -> kelompok 3. |
+| `Focus_Sessions.completed`, `Workspace_Events.is_processed`/`payload` | **ditinggalkan** | Keduanya **ditulis** (`app/focus.tsx:130`, `:33`), hanya tidak dibaca. Menghapus = skema + nasib `Workspace_Events` (F-62) -> kelompok 3. |
+
+### Perkakas, anti-vakum, dan dua jebakan yang mengulang dirinya sendiri
+
+`typecheck`, `test:findings` (**22** hijau, naik dari 19), `test:enum`, `test:docs`, `test:batch`
+semua `rc=0`. **9** mutasi -> **9** `rc=1` dengan merah pada ID yang benar, **0** hijau-palsu,
+pemulihan diverifikasi `md5` pada 6 berkas. Bundel RN lewat Metro: **8.243.230** byte, `http=200`,
+**0** `Unable to resolve module`.
+
+Dua jebakan yang sudah pernah dicatat sesi sebelumnya muncul lagi, dan keduanya kujatuh sendiri:
+
+1. **Komentar menipu grep.** Tulisanku di `lib/pocketbase.ts` — "belum ada satu pun
+   `pb.realtime.subscribe()`" — terhitung sebagai *pemanggilan* oleh scanner baru, membuat F-49
+   MERAH pada kode yang benar. Perbaikannya di gerbang (`tanpaKomentar()`), bukan dengan
+   mengubah kata di komentar. Pelajaran yang sama pernah terjadi pada bundel dev: komentar tidak
+   dibuang, jadi setiap klaim "identitas X sudah hilang dari bundel" harus dibaca setelah
+   komentar dibuang. Akibatnya dua laporan bundel kali ini sengaja tidak dipakai sebagai bukti:
+   `logo-apple` tetap **3x** dan `logo-google` **2x** (Ionicons membundel seluruh peta glyph),
+   `EventSource` tetap **2x** di dalam modul realtime `pocketbase` — mencabut polyfill tidak
+   membuang kode klien SDK, hanya transport SSE-nya.
+2. **Perkakas yang menulis file yang sedang kuedit.** `npx expo prebuild` mengubah
+   `package.json` (skrip `android`/`ios` -> `expo run:*`). Untuk memulihnya aku `git checkout --
+   package.json`, dan itu ikut **menghapus dua baris dependensi yang sudah dicabut**. Terpantau
+   dari `git status` (package.json hilang dari daftar berubah), dipasang ulang dengan
+   `npm uninstall` supaya `package.json` + lock tetap satu sumber. Aturan yang lebih aman: kalau
+   satu perintah mengubah berkas yang ada diff-nya, jangan `git checkout -- <file>` —
+   balikkan bagian yang spesifik.

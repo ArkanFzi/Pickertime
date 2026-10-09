@@ -1,12 +1,9 @@
 import 'react-native-url-polyfill/auto';
 import PocketBase, { AsyncAuthStore } from 'pocketbase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import EventSource from 'react-native-sse';
 
-// Polyfill EventSource for React Native Realtime Subscriptions
-if (!global.EventSource) {
-  (global as any).EventSource = EventSource;
-}
+// Tidak ada polyfill EventSource di sini: belum ada satu pun `pb.realtime.subscribe()` di
+// aplikasi, dan memasangnya perlu dibuktikan di perangkat lebih dulu (lihat F-49).
 
 export const PB_URL =
   process.env.EXPO_PUBLIC_POCKETBASE_URL ||
