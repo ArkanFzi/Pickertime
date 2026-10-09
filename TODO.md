@@ -1346,6 +1346,64 @@ baru tanpa reload layar.
 - Tidak ada perubahan skema, `pb_hooks/**`, atau path pemicu deploy pada PR ini; merge ke `dev`
   dan nanti ke `main` tidak men-deploy apa pun.
 
+## M18 — Gelombang 4 kelompok 2: permukaan mati (2026-10-09, branch `fix/permukaan-mati`)
+
+Lanjutan langkah 6 urutan yang direncanakan. Yang ditutup: **F-49** (permukaan realtime) dan
+**F-61** (permukaan mati), plus koreksi satu klaim audit yang ternyata salah terukur.
+
+**Keputusan F-49: dicabut, bukan dipasang.** Alasannya bukan "realtime tidak bisa", justru
+sebaliknya — sisinya yang *tidak* bisa dibuktikan adalah sisi React Native, dan itu butuh
+perangkat (sesi ini `adb` tidak terpasang, tidak ada perangkat tersambung, Metro hanya bisa
+dipakai untuk membangun bundel). Meninggalkan kode fitur yang belum terbukti adalah pola yang
+persis dikritik F-49, jadi yang dibuang: polyfill `EventSource`, komentar "digunakan oleh
+realtime subscription", dependensi `react-native-sse`. Spesifikasi wire-nya tetap dinilai hidup
+di CI lewat `F-49b`, supaya alasan pencabutan bisa diulang dan tidak jadi asumsi turun-temurun.
+
+| ID | Yang diubah | Bukti terukur |
+|---|---|---|
+| **F-49** | `lib/pocketbase.ts` tanpa polyfill; komentar `store/useStore.ts` tidak lagi mengklaim fitur; `react-native-sse` keluar dari `package.json` + lock. Gerbangnya **koherensi**, bukan larangan: polyfill tanpa pelanggan = merah, pelanggan tanpa polyfill = merah, jadi memasang realtime nanti tetap boleh selama keduanya ada bersama. | `grep .realtime.(subscribe\|connect)(` di app/store/lib/components (baris komentar dibuang) = **0**; `react-native-sse` di dependencies = **tidak**. Mutasi: polyfill dipasang lagi -> `RED F-49 … klaim fitur tanpa pemakai`; `pb.realtime.subscribe()` ditambahkan tanpa polyfill -> `RED F-49 … 1 panggilan realtime tapi EventSource tidak dipolyfill`; komentar lama dikembalikan -> `RED F-49 … komentar store masih mengklaim`. |
+| **F-49b** (gerbang baru) | Perilaku server diuji lewat SSE manual (Node 22 tidak punya `EventSource`), meniru urutan `pocketbase@0.26.9`: `GET /api/realtime` tanpa header auth -> `POST /api/realtime {clientId, subscriptions}` dengan `Authorization`. | `GET -> 200 text/event-stream`, `PB_CONNECT` berisi clientId; `POST subscriptions=["Tasks/<id>","Tasks"] -> 204`; `action=update` datang dalam **3–6 ms**, `record` **16** kunci. **Kontrol isolasi:** B melanggan `Tasks` dan menerima record miliknya, sementara stream A memuat **0** frame berisi id record B — isolasi F-03 berlaku di jalur SSE. Probe tambahan: langganan **tanpa** `Authorization` menerima **0** event. Mutasi: filter kebocoran diarah ke record A -> `RED F-49b … 2 frame record B lewat`; topik langganan disalahkan -> `RED F-49b … event tidak datang dalam 4000ms`. |
+| **F-61** | Tombol "Apple"/"Google" + divider "or continue with" dan 6 gaya (`ssoRow`/`ssoBtn`/`ssoBtnText`/`divider*`) dihapus dari `app/(auth)/sign-up.tsx`; `avatar_url` keluar dari tipe `Profile`; `onboardingComplete` + `setOnboardingComplete` keluar dari state; `expo-calendar` keluar dari dependencies. | Kedua tombol **tidak punya `onPress` sama sekali** (bukan stub), dan `POST /api/oauth2/auth?provider=google -> 404` di backend uji. `setOnboardingComplete` = **0** panggilan di luar `store/useStore.ts` (dibuktikan dengan `grep -rn` di app/components/lib -> rc=1). **Manifest diukur, bukan disimpulkan:** `npx expo prebuild --platform android` sebelum -> `AndroidManifest.xml` memuat `READ_CALENDAR` **dan** `WRITE_CALENDAR` (7 `uses-permission`); sesudah `expo-calendar` dicabut -> 5 baris, `diff` selisihnya **persis dua** izin itu. Mutasi: tombol SSO dikembalikan -> `RED F-61 … 4 jejak tombol SSO`; `avatar_url` balik -> merah; `expo-calendar` balik di `package.json` -> merah. |
+| **Koreksi klaim audit** | Audit (baris F-61) menyebut `WEEK_LABELS` "tak terpakai". **Salah terukur** — ia label sumbu `LineChart`. | `insights.tsx:18` deklarasi, `insights.tsx:213` `labels: WEEK_LABELS` = **2** muncul. Gerbang sekarang menjaga dua arah: deklarasi tanpa pemakaian -> `RED F-61 … hanya 1x muncul`; mutasi `labels: WEEK_LABELS` -> `labels: []` -> tepat merah itu. Tidak ada yang dihapus dari file ini. |
+
+Perkakas keadaan akhir, semuanya `rc=0`: `typecheck`; `test:findings` **22** baris hijau
+(sebelum kelompok ini 19); `test:enum`; `test:docs`; `test:batch`. Anti-vakum: **9** mutasi,
+**9** tertangkap dengan merah pada ID yang benar dan **0** hijau-palsu; pemulihan diverifikasi
+`md5` pada **6** berkas (`lib/pocketbase.ts`, `store/useStore.ts`, `app/(auth)/sign-up.tsx`,
+`app/(tabs)/insights.tsx`, `package.json`, `tools/test/findings.mjs`) lalu gerbang dijalankan
+ulang dan hijau lagi. Bundel RN: Metro `:8083` menghasilkan **8.243.230** byte (`http=200`),
+**0** `Unable to resolve module`; `react-native-sse`, `expo-calendar`, `ssoBtn`,
+`onboardingComplete`, `avatar_url`, `PAUSE_FOCUS` semuanya **0** setelah komentar dibuang.
+
+Batas yang jujur dari bundel: `logo-apple` tetap muncul **3x** dan `logo-google` **2x** karena
+Ionicons membundel seluruh peta glyph apa pun yang dipakai layar, dan `EventSource` tetap muncul
+**2x** di dalam modul realtime `pocketbase` — mencabut polyfill tidak membuang kode klien SDK,
+yang dibuang hanya transport SSE-nya. Karena itu bukti "permukaan mati hilang" yang dipakai adalah
+gerbang sumber (`F-61`), bukan grep bundel.
+
+Dua jebakan sesi ini (berulang, dicatat): (1) komentar di `lib/pocketbase.ts` yang MELARANG
+realtime (`belum ada satu pun pb.realtime.subscribe()`) ikut terhitung sebagai pemanggilan dan
+membuat gerbang F-49 merah pada kode yang benar — diperbaiki dengan `tanpaKomentar()` di
+`tools/test/findings.mjs`, bukan dengan mengganti kata di komentar; (2) `npx expo prebuild`
+mengubah `package.json` (skrip `android`/`ios` jadi `expo run:*`), lalu `git checkout --
+package.json` untuk memulihnya ikut menghapus dua baris dependensi yang sudah dicabut —
+dipasang ulang dengan `npm uninstall` supaya `package.json` dan lock tetap satu sumber.
+`android/` hasil prebuild dihapus lagi (sudah di-`.gitignore` baris 13–14).
+
+Yang sengaja **tidak** diselesaikan di kelompok ini:
+
+- **`PAUSE_FOCUS` / `RESET_FOCUS`** tetap ada di union `app/focus.tsx:15`. Dua alasan terukur:
+  `test:enum` mengikat union itu dua arah ke `EVENTS` di `pb_migrations/**` (menyempitkan
+  tanpa mengubah pattern -> merah), dan `PAUSE_FOCUS` bukan nilai mati — layar Focus punya
+  kontrol Pause/Resume (`app/focus.tsx:71-76`) yang memang belum menulis event. Menarrow
+  pattern = pekerjaan skema -> kelompok 3.
+- **Field write-only** `Focus_Sessions.completed` dan `Workspace_Events.is_processed` /
+  `payload`: keduanya *ditulis* (`app/focus.tsx:130`, `:33`), tidak ada yang membaca —
+  menghapusnya perubahan `pb_migrations/**`, satu kelompok dengan F-52/F-57 dan nasib
+  `Workspace_Events` (F-62).
+- **Sisa F-06/F-27**: izin kalender hilang dari manifest *hasil generate*, tapi perangkat yang
+  terpasang baru bersih setelah build ulang + pasang APK.
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan

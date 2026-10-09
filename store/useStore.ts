@@ -14,7 +14,6 @@ export interface Profile {
   id: string;
   email: string;
   full_name: string;
-  avatar_url?: string;
   role: UserRole;
   focus_goal: string;
   energy_pref: EnergyPref;
@@ -61,7 +60,7 @@ interface AppState {
   setUser: (user: AuthModel | null) => void;
   setProfile: (profile: Profile | null) => void;
 
-  // Tasks — operasi lokal (digunakan oleh realtime subscription)
+  // Tasks — operasi lokal; isi array selalu dari respons server (lihat sync* di bawah).
   tasks: Task[];
   setTasks: (tasks: Task[]) => void;
   addTask: (task: Task) => void;
@@ -140,10 +139,6 @@ interface AppState {
   snoozes: SnoozeLedger;
   hydrateSnoozes: () => Promise<void>;
   recordSnooze: () => Promise<void>;
-
-  // Onboarding
-  onboardingComplete: boolean;
-  setOnboardingComplete: (val: boolean) => void;
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -375,8 +370,4 @@ export const useStore = create<AppState>((set, get) => ({
   setActiveTask: (task) => set({ activeTask: task }),
   setTimerSeconds: (timerSeconds) => set({ timerSeconds }),
   setIsRunning: (val) => set({ isRunning: val }),
-
-  // ─── Onboarding ─────────────────────────────────────────────────────────────
-  onboardingComplete: false,
-  setOnboardingComplete: (val) => set({ onboardingComplete: val }),
 }));
