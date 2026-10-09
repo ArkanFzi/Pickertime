@@ -522,7 +522,11 @@ Tiga hal yang kuukur dulu sebelum menulis klaim:
 Perkakas: `tools/test/snapshot-f57.mjs` + `npm run test:snapshot` + langkah CI baru di job `schema`
 (container kedua, port 8091, hanya file snapshot yang di-mount). `test:findings` naik **22 → 24**
 hijau dan angka itu juga hijau di **install fresh replika CI** (port 8098, `pb_data` kosong, hooks
-+ migrations: `pb-schema-verify` **17/17 OK**, seed 4 dibuat/1 ditolak). Lima mutasi anti-vakum
++ migrations: `pb-schema-verify` **21** baris `OK` / **0** gagal, `rc=0`, seed 4 dibuat/1 ditolak).
+Angka **17/17** yang kutulis pada ronde sebelumnya di paragraf ini salah dan sudah kucabut: tool
+itu tidak mencetak penyebut `n/n`, jadi "17" adalah hitunganku sendiri terhadap skema waktu itu —
+dihitung ulang terhadap skema sekarang = 21. CI run PR #31 sendiri membalas **24** `GREEN` di
+langkah findings + **2** `GREEN` di langkah snapshot, **0** `RED`. Lima mutasi anti-vakum
 (M1 file pra-resnap, M2b `required` di file, M3 `cascadeDelete` di file, M4 `cascadeDelete` di
 server, M5 rule asing di up-#2) semuanya tertangkap di lengan yang benar; pemulihan diverifikasi
 `md5` (snapshot `ecabd128…`, #2 `8eae8279…`) dan server uji dikembalikan sampai definisi

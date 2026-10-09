@@ -1426,8 +1426,12 @@ kelompok ini 22); `test:snapshot` (baru, `npm run test:snapshot`); `test:docs`; 
 `0` berkas. CI mendapat langkah baru `Snapshot berdiri sendiri (F-57)` di job `schema`: container
 kedua di port 8091 yang **hanya** memuat file snapshot, lalu `tools/test/snapshot-f57.mjs`.
 Rantai penuh di-install-fresh juga dijalankan lokal sebagai replika CI (port 8098, hooks +
-migrations, `pb_data` kosong): `pb-schema-verify` **17/17 OK**, `seed` 4 task dibuat + 1 ditolak,
-`findings` **24** hijau.
+migrations, `pb_data` kosong): `pb-schema-verify` **21** baris `OK` dan **0** gagal (`rc=0`,
+"semua pemeriksaan lulus"), `seed` **4** task dibuat + **1** ditolak, `findings` **24** hijau.
+CI-nya sendiri sama: job `schema` pada run PR membalas **24** `GREEN` di langkah findings + **2**
+`GREEN` di langkah snapshot, **0** `RED`. Angka `17/17` yang tadinya kutulis di baris ini
+ketinggalan ronde — `pb-schema-verify` tidak mencetak penyebut `n/n` sama sekali, jadi hitungan lama
+sudah tidak berlaku terhadap skema sekarang dan kuukur ulang: **21**.
 
 Anti-vakum kelompok ini: **5** mutasi (M1 file pra-resnap, M2b `required` di file saja,
 M3 `cascadeDelete` di file saja, M4 `cascadeDelete` di server, M5 rule baru di up-#2), **5**
