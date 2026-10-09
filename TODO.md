@@ -1061,6 +1061,51 @@ tombol yang terbukti mati dengan koordinat terukur.
 - Data uji tertinggal di backend uji (bukan produksi): task `rzbusi008v4bbjq` "Uji-Jadwal-Bulat" dan
   `yv5v65cw6yr156z` yang start-nya sudah digeser dua kali. Tidak dihapus.
 
+## M13 — Gelombang "bug kalender": batas hari dan minggu dihitung dari perangkat (branch `fix/batas-hari-lokal`, 2026-10-09)
+
+Lanjutan `docs/04_audit/action_plan_2026-10-08.md`. Semua angka di bawah adalah keluaran alat terhadap
+backend uji PocketBase 0.40.4 (`pt-pb-test`, `127.0.0.1:8099`; seed `tools/test/seed.mjs` ->
+`task dibuat=4 ditolak=1`), node 22.23.2 — bukan pembacaan kode.
+
+| ID | Yang diubah | Bukti terukur |
+|---|---|---|
+| **F-34** (batas "hari ini" dipotong pada tengah malam UTC) | `lib/localDay.ts` (baru, 25 baris) `toPbEpoch` / `localDayStartEpoch` / `localWeekStart` / `localWeekStartEpoch`; dipakai `store/useStore.ts:324` sehingga `syncFetchTasks` mengirim `start_time >= <epoch>` tanpa tanda kutip. | Baris yang sama diuji dengan dua batas: task 05:00 WIB tersimpan `2026-10-08 22:00:00.000Z`; batas UTC `"2026-10-09"` -> **0 baris** (persis gejala "tugas pagi hilang mulai jam 07:00"), batas lokal epoch `1791478800` -> **1 baris**. `GREEN F-34`. Dijalankan ulang dengan `TZ=UTC` (= kondisi runner CI) tetap `rc=0`, karena yang dikirim detik UTC, bukan string yang bergantung zona waktu. |
+| **F-48** (`alarm_minutes_before \|\| 10` mengubah "tepat waktu" jadi 10 menit) | `resolveLeadMinutes()` di `lib/taskContract.ts` (`LEAD_DEFAULT_MINUTES = 10`), dipakai **dua sisi**: jadwal `lib/notifications.ts:76` dan tulis `store/useStore.ts:52`. | `resolveLeadMinutes(0 / undefined / null / 1440) -> 0,10,10,1440`. Batas server diukur terpisah: `1441` -> HTTP 400 `validation_max_number_constraint`, `-1` -> `validation_min_number_constraint`, `0` -> **tersimpan 0**; field tidak dikirim saat create juga kembali `0`, jadi default 10 memang hanya boleh hidup di sisi tulis. Gerbang menuntut `lib/notifications.ts` memanggil fungsi itu dan tidak ada lagi `|| 10`. |
+| **F-75** (baru, ketemu saat memvalidasi perbaikan F-34) | Dua query mingguan `app/(tabs)/insights.tsx:96` dan `:130` sekarang epoch (`>= ${awalMinggu}`). | Satu baris, tiga ejaan batas untuk instans yang sama: `"2026-10-08T17:00:00.000Z"` -> **0 baris**, `"2026-10-08 17:00:00.000Z"` -> **1**, `1791478800` -> **1**. PocketBase membandingkan literal ber-huruf "T" sebagai **teks** terhadap kolom `YYYY-MM-DD HH:MM:SS.mmmZ` (`' ' < 'T'`), jadi setiap baris yang tanggal UTC-nya sama dengan tanggal batas tidak ikut terhitung — statistik mingguan kurang tanpa pesan. Guard: pemindaian rekursif `app/ store/ lib/` atas pola `>= "${…toISOString()}"` menuntut **0** (terukur `0 filter ISO-"T" di app/store/lib`). |
+| **F-76** (baru) | `getWeekRange()` (`insights.tsx:361`) dan query mingguan memakai `localWeekStart()`. | Rumus lama `now.getDate() - now.getDay() + 1` dibandingkan atas **91 tanggal (1 Sep – 30 Nov 2026): 13 tanggal beda, dan itu persis 13 dari 13 hari Minggu** (13 hari Sabtu cocok). Contoh `Sun Oct 04 2026` -> label lama "Oct 5 – Oct 11" padahal minggu datanya "Sep 28 – Oct 4". Assert baru: Senin..Minggu 5–11 Okt 2026 semuanya mendarat di `Mon Oct 05 2026`. Catatan jujur: rumus lama di `loadRealData` (`getDay()===0 ? 6 : getDay()-1`) **tidak** menyimpang (0/31 tanggal Okt) — bug query itu murni F-75. |
+| Gerbang `tools/test/findings.mjs` | Empat blok baru (F-34/F-48/F-75/F-76), `process.env.TZ = 'Asia/Jakarta'` sebelum satu pun `Date`, helper `bersihkanSisa(title)` per judul probe, guard impor: kalau salah satu fungsi `lib/*.ts` tidak terbaca sebagai function -> `process.exit(1)`. | Keadaan bersih: `GREEN F-01 F-03 F-02 F-34 F-48 F-75 F-76` + `baris bukti dibersihkan: 2` + `semua temuan sudah tertutup.` `rc=0`. Anti-vacuous: empat mutasi terpisah (store tidak memakai helper; `notifications.ts` dipotong dari fungsi; filter ISO-"T" disuntik ke `insights.tsx:130`; `getWeekRange` kembali ke rumus lama) -> **tepat satu baris RED per mutasi, `rc=1`**, berkas dipulihkan (`md5sum -c` OK). |
+| Jebakan di dokumentasi | `docs/02_migration/pocketbase_schema.md` jebakan 4: kirim batas sebagai epoch atau `"YYYY-MM-DD HH:MM:SS"`, jangan `toISOString()`. | Angka yang dikutip di jebakan itu adalah hasil probe di baris F-75 (0 / 1 / 1), bukan perkiraan. |
+
+### Gerbang lain yang diulang setelah perubahan (semuanya rc=0)
+
+`npx tsc --noEmit` (tanpa keluaran), `test:enum` ("Semua sumber cocok dengan skema."),
+`test:batch` ("Batch tulis task tidak meninggalkan baris yatim."),
+`test:findings` (7 GREEN, juga dengan `TZ=UTC`), `test:ai-proxy` ("Jalur proxy AI bersih.";
+12 request paralel -> 10 lolos, 2 ditahan HTTP 429; prompt 200.000 karakter -> 413 dalam 11ms).
+`test:findings` **sudah** menjadi langkah CI (`ci.yml:125-130`, job "Skema PocketBase + hook AI"),
+jadi regresi kalender ini merah di CI tanpa perubahan pipa.
+
+### Sisa M13 (tidak ditutup diam-diam)
+
+- **Bukti perangkat belum ditagih.** F-34 diuji terhadap backend, bukan terhadap layar: yang wajib
+  dijalankan di ponsel ialah *set zona waktu Asia/Jakarta, buat task 06:00, reload setelah 07:00*
+  dan pastikan tugas itu masih muncul di Timeline. Angka hari ini membuktikan query-nya benar,
+  bukan bahwa pengguna sudah melihatnya.
+- **F-35 belum** — bukan soal filter tapi permukaan: semua konsumen `store.tasks` sudah menjaga
+  `!t.start_time` (terukur di `timeline.tsx:200`, `schedule.tsx:133/145`, `smart-alarm.tsx:60/65`,
+  `edit-task.tsx:136`, `index.tsx:60`), jadi menambahkan `(start_time = "" || …)` ke
+  `syncFetchTasks` hanya memindahkan baris tak-terjadwal ke "ada di memori, tidak ditampilkan di mana pun".
+  Perlu satu keputusan produk: section "Tanpa jadwal", atau memang dibiarkan tersaring.
+- **F-43 belum** — `scheduleTaskNotification` masih `string | null` dan pemanggilnya
+  (`store/useStore.ts:177`, satu-satunya call site nyata) tidak membaca hasilnya; mengubahnya jadi `{ ok, reason }` berarti
+  menambah state + chip yang menjelaskan *mengapa* alarm tidak terpasang, dan itu dibuktikan di
+  perangkat (suite A-2…A-7), bukan di node.
+- **Tabrakan buku yang sudah diketahui:** M12 (`feat/workspace-events-ketat`, commit `711bd3e`) dan
+  jebakan 4–7 di `docs/02_migration/pocketbase_schema.md` ada di branch lain yang belum masuk `dev`.
+  Keduanya menambah blok di posisi yang sama, jadi merge branch ini ke `dev` akan berkonflik dengan
+  M12 di `TODO.md` dan di penomoran jebakan — diselesaikan dengan menjaga urutan M12 lalu M13 dan
+  menomori ulang jebakan ISO-"T" di belakang 4–7, bukan dengan membuang salah satu.
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan

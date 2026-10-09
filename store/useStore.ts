@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { AuthModel, RecordModel } from 'pocketbase';
 import { pb } from '@/lib/pocketbase';
 import { scheduleTaskNotification, cancelTaskNotification, listArmedAlarmTaskIds } from '@/lib/notifications';
-import { createTaskBatch, type TaskWriter, type TaskWritePayload } from '@/lib/taskContract';
+import { createTaskBatch, resolveLeadMinutes, type TaskWriter, type TaskWritePayload } from '@/lib/taskContract';
+import { localDayStartEpoch } from '@/lib/localDay';
 
 export type UserRole = 'Student' | 'Professional' | 'Freelancer' | 'Creator' | 'Researcher' | string;
 export type EnergyPref = 'Morning' | 'Afternoon' | 'Night Owl';
@@ -48,7 +49,7 @@ const withTaskDefaults = (payload: CreateTaskPayload): CreateTaskPayload => ({
   ...payload,
   is_completed: payload.is_completed ?? false,
   has_alarm: payload.has_alarm ?? true,
-  alarm_minutes_before: payload.alarm_minutes_before ?? 10,
+  alarm_minutes_before: resolveLeadMinutes(payload.alarm_minutes_before),
 });
 
 interface AppState {
@@ -320,9 +321,9 @@ export const useStore = create<AppState>((set, get) => ({
     const user = get().user || pb.authStore.model;
     if (!user) return;
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const batasHari = localDayStartEpoch();
       const records = await pb.collection('Tasks').getFullList({
-        filter: `user = "${user.id}" && start_time >= "${today}"`,
+        filter: `user = "${user.id}" && start_time >= ${batasHari}`,
         sort: 'start_time',
       });
       if (records) {
