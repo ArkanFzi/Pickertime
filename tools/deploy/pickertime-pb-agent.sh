@@ -93,13 +93,22 @@ step() { echo "$LOG_PREFIX: ${ID:-?} langkah: $*"; }
 pb_ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER"; }
 
 gate() { # gerbang lokal: health + anon harus 401 + superuser auth + baca koleksi
-  local url="http://${1}:8090" code tok eml pw c
+  local url="http://${1}:8090" code tok eml pw c path
   code=$(curl -s -o "$WORK/health.json" -w '%{http_code}' -m 15 "$url/api/health") || { echo "health curl gagal"; return 1; }
   [ "$code" = "200" ] || { echo "health http=$code"; return 1; }
   grep -q '"code":200' "$WORK/health.json" || { echo "health body bukan 200"; return 1; }
+  # Proxy AI berganti nama endpoint (F-60): coba yang baru, jatuh ke yang lama hanya kalau
+  # path barunya belum terpasang. Anon wajib 401 pada keduanya, jadi gerbang ini tetap
+  # menilai autentikasi dan tidak lagi membuat deploy hook baru dianggap gagal.
+  path=/api/ai/complete
   code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 -X POST -H 'Content-Type: application/json' \
-    -d '{"prompt":"ping"}' "$url/api/ai/gemini") || { echo "anon gemini curl gagal"; return 1; }
-  [ "$code" = "401" ] || { echo "anon /api/ai/gemini http=$code (harus 401)"; return 1; }
+    -d '{"prompt":"ping"}' "$url$path") || { echo "anon $path curl gagal"; return 1; }
+  if [ "$code" = "404" ]; then
+    path=/api/ai/gemini
+    code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 -X POST -H 'Content-Type: application/json' \
+      -d '{"prompt":"ping"}' "$url$path") || { echo "anon $path curl gagal"; return 1; }
+  fi
+  [ "$code" = "401" ] || { echo "anon $path http=$code (harus 401)"; return 1; }
   eml=$(sed -n 's/^email=//p' "$APP_DIR/superuser.txt") || { echo "baca superuser.txt gagal"; return 1; }
   pw=$(sed -n 's/^password=//p' "$APP_DIR/superuser.txt") || { echo "baca superuser.txt gagal"; return 1; }
   [ -n "$eml" ] && [ -n "$pw" ] || { echo "kredensial superuser tidak terbaca"; return 1; }

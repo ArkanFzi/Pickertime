@@ -53,7 +53,13 @@ const listIn = (file, name) => {
   return [...block.matchAll(/'([^']+)'/g)].map((m) => m[1])
 }
 const promptIn = (file) => {
-  const src = read(file)
+  let src = read(file)
+  // Prompt boleh mengambil daftar dari lib/taskContract.ts (satu sumber kebenaran), tapi
+  // gate ini harus menilai nilai yang benar-benar dikirim ke AI — jadi sisipkan dulu.
+  src = src.replace(
+    /\$\{\s*TASK_CATEGORIES\.join\(', '\)\s*\}/g,
+    listIn('lib/taskContract.ts', 'TASK_CATEGORIES').join(', ')
+  )
   const m = src.match(/Category must be one of: ([^.]+)\./)
   return m ? m[1].split(',').map((s) => s.trim()) : []
 }

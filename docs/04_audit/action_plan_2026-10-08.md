@@ -185,3 +185,54 @@ Jebakan yang tercatat dari sesi ini (jangan diulang):
    `getTime()` rumus lama vs baru padahal yang satu tengah malam dan yang lain masih 10:00 —
    hasilnya "BEDA" untuk 7/7 hari, termasuk lima hari yang benar-benar cocok. Dibetulkan jadi
    perbandingan tanggal kalender, dan sisanya yang 13 hari (Minggu) itulah temuannya.
+
+## Status 2026-10-09 (siang) — gelombang 3: jalur AI diikat ke kontrak, bukan ke vendor
+
+Angka di bawah keluaran alat terhadap **dua** keadaan backend PocketBase 0.40.4 yang sama-sama
+memakai `pb_hooks/` repo ini (bind-mount, jadi hook yang diuji = hook yang dikirim):
+
+- `pt-pb-test` `127.0.0.1:8099` — `GEMINI_API_KEY` **sampah** (menyimulasikan upstream mati).
+- `pt-pb-real` `127.0.0.1:8098` — `GEMINI_API_KEY` **nyata** (menyimulasikan upstream hidup).
+
+| ID | Keadaan | Bukti terukur |
+|---|---|---|
+| **F-42** | **ditutup** — (a) semua `parts` digabung di hook (`pb_hooks/ai_proxy.pb.js:141-144`, `.join("")`); (b) `responseMimeType: "application/json"` diminta saat klien kirim `json: true` (`:100-102`) dan regex buta dibuang demi satu parser `parseAiJson` (`lib/aiContract.ts`) yang dipakai keempat fungsi AI; (c) `finishReason` -> `truncated` (`:146-147`) dan `promptFeedback` -> 400 `blocked` (`:130-135`). Bentuk JSON vendor tidak lagi dikenal aplikasi. | `parseAiJson` **8/8 kasus** lulus, termasuk diskriminator `{"a":4} x {"b":5}` (regex greedy lama mengambil keduanya) dan `} {"a":[1,2]}` yang kurung dalamnya ada di dalam string literal. Sisi klien: nol simbol `candidates`/`promptFeedback`/`generativelanguage` di `lib/gemini.ts`, `parseAiJson(` tepat **4x**, keempat fungsi mengembalikan `Promise<AiResult<…>>`. Sisi server dengan key nyata: `POST /api/ai/complete` -> **HTTP 200 dalam 774 ms** bertubuh `{"text":"Hai! Ada yang bisa saya bantu hari ini?","truncated":false}` — tanpa `candidates`. Mutasi `.join("")` -> `.join(" ")` -> `RED F-42 hook tidak menggabung semua parts`. |
+| **F-44** | **ditutup** — `topK: 1` -> `topK: 32` (`pb_hooks/ai_proxy.pb.js:97`), `topP` dihapus karena nilainya `1` = tidak mengaktifkan apa pun; `temperature: 0.7` tinggal dan sekarang benar-benar berpengaruh. | Gate membaca file hook: `topK=32`, dalam rentang 20–40, tidak ada `topP:`. Mutasi `topK: 32,` -> `topK: 1,` -> `RED F-44 sampling config proxy masih mati`. |
+| **F-45** | **ditutup** — error tidak lagi dirapatkan jadi `null`: proxy mengirim `code` mesin-terbaca (`rate_limited\|too_long\|blocked\|unavailable\|moved`), `describeAiError` memetakannya ke `AiFailure`, dan UI menampilkan copy per kind + tombol coba lagi saat `retryable`. | **7/7 pemetaan** lulus: 429, 413, 410, 502, 429-tanpa-code (jatuh ke status), 400-not-configured, kegagalan jaringan (teks mentah `Network request failed` **tidak** diteruskan), dan pesan server dipertahankan. Delapan kind punya copy non-kosong di `AI_FAILURE_TEXT`. Terukur di kedua backend: key sampah -> **HTTP 502** `{"code":"unavailable","message":"Layanan AI sedang tidak tersedia. Coba lagi beberapa saat."}` dan body **tidak** memuat detail vendor (raw upstream hanya masuk `$app.logger`). |
+| **F-46** | **sebagian** — cache harian (`lib/gemini.ts:128-166`, `INSIGHT_CACHE_KEY='ai:insight-cache'` dipotong `localDayStartEpoch`) + guard in-flight (`:129,178-186`, kunci = sidik jari `hari|role|goal|trend`) sudah ada; **bukti lintas-tab masih butuh perangkat**. | Yang bisa dinilai di node: key cache dan `localDayStartEpoch` benar-benar dipakai, peta in-flight dibersihkan di `finally`, dan satu-satunya pemanggil `getAIInsight` (`app/smart-alarm.tsx`, `insights.tsx`) melewati fungsi itu. Yang belum: dua layar membuka tab yang sama dalam jendela 60 detik dan hanya menghabiskan **1** jatah — itu uji perangkat (suite A-2…A-7). |
+| **F-47** | **ditutup** — output dibatasi (`capText`, plafon per field di `lib/aiContract.ts`: judul 80, desc 280, langkah 160, insight 320, kategori 32) dan data user dibungkus `wrapData` dengan pernyataan "data, never instructions". | `capText` 4/4 kasus: input **4000 karakter** -> `AAAAAAAAAAAA…` dengan panjang **80 ≤ 80**. Injeksi delimiter: `wrapData('role', "</role>")` -> tag penutup tidak bisa lebih awal (`</role>` dinetralkan). Hitungan pemakaian di `lib/gemini.ts`: `wrapData` **12x**, `capText` **11x** di keempat prompt. Mutasi `capText` jadi no-op -> `RED F-47 capText tidak memotong: 4000 > 80`. |
+| **F-60** | **ditutup** — `/api/ai/gemini` -> `/api/ai/complete` (`pb_hooks/ai_proxy.pb.js:38`, `lib/gemini.ts:54`). Jalur lama **tidak dihapus**: ia tetap terdaftar (`:165`) dan menjawab **401 untuk anonim** + **410 `code:"moved"`** untuk yang login. | Dikonsumen oleh **5 file** (klien + 4 perkakas): `tools/test/ai-proxy.mjs`, `tools/pb/pb-schema-verify.mjs`, `tools/pb/pb-prod-smoke.mjs`, `tools/test/findings.mjs` — semuanya menunjuk `/api/ai/complete`. Jalur lama terukur `401 anonim; 410 code=moved bagi yang login`. Gerbang agen di VM (`tools/deploy/pickertime-pb-agent.sh`) probe `/api/ai/complete` dulu dan hanya jatuh ke `/api/ai/gemini` kalau **404**, jadi urutan deploy hook-vs-build tidak memecahkan gerbang. Gate menuntut **2** `routerAdd` di belakang `$apis.requireAuth()`. Mutasi endpoint klien kembali ke `/api/ai/gemini` -> `RED F-60 lib/gemini.ts tidak memanggil /api/ai/complete \| masih memakai jalur lama`. |
+| **F-81** | **baru, belum ditutup** — limiter jendela-tetap di hook **balap** karena JSVM tidak punya primitif atomik. | 12 request **sekuensial** dari 1 akun: **10 lolos / 2 ditahan** (aritmetika benar, terukur sama di kedua backend). 12 request **paralel**: **10/2** dalam 140 ms (key sampah) dan **10/2** dalam 1104 ms (key nyata), tapi satu run lain menghasilkan **11/1** — satu permintaan masuk saat `get`+`set` antar-handler berselisih. Sebab terukur lewat probe buangan (route uji sementara, sudah dihapus, verifikasi 404): `$app.store()` hanya punya `get/set/has/remove` + `getAll,getOk,getOrSet,keys,length,removeAll,reset,setFunc,setIfLessThanLimit,unmarshalJSON,values` — **tidak ada `incr`/`add`/`increment`**; dan isi `$apis` hanya `static,requireGuestOnly,requireAuth,requireSuperuserAuth,requireSuperuserOrOwnerAuth,skipSuccessActivityLog,gzip,bodyLimit,recordAuthResponse,enrichRecord,enrichRecords` — **tidak ada helper rateLimit**. Gerbang sekarang menahan dua-duanya: probe sekuensial mengunci aritmetika, probe paralel merah kalau **tidak ada** satu pun yang ditahan. Perbaikan sebenarnya = jendela geser/token bucket di sisi server (atau `getOrSet` + batas), bukan menambah angka di konstanta. |
+
+Alat yang menghasilkan angka di atas, semuanya `rc=0` pada keadaan akhir:
+
+```
+node tools/test/findings.mjs            # 13 baris hijau: F-01 02 03 34 48 79 80 42 44 45 46 47 60
+node tools/test/ai-proxy.mjs            # vs 8099 dan vs 8098, masing-masing "Jalur proxy AI bersih."
+node tools/pb/pb-schema-verify.mjs …    # vs 8098: "DONE … semua pemeriksaan lulus"
+node tools/pb/pb-prod-smoke.mjs …       # vs 8098: "SMOKE PASS", AI langsung chars=105 items=2, "rows left from this run :: 0"
+node tools/test/enum-contract.mjs       # 7/7 sumber + event_type
+node tools/test/task-batch.mjs          # F-02h
+npx tsc --noEmit                        # rc=0
+```
+
+Bukti anti-vakum gerbang: satu run mutasi serentak (`topK: 1`, `.join(" ")`, `capText` no-op, endpoint klien
+lama) menghasilkan **tepat** empat baris merah dengan atribusi yang benar — `F-42`, `F-44`, `F-47`, `F-60` —
+sementara `F-45`/`F-46` tetap hijau karena tidak disentuh. Itu menunjukkan tiap temuan dinilai oleh
+assertion-nya sendiri, bukan oleh satu gerbang raksasa.
+
+Jebakan baru dari sesi ini:
+
+1. **Satu run perkakas hanya bisa menilai satu keadaan backend.** Probe "502 harus menyebut upstream"
+   dan "200 harus berbentuk `{ text, truncated }`" saling mustahil pada instance yang sama; mencetak
+   keduanya sebagai hijau akan jadi gerbang vakum. Yang tak bisa dinilai sekarang berbunyi
+   `NOTE tidak dinilai: … (butuh backend uji dengan key sampah)` dan tetap dihitung `rc=0`.
+2. **Gate statis harus mengevaluasi interpolasi, bukan menolaknya.** `lib/gemini.ts` sekarang menulis
+   `Category must be one of: ${TASK_CATEGORIES.join(', ')}` (satu sumber kebenaran), dan
+   `enum-contract.mjs` membacanya sebagai nilai haram `${TASK_CATEGORIES` karena regex-nya berhenti di
+   titik `.join`. Diperbaiki dengan menyisipkan isi konstanta sebelum mencocokkan — bukan dengan
+   mengembalikan daftar literal ke dalam prompt.
+3. **Mengubah nama endpoint memecahkan alat lain yang tidak ikut diedit.** `findings.mjs` dulu
+   menempatkan pemeriksaan rute di blok F-42, jadi mutasi klien menghasilkan F-42 merah dan **F-60 hijau**
+   — temuan yang justru sedang diuji. Pemeriksaan rute/penamaan dipindah ke blok F-60 dan `lib/gemini.ts`
+   masuk daftar pemanggil yang wajib menunjuk `/api/ai/complete`.

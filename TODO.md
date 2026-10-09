@@ -1135,6 +1135,68 @@ jadi regresi kalender ini merah di CI tanpa perubahan pipa.
   jebakan ISO-"T" dinomori ulang menjadi **#8** sehingga daftar jadi 1–8 berurutan;
   `tools/test/findings.mjs` menggabung tanpa konflik. Tidak ada satu pun bukti yang dibuang.
 
+## M14 — Gelombang 3: jalur AI diikat ke kontrak, bukan ke vendor (branch `fix/jalur-ai`, 2026-10-09)
+
+Lanjutan urutan yang disarankan `docs/04_audit/action_plan_2026-10-08.md:146` —
+"F-42 → F-44 → F-45 → F-46 → F-47 → F-60, selesaikan sebelum memutuskan/ganti provider".
+Semua angka adalah keluaran alat, bukan pembacaan kode. Yang membedakan sesi ini: hook di-`bind-mount`
+ke **dua** backend sehingga tiap perilaku dinilai pada dua keadaan yang saling eksklusif.
+
+- `pt-pb-test` `127.0.0.1:8099` — `GEMINI_API_KEY` sampah (upstream mati).
+- `pt-pb-real` `127.0.0.1:8098` — `GEMINI_API_KEY` nyata (upstream hidup). Ini container lokal;
+  `tools/test/ai-proxy.mjs` **tidak pernah** diarahkan ke backend produksi.
+
+| ID | Yang diubah | Bukti terukur |
+|---|---|---|
+| **F-42a** (hanya `parts[0]`) | Hook menggabung semua part bertipe `text` (`pb_hooks/ai_proxy.pb.js:141-144`). | `GREEN F-42`; mutasi `.join("")` -> `.join(" ")` -> `RED F-42 hook tidak menggabung semua parts`. |
+| **F-42b** (regex buta, dua fungsi parse dua cara) | `parseAiJson` di `lib/aiContract.ts` (strip fence -> `JSON.parse` -> irisan kurung-seimbang yang menghormati string literal & escape), dipakai tepat **4x** — satu per fungsi AI; `json: true` dari klien -> `responseMimeType: "application/json"` (`:100-102`). | 8/8 kasus parser lulus, termasuk diskriminator `{"a":4} x {"b":5}` (regex greedy lama mengambil kedua objek) dan `} {"a":[1,2]}`. Klien tidak lagi memuat simbol `candidates`/`promptFeedback`/`generativelanguage`. |
+| **F-42c** (`finishReason`/`promptFeedback` tidak dibaca) | `truncated = finishReason === "MAX_TOKENS"` (`:146-147`), `promptFeedback` -> 400 `blocked` (`:130-135`), keduanya + hasil tidak lengkap masuk `$app.logger`. | Kontrak 200 terukur pada key nyata: `{"text":"Hai! Ada yang bisa saya bantu hari ini?","truncated":false}` (774 ms). `pb-prod-smoke` dengan prompt array: `chars=105 items=2 titles=short,task two` — JSON hasil parse bisa dibaca ulang oleh klien. |
+| **F-44** (`topK: 1` membuat temperature/topP config mati) | `topK: 32`; `topP` dihapus (nilainya `1` = tidak mengaktifkan apa pun). | `GREEN F-44 topK=32 (bukan 1), topP tidak lagi disetel`; gerbang menuntut nilai 20–40; mutasi kembali `topK: 1,` -> `RED F-44`. |
+| **F-45** (pesan rate-limit/413 dibuang) | Kontrak error server `code` + `message` (`replyError`, `:53`), dipetakan `describeAiError` -> `AiFailure{kind,message,retryable}`; keempat fungsi mengembalikan `AiResult<T>`; `app/(tabs)/index.tsx` + `insights.tsx` menampilkan `AI_FAILURE_TEXT[kind]` dan tombol **Try again** saat `retryable`; `timeline.tsx` memakai `failure?.message` di Alert. | 7/7 pemetaan lulus (429, 413, 410, 502, 429-tanpa-code, 400-not-configured, jaringan, dan "pesan server dipertahankan"). 8 kind punya copy non-kosong. Terukur: key sampah -> **HTTP 502** `{"code":"unavailable","message":"Layanan AI sedang tidak tersedia. Coba lagi beberapa saat."}` dalam 236 ms dan body tidak memuat detail vendor. |
+| **F-46** (tidak ada cache/dedup) | Cache AsyncStorage berpotong hari (`lib/gemini.ts:128-166`) + peta in-flight bersidik-jari `hari\|role\|goal\|trend` (`:129,178-186`), dibersihkan di `finally`. | `GREEN F-46` = bukti statis (key cache, `localDayStartEpoch`, semua pemanggil melewati fungsi ini). **Bukti perangkat masih digali**: dua tab dibuka bergantian dalam 60 detik harus menghabiskan **1** jatah, bukan 2. |
+| **F-47** (output tak dibatasi, data user mentah) | Plafon per field `AI_TITLE_MAX 80 / AI_DESC_MAX 280 / AI_STEP_MAX 160 / AI_INSIGHT_MAX 320 / AI_CATEGORY_MAX 32` + `capText`; data user dibungkus `wrapData` yang mensterilkan `<`/`>` dan menyatakan "data, never instructions". | `capText` 4/4: input **4000** karakter -> `"AAAAAAAAAAAA…"` panjang **80**; `wrapData('role', "</role>")` tidak bisa menutup delimiter lebih awal. Dipakai `wrapData` **12x**, `capText` **11x** di 4 prompt. Mutasi `capText` no-op -> `RED F-47 capText tidak memotong: 4000 > 80`. |
+| **F-60** (nama endpoint = nama vendor) | `POST /api/ai/complete` (`:38`); jalur lama tetap terdaftar (`:165`) dengan **401 anonim** + **410 `code:"moved"`** bagi yang login, dan `tools/deploy/pickertime-pb-agent.sh` probe `/api/ai/complete` lalu jatuh ke `/api/ai/gemini` **hanya** saat 404. | Dipegang 5 pemanggil (klien + 4 perkakas), `GREEN F-60`; `pb-schema-verify` vs key nyata: `401 anonim; 410 code=moved bagi yang login`. Gerbang menuntut **2** route di belakang `$apis.requireAuth()`. Mutasi endpoint klien ke nama lama -> `RED F-60` dua atribusi sekaligus. |
+| **F-81** (baru, **belum** ditutup) | Limiter jendela-tetap `get`+`set` (`:79-85`) balap di bawah handler paralel. Tidak ada yang diubah di kode selain memecah probe. | Sekuensial 12 request 1 akun: **10 lolos / 2 ditahan** di kedua backend. Paralel: **10/2** (140 ms, key sampah) dan **10/2** (1104 ms, key nyata), tapi satu run menghasilkan **11/1**. Sebab terukur lewat probe buangan (route sementara, sudah dihapus, diverifikasi 404): `$app.store()` tidak punya `incr/add/increment` (sendiri: `getAll,getOk,getOrSet,keys,length,marshalJSON,removeAll,reset,setFunc,setIfLessThanLimit,unmarshalJSON,values`) dan `$apis` tidak punya helper rate limit (isinya hanya `static,requireGuestOnly,requireAuth,requireSuperuserAuth,requireSuperuserOrOwnerAuth,skipSuccessActivityLog,gzip,bodyLimit,recordAuthResponse,enrichRecord,enrichRecords`). |
+
+### Konsekuensi urutan deploy (yang membuat renama ini aman)
+
+`deploy.yml` punya path filter `pb_hooks/**` pada merge ke `main`, jadi hook terpasang lebih dulu
+sementara bundel aplikasi lama masih memanggil `/api/ai/gemini`. Tiga hal yang menjaga rantai itu:
+
+1. Route lama tidak dihapus -> build lama dapat **410 `moved`** dengan pesan yang bisa dibaca user,
+   bukan 404 senyap (`lib/aiContract.ts` `AI_FAILURE_TEXT.moved`).
+2. Route lama tetap di belakang `requireAuth()` -> **401 anonim** dipertahankan, karena gerbang agen
+   di VM memakai kondisi itu sebagai bukti "hook terpasang".
+3. Gerbang agen toleran urutan: rute baru dulu, rute lama hanya saat 404.
+
+Menurut catatan AGENTS.md, merge yang tidak menyentuh `pb_hooks/**`, `pb_migrations/**`,
+`tools/deploy/**`, atau workflow itu sendiri **tidak men-deploy apa pun** — perubahan M14 menyentuh
+`pb_hooks/` **dan** `tools/deploy/`, jadi merge ke `main` nanti akan memicu deploy. Bukti run terakhir
+sebelum sesi ini: run `#4` pada sha `5788455`.
+
+### Gerbang yang diulang pada keadaan akhir (semuanya rc=0)
+
+`npx tsc --noEmit` (tanpa keluaran) · `test:findings` 13 baris hijau
+(F-01 02 03 34 48 79 80 42 44 45 46 47 60, `baris bukti dibersihkan: 2`,
+`semua temuan sudah tertutup.`) · `test:ai-proxy` vs 8099 **dan** vs 8098 ("Jalur proxy AI bersih.") ·
+`pb-schema-verify` vs 8098 (`DONE … semua pemeriksaan lulus`) · `pb-prod-smoke` vs 8098
+(`SMOKE PASS`, `rows left from this run :: 0`) · `test:enum` (`Semua sumber cocok dengan skema.`) ·
+`test:batch` (`Batch tulis task tidak meninggalkan baris yatim.`).
+
+Anti-vakum: satu run mutasi serentak (`topK: 1`, `.join(" ")`, `capText` no-op, endpoint klien nama lama)
+-> **tepat** `RED F-42`, `RED F-44`, `RED F-47`, `RED F-60` dengan `F-45`/`F-46` tetap hijau.
+
+### Sisa M14 (tidak ditutup diam-diam)
+
+- **Bukti perangkat untuk F-46 dan F-45.** Yang dinilai di node baru bentuk kode; yang harus dilihat
+  di ponsel: (a) bolak-balik tab Insights/Smart Alarm < 60 detik hanya menghabiskan 1 jatah;
+  (b) kartu "Next best action" menampilkan copy gagal + **Try again** yang benar-benar memuat ulang,
+  termasuk saat server membalas 429.
+- **F-81 belum** — perbaikannya jendela geser/token bucket, bukan menaikkan konstanta.
+- `tools/pb/pb-prod-smoke.mjs:60` masih memuat daftar field yang belum mencakup `occurred_at` wajib
+  (tercatat sejak M10).
+
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan
@@ -1196,3 +1258,13 @@ jadi regresi kalender ini merah di CI tanpa perubahan pipa.
   Aturan: setiap kali sebuah kegagalan akan dijelaskan dengan kata "karena", jalankan lebih dulu
   satu perintah yang membedakan penjelasan itu dari pesaingnya — di sini cukup satu PATCH API dan
   satu `console.log(typeof raw)`.
+- [ ] **H11** Run bukti-mutasi WAJIB mencadangkan **setiap** berkas yang disentuh, dan memeriksa
+  cadangan itu sebagai langkah terakhir — bukan sebagian. Pelajaran M14 (2026-10-09): mutasi serentak
+  menyentuh tiga berkas (`lib/aiContract.ts`, `lib/gemini.ts`, `pb_hooks/ai_proxy.pb.js`) tapi hanya
+  dua berkas `lib/` yang dibackup; restore mencetak `pb_hooks/ai_proxy.pb.js: FAILED` + `md5sum:
+  WARNING: 1 computed checksum did NOT match`, dan hook tinggal dalam keadaan rusak (`topK: 1`,
+  `.join(" ")`). Karena container meng-`bind-mount` `pb_hooks/`, backend uji ikut memegang kode rusak
+  sampai ketahuan — dan `grep '^GREEN'` pada laporan (baris asli dipadasi ke lebar 4, jadi
+  `RED  F-42`) tidak akan menampilkannya. Aturan: salin semua berkas target ke direktori kerja
+  sebelum mutasi, pulihkan dari sana, lalu **jalankan ulang gerbang dan `md5sum -c`** sebagai satu
+  rangkaian; kalau ada yang tidak cocok, keadaan repo dianggap belum diketahui.

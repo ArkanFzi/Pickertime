@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, Task } from '@/store/useStore';
 import { getSmartAlarmPrep, getAIInsight, PrepStep } from '@/lib/gemini';
+import { AiResult } from '@/lib/aiContract';
 
 const SNOOZE_MINUTES = 5;
 
@@ -108,11 +109,13 @@ export default function SmartAlarmScreen() {
     // Fetch Prep Steps and Insight in parallel
     const [steps, insight] = await Promise.all([
       getSmartAlarmPrep(title, role),
-      profile ? getAIInsight(profile.role, profile.focus_goal || 'Stay productive', {}) : Promise.resolve(null)
+      profile
+        ? getAIInsight(profile.role, profile.focus_goal || 'Stay productive', {})
+        : Promise.resolve<AiResult<string>>({ value: null, failure: null })
     ]);
-    setPrepSteps(steps ?? PREP_STEPS[role] ?? []);
-    setPrepFromAI(steps !== null);
-    setAiInsight(insight);
+    setPrepSteps(steps.value ?? PREP_STEPS[role] ?? []);
+    setPrepFromAI(steps.value !== null);
+    setAiInsight(insight.value);
     setLoadingSteps(false);
   }
 

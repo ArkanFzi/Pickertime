@@ -76,8 +76,10 @@ Ganti dengan IP LAN komputer Anda kalau mengaksesnya dari HP/emulator.
 ### 5. Konfigurasi AI
 `GEMINI_API_KEY` hanya ada di sisi server PocketBase (lihat langkah 3) dan tidak pernah
 masuk ke bundle aplikasi. Proxy-nya ada di `pb_hooks/ai_proxy.pb.js`.
-Kalau key tidak dipasang, `POST /api/ai/gemini` membalas 400
+Kalau key tidak dipasang, `POST /api/ai/complete` membalas 400
 `"GEMINI_API_KEY is not configured on the server."` — fitur lain tetap jalan.
+Jalur lama `POST /api/ai/gemini` masih terdaftar dan membalas 410 `code: "moved"`
+(untuk build yang belum di-rebuild dan untuk gerbang agen di VM).
 
 ### 6. Verifikasi
 ```bash

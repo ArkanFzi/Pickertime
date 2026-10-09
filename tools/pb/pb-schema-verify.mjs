@@ -105,26 +105,44 @@ if (task) {
   })
 }
 // ai_proxy hook: harus menolak tanpa auth, dan melaporkan konfigurasi jika tanpa key
-await t('POST /api/ai/gemini tanpa token harus 401', async () => {
-  const r = await fetch(BASE + '/api/ai/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'hi' }) })
+await t('POST /api/ai/complete tanpa token harus 401', async () => {
+  const r = await fetch(BASE + '/api/ai/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'hi' }) })
   await r.text()
-  if (fetchWrap('gemini anon', r.status, 401) === null) throw new Error('status salah')
+  if (fetchWrap('complete anon', r.status, 401) === null) throw new Error('status salah')
   return 'ok'
+})
+// Jalur lama (F-60) masih harus menjawab 401 untuk anonim karena gerbang agen di VM
+// memakainya, dan 410 + code "moved" untuk yang login supaya build lama diberi tahu,
+// bukan dibuang diam-diam.
+await t('POST /api/ai/gemini (jalur lama) 401 anonim dan 410 moved bagi yang login', async () => {
+  const anonRes = await fetch(BASE + '/api/ai/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'hi' }) })
+  await anonRes.text()
+  if (fetchWrap('gemini anon', anonRes.status, 401) === null) throw new Error('status salah')
+  const authedRes = await fetch(BASE + '/api/ai/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: app.authStore.token }, body: JSON.stringify({ prompt: 'hi' }) })
+  const body = await authedRes.text()
+  if (authedRes.status !== 410) throw new Error('expected HTTP 410, got ' + authedRes.status + ' ' + body.slice(0, 120))
+  if (!/"code"\s*:\s*"moved"/.test(body)) throw new Error('410 tanpa code "moved": ' + body.slice(0, 120))
+  return '401 anonim; 410 code=moved bagi yang login'
 })
 // Konfigurasi key dibaca dari jawaban SERVER, bukan dari env proses verifier.
 // Pelajaran terukur 2026-10-07: versi lama memakai `process.env.GEMINI_API_KEY` di sisi kita,
 // padahal container bisa dipasang key sampah tanpa shell ini tahu — akibatnya assertion
 // "harus 400 konfigurasi" merah palsu (server menjawab 502 karena key-nya memang ada).
 // Ketiga keadaan di bawah tetap menuntut bukti, jadi tidak ada jalur yang kembali vacuous.
-await t('POST /api/ai/gemini dengan token: konfigurasi/key upstream tertangani tanpa bocor', async () => {
-  const r = await fetch(BASE + '/api/ai/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: app.authStore.token }, body: JSON.stringify({ prompt: 'hi' }) })
+await t('POST /api/ai/complete dengan token: konfigurasi/key upstream tertangani tanpa bocor', async () => {
+  const r = await fetch(BASE + '/api/ai/complete', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: app.authStore.token }, body: JSON.stringify({ prompt: 'hi' }) })
   const body = await r.text()
   if (r.status === 400 && /GEMINI_API_KEY is not configured/.test(body)) return 'server tanpa key -> HTTP 400 pesan konfigurasi'
   if (r.status === 502) {
     if (/api\.googleapis|generativelanguage|INVALID_ARGUMENT|API key not valid|googleapis\.com/.test(body)) throw new Error('LEAK: body 502 menyebut detail upstream: ' + body.slice(0, 160))
-    return 'server dengan key (upstream menolak) -> HTTP 502 generik tanpa detail vendor'
+    if (!/"code"\s*:\s*"unavailable"/.test(body)) throw new Error('502 tanpa code "unavailable" sehingga klien tidak bisa memetakan: ' + body.slice(0, 160))
+    return 'server dengan key (upstream menolak) -> HTTP 502 generik tanpa detail vendor, code=unavailable'
   }
-  if (r.status === 200) return 'server dengan key hidup -> HTTP 200'
+  if (r.status === 200) {
+    const shaped = (() => { try { const b = JSON.parse(body); return typeof b.text === 'string' && !('candidates' in b) } catch { return false } })()
+    if (!shaped) throw new Error('200 tapi body bukan { text } milik kontrak: ' + body.slice(0, 160))
+    return 'server dengan key hidup -> HTTP 200 envelope { text, truncated }'
+  }
   throw new Error('unexpected ' + r.status + ' ' + body.slice(0, 160))
 })
 console.log(bad === 0 ? `DONE ${tag} :: semua pemeriksaan lulus` : `DONE ${tag} :: ${bad} pemeriksaan GAGAL`)
