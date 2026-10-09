@@ -558,6 +558,25 @@ Hal yang lahir dari menjalankan, bukan dari membaca kode:
   menyatakan "teks itu tidak ada lagi di file". Melembangkan pengecualian file akan membuat F-57
   kembali tak terjaga.
 
+### Konsekuensi `dev` → `main` sesudah kelompok 3 (terukur 2026-10-09, bukan diduga)
+
+Dihitung dari `git diff --name-only origin/main...origin/dev` + riwayat `deploy.yml` lewat API,
+bukan dari ingatan:
+
+| Fakta | Angka |
+|---|---|
+| Ujung `main` | `c86bb9a` (2026-10-07 23:17 +07, merge PR #21) — **24** commit di belakang `dev` (`3ad4876`) |
+| Deploy terakhir ke VM | run **`#5`** sha `a1ef8c7`, `2026-10-07T13:28:10Z`, `completed/success` (run `#4` `5788455` adalah yang tercatat di `TODO.md` M9 P9; `#5` kemudian, `completed success`) |
+| File pemicu deploy yang berbeda `main`↔`dev` | **4**: `pb_hooks/ai_proxy.pb.js`, `pb_migrations/1790909763_collections_snapshot.js`, `pb_migrations/1791526402_workspace_events_ketat.js`, `tools/deploy/pickertime-pb-agent.sh` (+12/−3) |
+| `1790909763` yang di-resnap | **tidak** dijalankan ulang — `git cat-file -e` menunjukkan filenya **sudah ada** di `main`, jadi kunci `1790909763` sudah tercatat diterapkan di VM; bukti mekanismenya di §3 item 1 (mutasi `listRule` + restart → **0** kunci berubah). Rantai `main` tetap benar karena `1790909800_ownership_create_rule.js` **juga sudah ada** di `main` dan menugaskan rule yang sama |
+| `1791526402_workspace_events_ketat.js` | **belum ada di `main`** (`fatal: path … exists on disk, but not in 'origin/main'`) → deploy berikutnya **menerapkannya nyata**: `occurred_at` + pattern `event_type` di produksi |
+| Risiko klien lama | hook di `dev` membalas **410** pada `POST /api/ai/gemini` untuk yang login (`pb_hooks/ai_proxy.pb.js:165-168`), sementara build dari `main` masih memanggil path itu (`lib/gemini.ts:35`) → AI pada build lama **putus** sampai aplikasi di-*rebuild* dari `dev`. Tidak ada user nyata (gelombang 2 justru ditutup "sebelum ada user nyata"), jadi yang terpengaruh hanya build milik pemilik |
+| Jebakan rollback agen | **tidak** terjadi: rute 410 tetap dipasangi `$apis.requireAuth()` (`pb_hooks/ai_proxy.pb.js:170`), jadi agen yang **sudah terpasang di VM** — yang memeriksa "anonis harus 401" di path lama — tetap lolos; `dev` juga menambah fallback `404 → path lama` di `pickertime-pb-agent.sh` (+12/−3) untuk deploy sebelum hook sempat pasang |
+| Restart | `deploy.yml` memasang lalu merestart PocketBase → **M8.1** berlaku: kredensial superuser kembali ke nilai env container |
+
+Karena itu merge ke `main` **bukan** langkah otomatis dari kelompok 3: ia menyalakan deploy,
+menerapkan satu migrasi nyata, dan memutus build lama di jalur AI. Keputusannya ada di pemilik.
+
 Belum diselesaikan di kelompok ini (butuh keputusan pemilik, bukan pembersihan sunyi):
 penghapusan field write-only (`Focus_Sessions.completed`, `Workspace_Events.is_processed`/`payload`,
 `Profiles.avatar_url`) yang berarti **membuang data** lewat migrasi baru; nasib `Workspace_Events`

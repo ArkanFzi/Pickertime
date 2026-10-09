@@ -1472,6 +1472,13 @@ Yang sengaja **tidak** diselesaikan di kelompok ini:
   mati: `app/focus.tsx:71-76` punya kontrol Pause/Resume yang tidak pernah menulis event).
 - **Narrowing `event_type`** tidak dilakukan; pattern sekarang sudah ada di dua tempat (snapshot
   dan #3) dan `snapshot-f57.mjs` akan merah kalau keduanya sampai berselisih.
+- **Merge `dev` → `main` tidak kukerjakan** — dan sekarang ada angkanya: `main` di `c86bb9a`
+  (**24** commit di belakang `dev`), deploy terakhir run **`#5`** sha `a1ef8c7` 2026-10-07
+  `completed/success`, dan **4** file pemicu `deploy.yml` berbeda di antara keduanya. Yang paling
+  nyata: `1791526402_workspace_events_ketat.js` **belum ada di `main`** sehingga akan benar-benar
+  diterapkan di produksi, sementara build lama masih memanggil `/api/ai/gemini` yang di `dev`
+  dibalas **410**. Tabel lengkap + kenapa file snapshot yang di-resnap **tidak** dijalankan ulang
+  ada di `docs/04_audit/action_plan_2026-10-08.md` §"Konsekuensi `dev` → `main`".
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
