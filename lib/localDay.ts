@@ -23,3 +23,13 @@ export function localWeekStart(now: Date = new Date(), firstDay = 1): Date {
 export function localWeekStartEpoch(now: Date = new Date(), firstDay = 1): number {
   return toPbEpoch(localWeekStart(now, firstDay));
 }
+
+/**
+ * Indeks kolom minggu (0 = Senin) untuk satu titik waktu. Dipakai heatmap Insights;
+ * dulu barisnya ditulis sebagai `(d.getDay() === 0 ? 6 : d.getDay() - 1)` di samping
+ * `localWeekStart()` yang sudah ada — dua rumus minggu dalam satu file (F-63).
+ */
+export function localWeekDayIndex(at: Date, firstDay = 1): number {
+  const diffDays = (at.getTime() - localWeekStart(at, firstDay).getTime()) / 86_400_000;
+  return Math.floor(diffDays);
+}

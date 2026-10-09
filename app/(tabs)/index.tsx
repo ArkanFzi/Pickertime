@@ -8,21 +8,13 @@ import Svg, { Circle } from 'react-native-svg';
 import { useStore, Task } from '@/store/useStore';
 import { getNextBestAction, GeminiSuggestion } from '@/lib/gemini';
 import { AiFailure, AI_FAILURE_TEXT } from '@/lib/aiContract';
+import { energyStatus } from '@/lib/periods';
 
 function getGreeting() {
   const h = new Date().getHours();
   if (h < 12) return 'Good Morning';
   if (h < 17) return 'Good Afternoon';
   return 'Good Evening';
-}
-
-function getEnergyStatus(energyPref: string): string {
-  const h = new Date().getHours();
-  if (energyPref === 'Morning' && h >= 6 && h < 12) return 'High Energy';
-  if (energyPref === 'Afternoon' && h >= 12 && h < 17) return 'High Energy';
-  if (energyPref === 'Night Owl' && (h >= 20 || h < 2)) return 'High Energy';
-  if (h >= 14 && h < 16) return 'Post-Lunch Dip';
-  return 'Building Momentum';
 }
 
 function startMsOf(task: Task) {
@@ -45,7 +37,7 @@ export default function DashboardScreen() {
   const [loadingAI, setLoadingAI] = useState(false);
 
   const greeting = getGreeting();
-  const energyStatus = getEnergyStatus(profile?.energy_pref || 'Morning');
+  const energyLabel = energyStatus(profile?.energy_pref || 'Morning');
 
   const totalTasks = tasks.length;
   const doneCount = tasks.filter((t) => t.is_completed).length;
@@ -163,7 +155,7 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.energyBadge}>
             <Ionicons name="flash" size={11} color="#00D4FF" />
-            <Text style={styles.energyText}>{energyStatus}</Text>
+            <Text style={styles.energyText}>{energyLabel}</Text>
           </View>
         </View>
 

@@ -9,7 +9,9 @@ import { useStore } from '@/store/useStore';
 import { pb } from '@/lib/pocketbase';
 import { getAIInsight } from '@/lib/gemini';
 import { AiFailure, AI_FAILURE_TEXT } from '@/lib/aiContract';
-import { localWeekStart, localWeekStartEpoch } from '@/lib/localDay';
+import { localDayStartEpoch, localWeekDayIndex, localWeekStart, localWeekStartEpoch } from '@/lib/localDay';
+import { TIME_BUCKETS, bucketOfHour, emptyHeatmap, periodMatchSentence, type Heatmap } from '@/lib/periods';
+import { snoozesOn, sumSince } from '@/lib/snoozeLedger';
 
 const { width } = Dimensions.get('window');
 
@@ -18,7 +20,7 @@ const WEEK_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function InsightsScreen() {
   const router = useRouter();
-  const { profile, user, snoozeCount, syncFetchTasks } = useStore();
+  const { profile, user, snoozes, hydrateSnoozes, syncFetchTasks } = useStore();
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [aiFailure, setAiFailure] = useState<AiFailure | null>(null);
   const [aiDismissed, setAiDismissed] = useState(false);
@@ -28,11 +30,7 @@ export default function InsightsScreen() {
   
   // Real data states
   const [focusTrend, setFocusTrend] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
-  const [heatmap, setHeatmap] = useState({
-    Morning: [0, 0, 0, 0, 0, 0, 0],
-    Afternoon: [0, 0, 0, 0, 0, 0, 0],
-    Evening: [0, 0, 0, 0, 0, 0, 0],
-  });
+  const [heatmap, setHeatmap] = useState<Heatmap>(emptyHeatmap);
   const [stats, setStats] = useState({
     totalMins: 0,
     completionRate: 0,
@@ -44,21 +42,20 @@ export default function InsightsScreen() {
   const completionRate = stats.completionRate;
 
   // "Best time to focus" dihitung dari heatmap nyata, bukan dari energy_pref yang
-  // baru dipilih user di onboarding.
-  const periodCounts = Object.entries(heatmap).map(([period, vals]) => ({
+  // baru dipilih user di onboarding. Keduanya sekarang memakai kosakata yang sama
+  // (lib/periods.ts) jadi kalimatnya boleh membandingkan (F-64).
+  const periodCounts = TIME_BUCKETS.map((period) => ({
     period,
-    count: vals.reduce((a, b) => a + b, 0),
+    count: heatmap[period].reduce((a, b) => a + b, 0),
   }));
   const weeklySessions = periodCounts.reduce((a, p) => a + p.count, 0);
   const bestPeriod = weeklySessions > 0
     ? periodCounts.slice().sort((a, b) => b.count - a.count)[0]
     : null;
-  // snoozeCount hanya menghitung snooze sejak aplikasi dibuka (tidak dipersist), jadi
-  // tanpa task minggu ini angkanya tidak bisa dijadikan persentase — dulu dipaksakan
-  // jadi '0%'/'15%' yang terbaca sebagai ukuran nyata.
-  const snoozeRate = stats.totalCount > 0
-    ? Math.min(100, Math.round((snoozeCount / stats.totalCount) * 100))
-    : null;
+  // F-65: dulu penghitung satu sesi dibagi jumlah task seminggu. Sekarang dua angka
+  // absolut dari ledger yang sama: snooze hari ini dan snooze sejak Senin.
+  const snoozeToday = snoozesOn(snoozes, localDayStartEpoch());
+  const snoozeWeek = sumSince(snoozes, localWeekStartEpoch());
 
 
   const slideAnims = useRef(
@@ -80,6 +77,7 @@ export default function InsightsScreen() {
     });
 
     if (user) {
+      hydrateSnoozes();
       syncFetchTasks();
       loadRealData();
     }
@@ -99,25 +97,18 @@ export default function InsightsScreen() {
 
       if (sessions && sessions.length > 0) {
         const newTrend = [0, 0, 0, 0, 0, 0, 0];
-        const newHeat = {
-          Morning: [0, 0, 0, 0, 0, 0, 0],
-          Afternoon: [0, 0, 0, 0, 0, 0, 0],
-          Evening: [0, 0, 0, 0, 0, 0, 0],
-        };
+        const newHeat = emptyHeatmap();
         let totalS = 0;
 
         sessions.forEach(s => {
           const d = new Date(s.created); // PocketBase uses 'created' by default
-          const dayIdx = (d.getDay() === 0 ? 6 : d.getDay() - 1);
+          const dayIdx = localWeekDayIndex(d);
           const mins = s.duration_seconds / 60;
           newTrend[dayIdx] += Math.round(mins);
           totalS += s.duration_seconds;
 
-          // Heatmap
-          const h = d.getHours();
-          if (h >= 6 && h < 12) newHeat.Morning[dayIdx]++;
-          else if (h >= 12 && h < 18) newHeat.Afternoon[dayIdx]++;
-          else newHeat.Evening[dayIdx]++;
+          // Heatmap — pemotongan jamnya dari lib/periods, tidak ditulis ulang di sini
+          newHeat[bucketOfHour(d.getHours())][dayIdx]++;
         });
 
         setFocusTrend(newTrend);
@@ -256,9 +247,10 @@ export default function InsightsScreen() {
             <Ionicons name="flame" size={16} color="#00D4FF" />
           </View>
           <Text style={styles.heatmapSub}>
-            {bestPeriod
-              ? `${bestPeriod.count} of ${weeklySessions} focus sessions this week were in the ${bestPeriod.period.toLowerCase()}.`
-              : 'No focus sessions logged this week yet.'}
+            {periodMatchSentence(
+              profile?.energy_pref,
+              bestPeriod ? { bucket: bestPeriod.period, count: bestPeriod.count, total: weeklySessions } : null,
+            )}
           </Text>
 
           <View style={styles.heatGrid}>
@@ -268,10 +260,10 @@ export default function InsightsScreen() {
                 <Text key={i} style={styles.heatDayLabel}>{d}</Text>
               ))}
             </View>
-            {Object.entries(heatmap).map(([period, vals]) => (
+            {TIME_BUCKETS.map((period) => (
               <View key={period} style={styles.heatRow}>
                 <Text style={styles.heatRowLabel}>{period.slice(0,3)}</Text>
-                {vals.map((v, i) => (
+                {heatmap[period].map((v, i) => (
                   <View key={i} style={[styles.heatCell, { backgroundColor: `rgba(0, 212, 255, ${Math.min(v / 4, 1)})` }]} />
                 ))}
               </View>
@@ -331,15 +323,13 @@ export default function InsightsScreen() {
                 <Ionicons name="notifications-off-outline" size={16} color="#F87171" />
               </View>
               <View>
-                <Text style={styles.alarmEffTitle}>Snooze Rate</Text>
-                <Text style={styles.alarmEffSub}>Counted this session</Text>
+                <Text style={styles.alarmEffTitle}>Snooze</Text>
+                <Text style={styles.alarmEffSub}>Per hari, bertahan setelah aplikasi ditutup</Text>
               </View>
             </View>
             <View style={styles.alarmEffRight}>
-              <Text style={styles.alarmEffValue}>{snoozeRate === null ? '--' : `${snoozeRate}%`}</Text>
-              <Text style={styles.alarmEffTrend}>
-                {snoozeRate === null ? 'Not enough data' : snoozeRate > 20 ? 'High snooze rate' : 'Low snooze rate'}
-              </Text>
+              <Text style={styles.alarmEffValue}>{snoozeToday}</Text>
+              <Text style={styles.alarmEffTrend}>{snoozeWeek} since Monday</Text>
             </View>
           </View>
         </Animated.View>

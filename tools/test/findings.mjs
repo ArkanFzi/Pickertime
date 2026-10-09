@@ -8,28 +8,45 @@ import PocketBase from 'pocketbase'
 
 // Fungsi tulis & aturan produksi dijalankan apa adanya — node >= 22.18 dibutuhkan untuk
 // membaca file .ts langsung (type stripping), dan itu yang dikunci .nvmrc.
-let createTaskBatch, resolveLeadMinutes, localDayStartEpoch, localWeekStart
+let createTaskBatch, resolveLeadMinutes, localDayStartEpoch, localWeekStart, localWeekDayIndex
 let parseAiJson, capText, wrapData, describeAiError, AI_FAILURE_TEXT, AI_TITLE_MAX
 let isEmailAlreadyRegistered, validateSignUp, describeResetFailure, describeSignInFailure
 let passwordResetCopy, PB_EMAIL_TAKEN_CODE, duplicateAccountMessage
 let observeAuthChange, markIntentionalLogout, sessionEndReason, resetSessionState, clearSessionEndReason
+let bucketOfHour, periodMatchSentence, energyStatus, emptyHeatmap, PREF_BUCKET, TIME_BUCKETS, ENERGY_PREFS
+let bumpSnooze, snoozesOn, sumSince, emptyLedger, parseLedger, serializeLedger, pruneBefore
 try {
   ({ createTaskBatch, resolveLeadMinutes } = await import('../../lib/taskContract.ts'))
-  ;({ localDayStartEpoch, localWeekStart } = await import('../../lib/localDay.ts'))
+  ;({ localDayStartEpoch, localWeekStart, localWeekDayIndex } = await import('../../lib/localDay.ts'))
   ;({ parseAiJson, capText, wrapData, describeAiError, AI_FAILURE_TEXT, AI_TITLE_MAX } =
     await import('../../lib/aiContract.ts'))
   ;({ isEmailAlreadyRegistered, validateSignUp, describeResetFailure, describeSignInFailure,
       passwordResetCopy, PB_EMAIL_TAKEN_CODE, duplicateAccountMessage } = await import('../../lib/authContract.ts'))
   ;({ observeAuthChange, markIntentionalLogout, sessionEndReason, resetSessionState,
       clearSessionEndReason } = await import('../../lib/session.ts'))
+  ;({ bucketOfHour, periodMatchSentence, energyStatus, emptyHeatmap, PREF_BUCKET, TIME_BUCKETS, ENERGY_PREFS } =
+    await import('../../lib/periods.ts'))
+  ;({ bumpSnooze, snoozesOn, sumSince, emptyLedger, parseLedger, serializeLedger, pruneBefore } =
+    await import('../../lib/snoozeLedger.ts'))
 } catch (err) {
   console.error(`Gagal memuat lib/*.ts dengan node ${process.version}: ${err.message}`)
   process.exit(1)
+}
+for (const [nama, nilai] of [
+  ['TIME_BUCKETS', TIME_BUCKETS],
+  ['ENERGY_PREFS', ENERGY_PREFS],
+  ['PREF_BUCKET', PREF_BUCKET],
+]) {
+  if (!nilai || (Array.isArray(nilai) && nilai.length !== 3)) {
+    console.error(`lib/periods.ts tidak mengekspor ${nama} sebagai daftar 3 nilai — gerbang ini tidak boleh diam-diam hijau.`)
+    process.exit(1)
+  }
 }
 for (const [nama, fn] of [
   ['resolveLeadMinutes', resolveLeadMinutes],
   ['localDayStartEpoch', localDayStartEpoch],
   ['localWeekStart', localWeekStart],
+  ['localWeekDayIndex', localWeekDayIndex],
   ['parseAiJson', parseAiJson],
   ['capText', capText],
   ['wrapData', wrapData],
@@ -662,6 +679,204 @@ const srcLayout = baca('app/_layout.tsx')
     line('RED', 'F-56', `sesi berakhir tidak bisa dibedakan dari logout: ${rusak.join(' | ')}`)
   } else {
     line('GREEN', 'F-56', `state machine sesi lulus ${jumlahCek} cek (cold start null, clear->expired, mark->logout, login ulang menghapus penanda); _layout/profile/welcome terhubung; tidak ada authRefresh`)
+  }
+}
+
+// ── Gelombang 4 kelompok 1: kebenaran state (F-50, F-64, F-65) ────────────────────────
+// Yang dinilai: apa yang mendarat di array `tasks`, kosakata periode yang dipakai
+// membandingkan data dengan preferensi, dan apakah penghitung snooze adalah ukuran
+// yang nyata. F-63 (dua rumus minggu di Insights) sudah tertutup di PR #24 dan diblok
+// oleh F-80; blok `localWeekDayIndex` di bawah menjaga agar tidak ada rumus ketiga.
+
+let f50row = null
+
+{
+  // F-50: payload klien ISO ber-"T" vs balasan server bentuk spasi. Keduanya dibedakan
+  // hanya oleh satu karakter, jadi menyimpan payload (=bug lama) membuat satu array
+  // punya dua format untuk kolom yang sama. Diukur hidup di backend uji.
+  const rusak = []
+  const judulF50 = 'F-50 format tanggal state'
+  await bersihkanSisa(judulF50)
+  const kirimBuat = iso(60)
+  try {
+    f50row = await A.pb.collection('Tasks').create(
+      taskPayload({ user: A.id, title: judulF50, start_time: kirimBuat, end_time: iso(90) })
+    )
+  } catch (err) {
+    rusak.push(`create probe gagal: status=${err.status ?? '-'} ${String(err.message).slice(0, 90)}`)
+  }
+  if (f50row) {
+    const kirimUpdate = iso(120)
+    let balasan = null
+    try {
+      balasan = await A.pb.collection('Tasks').update(f50row.id, { start_time: kirimUpdate })
+    } catch (err) {
+      rusak.push(`update probe gagal: status=${err.status ?? '-'} ${String(err.message).slice(0, 90)}`)
+    }
+    if (balasan) {
+      const spasi = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(balasan.start_time)
+      const geserMs = new Date(balasan.start_time).getTime() - new Date(kirimUpdate).getTime()
+      const fieldHilang = ['id', 'user', 'title', 'category', 'priority', 'duration_minutes',
+        'is_completed', 'has_alarm', 'alarm_minutes_before', 'start_time', 'end_time']
+        .filter((k) => !(k in balasan))
+      if (!spasi) {
+        rusak.push(`server membalas "${balasan.start_time}" bukan bentuk spasi — asumsi F-50 berubah, gerbang ini harus dinilai ulang bukan dihapus`)
+      } else if (balasan.start_time === kirimUpdate) {
+        rusak.push('server membalas persis literal yang dikirim klien — tidak ada dua format, F-50 kehilangan dasarnya')
+      }
+      if (geserMs !== 0) rusak.push(`menyimpan respons server menggeser instant sebesar ${geserMs} ms — bukan perbaikan yang sama`)
+      if (fieldHilang.length) rusak.push(`respons update tidak lengkap, kehilangan ${fieldHilang.join(',')} — menimpa seluruh elemen state akan menghapus field`)
+    }
+  }
+  // Static: tiga jalur tulis wajib mengisi state dari variabel respons server. Dipotong
+  // per fungsi karena `updateTask` (aksi lokal) memang menambal `{ ...t, ...updates }`.
+  const srcStore = baca('store/useStore.ts')
+  const blokFn = (nama) => {
+    const i = srcStore.indexOf(`${nama}: async`)
+    if (i === -1) return null
+    const j = srcStore.indexOf('\n  // ───', i)
+    return srcStore.slice(i, j === -1 ? srcStore.length : j)
+  }
+  for (const [nama, variabelRespons] of [
+    ['syncUpdateTask', 'updatedTask'],
+    ['syncToggleTask', 'after'],
+    ['syncSnoozeTask', 'afterSnooze'],
+  ]) {
+    const b = blokFn(nama)
+    if (b === null) { rusak.push(`${nama} tidak ditemukan di store — gerbang kehilangan pegangan`); continue }
+    if (/\.\.\.t,/.test(b)) rusak.push(`${nama} masih menambal state dengan payload klien ({ ...t, ... })`)
+    if (!new RegExp(`\\?\\s*${variabelRespons}\\s*:`).test(b)) {
+      rusak.push(`${nama} tidak menempatkan respons server (${variabelRespons}) ke array tasks`)
+    }
+  }
+  if (rusak.length) {
+    line('RED', 'F-50', `state masih bisa berisi format tanggal klien: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-50', `balasan server bentuk spasi (kirim bentuk "T"), geser 0 ms, respons lengkap; syncUpdateTask/syncToggleTask/syncSnoozeTask mengisi state dari respons server`)
+  }
+}
+
+{
+  // F-64: satu kosakata periode. Yang dinilai bukan "ada konstantanya" tapi bahwa
+  // pemotongan jam dipakai, bukan ditulis ulang di layar, dan kalimat kartunya benar-benar
+  // membandingkan pref vs data.
+  const rusak = []
+  const perJam = Array.from({ length: 24 }, (_, h) => bucketOfHour(h))
+  const jumlah = perJam.reduce((acc, b) => ({ ...acc, [b]: (acc[b] ?? 0) + 1 }), {})
+  if (jumlah.Morning !== 6 || jumlah.Afternoon !== 6 || jumlah.Evening !== 12) {
+    rusak.push(`pemotongan jam jadi ${JSON.stringify(jumlah)}, harapan 6/6/12 (Evening mencakup lewat tengah malam)`)
+  }
+  if (bucketOfHour(1) !== 'Evening' || bucketOfHour(5) !== 'Evening' || bucketOfHour(6) !== 'Morning') {
+    rusak.push('batas jam bergeser: pk 01:00/05:00 harus Evening, pk 06:00 harus Morning')
+  }
+  if (PREF_BUCKET['Night Owl'] !== 'Evening') {
+    rusak.push('PREF_BUCKET[Night Owl] bukan Evening — pref orang tidak bisa dibandingkan dengan bucket jam')
+  }
+  // Perilaku chip energi dinilai per jam, dan jendela Afternoon sengaja 12–17 (bukan
+  // 12–18 seperti heatmap): kalau keduanya dipaksa sama, mutation ini harus RED.
+  const kasus = [
+    ['Morning', 7, 'High Energy'], ['Morning', 15, 'Post-Lunch Dip'], ['Morning', 12, 'Building Momentum'],
+    ['Afternoon', 12, 'High Energy'], ['Afternoon', 15, 'High Energy'], ['Afternoon', 17, 'Building Momentum'],
+    ['Night Owl', 21, 'High Energy'], ['Night Owl', 1, 'High Energy'], ['Night Owl', 14, 'Post-Lunch Dip'],
+    ['Night Owl', 18, 'Building Momentum'], ['Night Owl', 3, 'Building Momentum'],
+    ['Morning', 17, 'Building Momentum'],
+    ['Preferensi-Lama', 9, 'Building Momentum'],
+  ]
+  for (const [pref, jam, harapan] of kasus) {
+    const nyata = energyStatus(pref, jam)
+    if (nyata !== harapan) rusak.push(`energyStatus(${pref}, ${jam}) -> "${nyata}", harapan "${harapan}"`)
+  }
+  const beda = periodMatchSentence('Night Owl', { bucket: 'Morning', count: 3, total: 10 })
+  const sama = periodMatchSentence('Night Owl', { bucket: 'Evening', count: 1, total: 1 })
+  const tanpaPref = periodMatchSentence(undefined, { bucket: 'Afternoon', count: 2, total: 2 })
+  const tanpaData = periodMatchSentence('Morning', null)
+  if (!/3 of 10/.test(beda) || !/Night Owl/.test(beda) || !/morning/.test(beda)) {
+    rusak.push(`kalimat beda tidak memuat kedua sisi: "${beda}"`)
+  }
+  if (!/matches/i.test(sama)) rusak.push(`kalimat cocok tidak menyatakan kecocokan: "${sama}"`)
+  if (tanpaPref !== '2 of 2 sessions this week were in the afternoon.') {
+    rusak.push(`tanpa pref yang dikenali kalimatnya harus data saja, dapat "${tanpaPref}"`)
+  }
+  if (tanpaData !== 'No focus sessions logged this week yet.') {
+    rusak.push(`layar kosong berubah kalimat: "${tanpaData}"`)
+  }
+  if (emptyHeatmap().Evening.length !== 7 || Object.keys(emptyHeatmap()).length !== 3) {
+    rusak.push('emptyHeatmap() tidak menghasilkan 3 bucket x 7 hari')
+  }
+  // layar tidak boleh menulis ulang potongannya sendiri
+  if (/h >= 6 && h < 12/.test(srcInsights)) rusak.push('insights.tsx memotong jam sendiri, bukan pakai bucketOfHour')
+  if (!srcInsights.includes('bucketOfHour(')) rusak.push('insights.tsx tidak memakai bucketOfHour — gerbang kehilangan pegangan')
+  if (/High Energy/.test(srcIndex)) rusak.push('app/(tabs)/index.tsx masih menyimpan verdict/jendela jamnya sendiri')
+  if (!srcIndex.includes('energyStatus')) rusak.push('app/(tabs)/index.tsx tidak memakai energyStatus dari lib/periods')
+  // F-63: `localWeekDayIndex` harus jadi satu-satunya rumus indeks kolom minggu
+  const kolom = [0, 1, 2, 3, 4, 5, 6].map((i) => localWeekDayIndex(new Date(2026, 9, 5 + i, 10, 0, 0)))
+  if (kolom.join(',') !== '0,1,2,3,4,5,6') rusak.push(`kolom minggu meleset: ${kolom.join(',')}`)
+  // Cocokkan dengan pemetaan hari yang berdiri sendiri ((getDay()+6)%7 = Senin=0) di
+  // 91 tanggal 1 Sep – 30 Nov 2026 per jam — termasuk tiap hari Minggu yang dulu
+  // menjatuhkan rumus lama, dan tiap jam yang bisa memaksa pembulatan salah.
+  let jamUji = 0
+  const meleset = []
+  for (let t = new Date(2026, 8, 1, 0, 0, 0); t <= new Date(2026, 10, 30, 23, 0, 0); t = new Date(t.getTime() + 3600 * 1000)) {
+    jamUji++
+    const harapan = (t.getDay() + 6) % 7
+    const nyata = localWeekDayIndex(t)
+    if (nyata !== harapan) meleset.push(`${t.toISOString()} -> ${nyata} (harapan ${harapan})`)
+  }
+  if (meleset.length) rusak.push(`${meleset.length} titik waktu keluar dari kolomnya, contoh ${meleset.slice(0, 2).join('; ')}`)
+  if (/d\.getDay\(\) === 0 \? 6 : d\.getDay\(\) - 1/.test(srcInsights)) rusak.push('insights.tsx masih menghitung indeks kolom dengan rumusnya sendiri')
+  if (rusak.length) {
+    line('RED', 'F-64', `kosakata periode belum satu sumber: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-64', `bucket 6/6/12 jam, ${kasus.length} kasus chip energi cocok, kalimat membandingkan pref vs data (${beda}); kolom minggu ${jamUji} titik waktu = (getDay+6)%7, insights & index memakai satu rumus itu`)
+  }
+}
+
+{
+  // F-65: kartu snooze bukan rasio lagi. Ledger dinilai per hari (murni, bisa mutasi)
+  // dan bagian persist/penempatannya dinilai dari sumber karena useStore mengimpor
+  // AsyncStorage + Expo sehingga tidak bisa dimuat node.
+  const rusak = []
+  const hariIni = localDayStartEpoch(new Date(2026, 9, 9, 13, 0, 0))
+  const kemarin = localDayStartEpoch(new Date(2026, 9, 8, 23, 0, 0))
+  const besok = localDayStartEpoch(new Date(2026, 9, 10, 0, 30, 0))
+  let l = bumpSnooze(bumpSnooze(emptyLedger(), hariIni), hariIni)
+  l = bumpSnooze(l, kemarin)
+  if (snoozesOn(l, hariIni) !== 2) rusak.push(`snooze hari ini = ${snoozesOn(l, hariIni)}, harapan 2`)
+  if (snoozesOn(l, kemarin) !== 1) rusak.push(`snooze kemarin = ${snoozesOn(l, kemarin)}, harapan 1`)
+  if (snoozesOn(l, besok) !== 0) rusak.push(`hari tanpa catatan harus 0, dapat ${snoozesOn(l, besok)}`)
+  if (sumSince(l, kemarin) !== 3) rusak.push(`seminggu (>= kemarin) = ${sumSince(l, kemarin)}, harapan 3`)
+  if (sumSince(l, hariIni) !== 2) rusak.push(`sejak hari ini = ${sumSince(l, hariIni)}, harapan 2`)
+  if (sumSince(l, besok) !== 0) rusak.push('sumSince ke batas sesudah semua hari harus 0')
+  if (bumpSnooze(l, hariIni).byDay === l.byDay) rusak.push('bumpSnooze mengubah ledger in-place (state lama ikut berubah)')
+  if (JSON.stringify(pruneBefore(l, hariIni)) !== JSON.stringify({ byDay: { [String(hariIni)]: 2 } })) {
+    rusak.push(`pruneBefore(${hariIni}) -> ${JSON.stringify(pruneBefore(l, hariIni))}`)
+  }
+  const roundtrip = parseLedger(serializeLedger(l))
+  if (JSON.stringify(roundtrip) !== JSON.stringify(l)) {
+    rusak.push(`roundtrip storage mengubah angka: ${JSON.stringify(l)} -> ${JSON.stringify(roundtrip)}`)
+  }
+  let sampahDitolak = 0
+  for (const sampah of [null, '', 'bukan json', '{', '[]', '3', '{"a":"x"}', '{"1":null}', '{"2":-3}', '{"3":1.5}', '{"y":4}', '{"5":1e999}']) {
+    const hasil = parseLedger(sampah)
+    const n = Object.keys(hasil.byDay).length
+    if (n === 0) sampahDitolak++
+    else rusak.push(`parseLedger(${JSON.stringify(sampah)}) meloloskan ${n} entri -> ${JSON.stringify(hasil.byDay)}`)
+  }
+  // static: rasio lama hilang, ledger yang dibaca layar, persist per user
+  const srcStoreF65 = baca('store/useStore.ts')
+  if (/snoozeCount/.test(srcStoreF65) || /snoozeCount/.test(srcInsights)) rusak.push('masih ada `snoozeCount` (penghitung tanpa hari)')
+  if (/snoozeRate/.test(srcInsights)) rusak.push('insights masih menghitung rasio snooze')
+  if (!srcInsights.includes('snoozesOn(') || !srcInsights.includes('sumSince(')) rusak.push('kartu Insights tidak membaca ledger')
+  if (!/snooze_ledger:\$\{/.test(srcStoreF65)) rusak.push('kunci storage tidak memuat id user — ledger bisa berpindah akun di perangkat yang sama')
+  if (!srcStoreF65.includes('AsyncStorage.getItem')) rusak.push('hydrateSnoozes tidak membaca storage — angka hilang lagi saat aplikasi dibuka ulang')
+  if (!srcStoreF65.includes('AsyncStorage.setItem')) rusak.push('recordSnooze tidak menulis storage')
+  if (!/get\(\)\.recordSnooze\(\)/.test(srcStoreF65)) rusak.push('syncSnoozeTask tidak memanggil recordSnooze')
+  if (!srcInsights.includes('hydrateSnoozes')) rusak.push('Insights tidak pernah memanggil hydrateSnoozes')
+  if (!srcStoreF65.includes('pruneBefore')) rusak.push('ledger tidak dipangkas — peta tumbuh tanpa batas')
+  if (rusak.length) {
+    line('RED', 'F-65', `snooze masih bukan ukuran nyata: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-65', `ledger per hari: hari ini 2, kemarin 1, sejak kemarin 3; ${sampahDitolak} bentuk sampah storage ditolak; persist per user + dipotong awal minggu (perilaku lintas-buka aplikasi masih butuh bukti perangkat)`)
   }
 }
 
