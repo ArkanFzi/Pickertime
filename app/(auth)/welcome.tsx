@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,14 @@ import { useRouter } from 'expo-router';
 
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/store/useStore';
+import { clearSessionEndReason, sessionEndReason, type SessionEndReason } from '@/lib/session';
 
 const { width } = Dimensions.get('window');
 
 export default function WelcomeScreen() {
   const router = useRouter();
   const { user } = useStore();
+  const [sessionEnded, setSessionEnded] = useState<SessionEndReason | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(40)).current;
   const pulse1 = useRef(new Animated.Value(1)).current;
@@ -27,6 +29,10 @@ export default function WelcomeScreen() {
       router.replace('/(tabs)');
       return;
     }
+
+    // Sesi yang habis harus kelihatan sebagai sesi habis, bukan aplikasi yang hangus (F-56).
+    setSessionEnded(sessionEndReason());
+    clearSessionEndReason();
 
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
@@ -79,6 +85,15 @@ export default function WelcomeScreen() {
           </Text>
         </View>
 
+        {sessionEnded === 'expired' && (
+          <View style={styles.sessionNote}>
+            <Ionicons name="time-outline" size={16} color="#FBBF24" />
+            <Text style={styles.sessionNoteText}>
+              Your session ended — sign in again to continue.
+            </Text>
+          </View>
+        )}
+
         {/* Feature Pills */}
         <View style={styles.pillRow}>
           {['🧠 AI Scheduling', '⚡ Smart Alarms', '🎯 Deep Focus'].map((pill) => (
@@ -113,6 +128,24 @@ export default function WelcomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  sessionNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+    marginBottom: 18,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.35)',
+    backgroundColor: 'rgba(251, 191, 36, 0.08)',
+  },
+  sessionNoteText: {
+    flex: 1,
+    color: '#FCD34D',
+    fontSize: 13,
+    lineHeight: 18,
+  },
   container: {
     flex: 1,
     backgroundColor: '#0A0F1D',

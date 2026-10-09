@@ -1197,6 +1197,59 @@ Anti-vakum: satu run mutasi serentak (`topK: 1`, `.join(" ")`, `capText` no-op, 
   (tercatat sejak M10).
 
 
+## M15 — Gelombang 2: permukaan auth & sesi (2026-10-09, sebelum ada user nyata)
+
+Langkah 5 urutan yang direncanakan: "Gelombang 2 (F-37, F-38) — sebelum ada user nyata".
+Yang dikerjakan hanya hal yang **terukur** di backend uji; dua bagian yang butuh keputusan
+sengaja dibiarkan terbuka (lihat "Sisa M15"), tidak di-lumpuhkan diam-diam.
+
+Alat: `pt-pb-test` `127.0.0.1:8099` (PocketBase 0.40.4). Probe auth membuat akun sekali pakai,
+lalu menghapusnya sendiri lewat token record itu; `findings.mjs` mencetak jumlah sisa baris.
+
+| ID | Yang diubah | Bukti terukur |
+|---|---|---|
+| **F-37** | Email sudah dipakai bukan lagi jalan buntu: `lib/authContract.ts` (baru) memetakan bentuk error server, `sign-up.tsx` menawarkan **Lanjutkan masuk** dengan password yang tadi diketik, dan arahnya jelas kalau password itu beda. Validasi klien jalan sebelum request. | **Koreksi tebakan audit**: rencana lama menyebut `validation_record_exists`; server benar-benar mengirim `data.data.email.code = "validation_not_unique"` (`"Value must be unique."`, HTTP 400). Rantai di gate: create **201** -> duplikat **HTTP 400 validation_not_unique** -> `authWithPassword` password sama **token issued** -> self-delete -> **0 baris sisa**. `validateSignUp` menolak **4/4** bidang kosong, lolos untuk form valid; **4** slot `fieldErrors.*` inline; Alert `"Missing Info"` hilang. |
+| **F-38** | Layar reset tidak lagi berbohong: kegagalan jadi layar sendiri + coba ulang, copy sukses hanya menjanjikan yang bisa dijamin klien. | `requestPasswordReset` -> **HTTP 200 `true`** untuk email **tak terdaftar** maupun terdaftar, dengan `smtp.enabled=false` dan **0** baris log mailer; jadi `true` bukan bukti email dikirim. `describeResetFailure` menghasilkan **2** pesan berbeda (status `0` vs `429`); catch tidak lagi `setForgotSent(true)`. Login: body "email tidak ada" vs "password salah" **identik** (HTTP 400 `Failed to authenticate.`, `data = {}`) -> pesan `Email atau password tidak cocok.` tidak menyalah satu bidang. |
+| **F-56** | "Sesi berakhir" dibedakan dari "logout sendiri" (`lib/session.ts`, murni), dilaporkan dari `_layout.tsx`, ditandai di `profile.tsx` sebelum `authStore.clear()`, ditampilkan + dibersihkan di `welcome.tsx`. | `Profiles.authToken.duration = 432000` (5 hari) dan **0** pemanggil `authRefresh` di `app/`, `store/`, `lib/` (gate merah kalau itu berubah tanpa menilai ulang banner). State machine **12/12** cek lulus, termasuk cold start: SDK memanggil `authStore.onChange` **segera** saat dilangganan, jadi fire pertama dengan store kosong **bukan** bukti sesi berakhir. |
+
+Gerbang (interpreter resmi lewat `tools/test/node-gate.sh`):
+
+```
+npm run test:findings   # 16 baris hijau: F-01 02 03 34 48 79 80 42 44 45 46 47 60 37 38 56
+npm run test:enum       # 7/7 sumber + event_type
+npm run test:batch      # F-02h
+npx tsc --noEmit        # rc=0
+bash -n tools/test/*.sh tools/deploy/*.sh  # 10/10 bersih
+```
+
+`npm run test:preflight` masih merah 2 baris, keduanya perangkat (`no devices/emulators found`,
+`adb reverse` kosong) — bukan regresi.
+
+Anti-vakum: tiga mutasi **terpisah**, masing-masing hanya membuat barisnya sendiri merah, lalu
+dipulihkan dan diverifikasi `md5sum` terhadap snapshot (7 file `SAMA`; `findings.mjs` satu-satunya
+yang beda karena checker-nya diperbaiki). Ini pola yang diminta **H11**.
+
+```
+PB_EMAIL_TAKEN_CODE -> "validation_record_exists"
+  RED F-37 kode server aktual "validation_not_unique" berbeda dari PB_EMAIL_TAKEN_CODE="validation_record_exists"
+catch reset -> setForgotSent(true)
+  RED F-38 masih ada setForgotSent(true) di dalam catch | layar tidak memakai describeResetFailure untuk pesan kegagalan
+} else if (wasAuthenticated) -> } else {
+  RED F-56 cold start belum pernah auth: dapat="expired" harus=null (4 kasus cold start)
+```
+
+### Sisa M15 (tidak ditutup diam-diam)
+
+- **F-38 separuh kedua masih keputusan**: taut reset PocketBase `/_/#/auth/confirm-*` menunjuk dashboard
+  yang 404 di edge, dan kolom `verified` tidak dibaca di mana pun. Yang dipilih menentukan bentuk
+  layar berikutnya (deep link `pickertime://reset-password?token=…` + layarnya, atau
+  `requestVerification` aktif, atau `verifiedPrefix`/`requireVerified` dimatikan supaya tidak menggantung).
+- **F-51 belum** — belum ada layar edit profil; `focus_goal`/`energy_pref` masih bisa kosong selamanya
+  dan AutoPlan mengirim string kosong ke prompt.
+- **F-56 separuh kedua masih keputusan**: memperpanjang `duration` dan/atau refresh terjadwal.
+- **Bukti perangkat**: banner "sesi berakhir" dan Alert "Lanjutkan masuk" belum pernah dilihat di ponsel;
+  keduanya baru diverifikasi sebagai state machine + rantai probe.
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan
@@ -1268,3 +1321,12 @@ Anti-vakum: satu run mutasi serentak (`topK: 1`, `.join(" ")`, `capText` no-op, 
   `RED  F-42`) tidak akan menampilkannya. Aturan: salin semua berkas target ke direktori kerja
   sebelum mutasi, pulihkan dari sana, lalu **jalankan ulang gerbang dan `md5sum -c`** sebagai satu
   rangkaian; kalau ada yang tidak cocok, keadaan repo dianggap belum diketahui.
+
+  **Tindak lanjut terukur 2026-10-09 (sore)**: aturan ini dijalankan penuh untuk M15 (snapshot 8 berkas
+  ke `/tmp/pt-gw2` sebelum mutasi, tiga mutasi terpisah, pemulihan diverifikasi `md5sum`, pemeriksaan
+  terakhir menunjukkan 7 berkas `SAMA` dan `findings.mjs` hanya berbeda satu regex yang memang
+  diperbaiki). Tapi sisa M14 masih terbukti ada: **awalan sesi ini** membuka `git diff` dan
+  `pb_hooks/ai_proxy.pb.js` masih dalam keadaan termutasi (`topK: 1`, `.join(" ")`) meski run M14
+  sudah mencetak restore — jadi pembandingan `md5sum` terhadap `git show HEAD:<file>` sekarang menjadi
+  langkah pembuka, bukan langkah penutup. `md5` working tree = `md5` HEAD =
+  `a6d51d25f1109eea48c45d60de37a007` sesudah dibersihkan.

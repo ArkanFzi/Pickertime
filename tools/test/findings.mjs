@@ -10,11 +10,18 @@ import PocketBase from 'pocketbase'
 // membaca file .ts langsung (type stripping), dan itu yang dikunci .nvmrc.
 let createTaskBatch, resolveLeadMinutes, localDayStartEpoch, localWeekStart
 let parseAiJson, capText, wrapData, describeAiError, AI_FAILURE_TEXT, AI_TITLE_MAX
+let isEmailAlreadyRegistered, validateSignUp, describeResetFailure, describeSignInFailure
+let passwordResetCopy, PB_EMAIL_TAKEN_CODE, duplicateAccountMessage
+let observeAuthChange, markIntentionalLogout, sessionEndReason, resetSessionState, clearSessionEndReason
 try {
   ({ createTaskBatch, resolveLeadMinutes } = await import('../../lib/taskContract.ts'))
   ;({ localDayStartEpoch, localWeekStart } = await import('../../lib/localDay.ts'))
   ;({ parseAiJson, capText, wrapData, describeAiError, AI_FAILURE_TEXT, AI_TITLE_MAX } =
     await import('../../lib/aiContract.ts'))
+  ;({ isEmailAlreadyRegistered, validateSignUp, describeResetFailure, describeSignInFailure,
+      passwordResetCopy, PB_EMAIL_TAKEN_CODE, duplicateAccountMessage } = await import('../../lib/authContract.ts'))
+  ;({ observeAuthChange, markIntentionalLogout, sessionEndReason, resetSessionState,
+      clearSessionEndReason } = await import('../../lib/session.ts'))
 } catch (err) {
   console.error(`Gagal memuat lib/*.ts dengan node ${process.version}: ${err.message}`)
   process.exit(1)
@@ -27,6 +34,17 @@ for (const [nama, fn] of [
   ['capText', capText],
   ['wrapData', wrapData],
   ['describeAiError', describeAiError],
+  ['isEmailAlreadyRegistered', isEmailAlreadyRegistered],
+  ['validateSignUp', validateSignUp],
+  ['describeResetFailure', describeResetFailure],
+  ['describeSignInFailure', describeSignInFailure],
+  ['passwordResetCopy', passwordResetCopy],
+  ['duplicateAccountMessage', duplicateAccountMessage],
+  ['observeAuthChange', observeAuthChange],
+  ['markIntentionalLogout', markIntentionalLogout],
+  ['sessionEndReason', sessionEndReason],
+  ['clearSessionEndReason', clearSessionEndReason],
+  ['resetSessionState', resetSessionState],
 ]) {
   if (typeof fn !== 'function') {
     console.error(`${nama} tidak terbaca sebagai function — gerbang ini tidak boleh diam-diam hijau.`)
@@ -279,6 +297,11 @@ const srcGemini = baca('lib/gemini.ts')
 const srcHook = baca('pb_hooks/ai_proxy.pb.js')
 const srcIndex = baca('app/(tabs)/index.tsx')
 const srcInsights = baca('app/(tabs)/insights.tsx')
+const srcSignIn = baca('app/(auth)/sign-in.tsx')
+const srcSignUp = baca('app/(auth)/sign-up.tsx')
+const srcWelcome = baca('app/(auth)/welcome.tsx')
+const srcProfile = baca('app/(tabs)/profile.tsx')
+const srcLayout = baca('app/_layout.tsx')
 
 {
   const rusak = []
@@ -457,6 +480,188 @@ const srcInsights = baca('app/(tabs)/insights.tsx')
     line('RED', 'F-60', `renama endpoint belum tuntas: ${rusak.join(' | ')}`)
   } else {
     line('GREEN', 'F-60', `/api/ai/complete dipakai 4 perkakas + klien; jalur lama tetap 401 anonim lalu 410 moved; ${jumlahJalur} jalur di balik requireAuth`)
+  }
+}
+
+// ── Gelombang 2: permukaan auth & sesi (F-37, F-38, F-56) ────────────────────────────
+// Aturan yang menegakkan blok ini ada di layar yang tidak boleh dilewati siapa pun, jadi
+// kegagalannya dicetak RED, bukan NOTE: signup dengan email yang sudah dipakai, "Forgot
+// password?" yang optimis, dan sesi yang habis di tengah jalan.
+
+{
+  // F-37: `Profiles.create` lalu `authWithPassword` adalah dua langkah non-atomik.
+  // Diukur hidup di backend uji, bukan dari dugaan audit (audit menebak
+  // `validation_record_exists`; yang benar-benar dikirim server adalah
+  // `validation_not_unique` — lihat lib/authContract.ts).
+  const rusak = []
+  const emailProbe = `probe-f37-${Date.now()}@local.test`
+  const pwProbe = 'rahasia-uji-12345'
+  const mk = () => { const p = new PocketBase(BASE); p.autoCancellation(false); return p }
+  const payload = { email: emailProbe, password: pwProbe, passwordConfirm: pwProbe, full_name: 'Probe F-37', role: 'Professional' }
+  let dibuat = null
+  let kodeAktual = '(tidak ada error)'
+  let loginKembali = false
+  try {
+    dibuat = await mk().collection('Profiles').create(payload)
+  } catch (err) {
+    rusak.push(`create akun probe baru ditolak status=${err.status} ${JSON.stringify(err.data ?? {}).slice(0, 140)} — probe F-37 tidak bisa dinilai`)
+  }
+  if (dibuat) {
+    try {
+      // Ini persis permintaan yang dikirim handleSignUp() saat user menekan "Complete Setup"
+      // dengan email yang sudah terdaftar.
+      await mk().collection('Profiles').create(payload)
+      rusak.push('create email duplikat DITERIMA server — penanda "email sudah dipakai" tidak berlaku lagi, gerbang ini harus dinilai ulang')
+    } catch (err) {
+      kodeAktual = String(err?.data?.data?.email?.code ?? `(shape lain: ${JSON.stringify(err.data ?? {}).slice(0, 80)})`)
+      if (err.status !== 400) rusak.push(`duplikat menolak dengan status=${err.status}, harus 400`)
+      if (!isEmailAlreadyRegistered(err)) rusak.push('isEmailAlreadyRegistered salah membaca bentuk error server yang nyata')
+    }
+    if (kodeAktual !== PB_EMAIL_TAKEN_CODE) {
+      rusak.push(`kode server aktual "${kodeAktual}" berbeda dari PB_EMAIL_TAKEN_CODE="${PB_EMAIL_TAKEN_CODE}"`)
+    }
+    try {
+      // Jalan keluar yang ditawarkan layar: password yang tadi diketik dipakai untuk masuk.
+      const auth = await mk().collection('Profiles').authWithPassword(emailProbe, pwProbe)
+      loginKembali = !!auth?.token
+    } catch { /* dinilai di bawah */ }
+    if (!loginKembali) rusak.push('retry login dengan password yang sama GAGAL — "Lanjutkan masuk" di layar signup adalah jalan buntu')
+    // Cleanup: terukur user boleh menghapus record miliknya sendiri (rules create/update/delete).
+    const pembersih = mk()
+    await pembersih.collection('Profiles').authWithPassword(emailProbe, pwProbe)
+    await pembersih.collection('Profiles').delete(pembersih.authStore.record.id).catch(() => rusak.push('probe F-37 gagal dibersihkan'))
+    const sisa = await mk().collection('Profiles').getFullList({ filter: `email = "${emailProbe}"` }).catch(() => [])
+    if (sisa.length) rusak.push(`probe F-37 masih meninggalkan ${sisa.length} baris di Profiles`)
+  }
+  // Discriminator murni: fungsi ini tidak boleh menganggap semua error 400 sebagai "email dipakai".
+  if (isEmailAlreadyRegistered({ status: 400, data: { data: { password: { code: 'validation_min' } } } })) {
+    rusak.push('isEmailAlreadyRegistered terlalu lebar: menandai error field lain sebagai email yang sudah dipakai')
+  }
+  if (isEmailAlreadyRegistered(undefined) !== false) rusak.push('isEmailAlreadyRegistered melempar untuk error kosong')
+  // Discriminator perilaku lama: create ditembak dulu, validasi tidak pernah ada.
+  const formKosong = validateSignUp({ name: '  ', email: 'bukan-email', password: '123', role: '  ' })
+  const jumlahTolakan = Object.keys(formKosong).length
+  if (jumlahTolakan !== 4) rusak.push(`validateSignUp menolak ${jumlahTolakan} bidang, harus 4 (nama/email/password/role)`)
+  if (Object.keys(validateSignUp({ name: 'Ada', email: 'ada@example.test', password: 'panjang-8', role: 'Professional' })).length !== 0) {
+    rusak.push('validateSignUp menolak form yang seharusnya lolos')
+  }
+  const pesanSatu = duplicateAccountMessage(false)
+  const pesanDua = duplicateAccountMessage(true)
+  if (pesanSatu === pesanDua) rusak.push('duplicateAccountMessage tidak membedakan "lanjut masuk" dari "password tidak cocok"')
+  if (!/Forgot password/i.test(pesanDua)) rusak.push('jalan buntu kedua tidak mengarahkan ke reset password')
+  if (!srcSignUp.includes('isEmailAlreadyRegistered')) rusak.push('sign-up.tsx tidak memakai isEmailAlreadyRegistered')
+  if (!srcSignUp.includes('duplicateAccountMessage')) rusak.push('sign-up.tsx tidak memakai duplicateAccountMessage')
+  if (!srcSignUp.includes('validateSignUp')) rusak.push('sign-up.tsx tidak memakai validateSignUp — request tetap ditembak sebelum validasi')
+  const jumlahValidasi = (srcSignUp.match(/fieldErrors\.\w+/g) || []).length
+  if (jumlahValidasi < 2) rusak.push(`hanya ${jumlahValidasi} bidang yang menampilkan error validasi inline di sign-up.tsx`)
+  if (/Alert\.alert\('Missing Info'/.test(srcSignUp)) rusak.push('sign-up.tsx masih memakai Alert generik "Missing Info"')
+  if (rusak.length) {
+    line('RED', 'F-37', `jalur email-duplikat masih buntu: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-37', `duplikat create -> HTTP 400 "${kodeAktual}" dikenali + retry login password sama berhasil; ${jumlahTolakan}/4 bidang kosong ditolak sebelum request, ${jumlahValidasi} pesan inline di layar; probe dibersihkan`)
+  }
+}
+
+{
+  // F-38: requestPasswordReset returning HTTP 200 `true` BUKAN bukti email terkirim.
+  // Diukur langsung: email yang tidak pernah terdaftar pun balikan true, dan mailer instance
+  // uji ini mati (smtp.enabled=false, 0 baris log mailer — lihat docs/02_migration).
+  const rusak = []
+  const emailAsing = `probe-f38-${Date.now()}@local.test`
+  const pbAsing = new PocketBase(BASE)
+  pbAsing.autoCancellation(false)
+  let balikanAsing
+  try {
+    balikanAsing = await pbAsing.collection('Profiles').requestPasswordReset(emailAsing)
+  } catch (err) {
+    rusak.push(`requestPasswordReset email tak terdaftar melempar status=${err.status} — perilaku server berubah, copy "diterima" harus dinilai ulang`)
+  }
+  const copy = passwordResetCopy('seseorang@example.test')
+  if (balikanAsing !== true) {
+    // Bukan kegagalan temuan: kalau server mulai jujur (false/404), copy tetap harus aman.
+    console.log(`NOTE tidak dinilai: requestPasswordReset email asing mengembalikan ${JSON.stringify(balikanAsing)} — perilaku server berubah dari pengukuran 2026-10-09`)
+  }
+  // Copy harus tetap benar untuk email asing: tidak boleh menjanjikan link/inbox.
+  if (/cek (inbox|email)|periksa email|link telah dikirim|email reset sudah dikirim/i.test(copy)) {
+    rusak.push(`copy reset menjanjikan pengiriman: "${copy}" padahal true untuk email asing (terukur)`)
+  }
+  if (!copy.includes('diterima')) rusak.push('copy reset tidak lagi menyebut fakta yang terukur: permintaan diterima server')
+  if (!copy.includes('seseorang@example.test')) rusak.push('copy reset tidak menyebut email yang diminta')
+  if (/mailer\.enabled/.test(srcSignIn)) rusak.push('sign-in.tsx masih menyebut mailer.enabled — kunci settings yang terukur adalah smtp.enabled')
+  // Kegagalan transport harus punya layar sendiri, bukan dirapatkan ke state "sukses".
+  const tanpaJaringan = describeResetFailure({ status: 0, message: 'Network request failed' })
+  const ditolakServer = describeResetFailure({ status: 429, message: 'Too many requests' })
+  if (!/tidak sampai ke server/i.test(tanpaJaringan)) rusak.push(`status 0 dipetakan ke pesan yang tidak menjelaskan koneksi: "${tanpaJaringan}"`)
+  if (/tidak sampai ke server/i.test(ditolakServer) === false && !/Too many requests/.test(ditolakServer)) rusak.push('pesan server untuk kegagalan lain dibuang')
+  const jumlahPeta = [tanpaJaringan, ditolakServer].filter((s, i) => s && ![tanpaJaringan, ditolakServer].slice(i + 1).includes(s)).length
+  if (jumlahPeta !== 2) rusak.push(`describeResetFailure menghasilkan ${jumlahPeta} pesan berbeda untuk status 0 vs 429, harus 2`)
+  const blokCatch = /async function handleForgotPassword\(\)[\s\S]*?catch \(error: any\) \{([\s\S]{0,400}?)\n    \} finally/.exec(srcSignIn)
+  if (!blokCatch) rusak.push('catch handleForgotPassword tidak ditemukan — periksa ulang bentuk kodenya')
+  else if (/setForgotSent\(true\)/.test(blokCatch[1])) rusak.push('masih ada setForgotSent(true) di dalam catch: kegagalan diperlihatkan sebagai layar "cek email"')
+  if (!srcSignIn.includes('describeResetFailure(error)')) rusak.push('layar tidak memakai describeResetFailure untuk pesan kegagalan')
+  if (!/forgotFailed \? \(/.test(srcSignIn)) rusak.push('tidak ada cabang layar kegagalan reset')
+  if (!/onPress=\{handleForgotPassword\}/.test(srcSignIn)) rusak.push('layar kegagalan reset tidak menawarkan percobaan ulang')
+  // Pesan login tidak boleh menyalah satu bidang: body "email tidak ada" dan "password salah"
+  // terukur identik (HTTP 400 "Failed to authenticate.", data = {}).
+  const pesanLogin = describeSignInFailure({ status: 400, message: 'Failed to authenticate.' })
+  if (!/Email atau password/i.test(pesanLogin)) rusak.push(`pesan login menyalah satu bidang: "${pesanLogin}"`)
+  if (!/koneksi/i.test(describeSignInFailure({ status: 0 }))) rusak.push('kegagalan jaringan saat login tidak dibedakan')
+  if (rusak.length) {
+    line('RED', 'F-38', `permintaan reset masih dibaca sebagai bukti email sampai: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-38', `email tak terdaftar -> HTTP 200 ${JSON.stringify(balikanAsing)} (terukur), copy hanya menjanjikan "diterima"; ${jumlahPeta} pemetaan kegagalan reset, catch tidak lagi membuka layar sukses, layar kegagalan punya coba ulang; pesan login "${pesanLogin}"`)
+  }
+}
+
+{
+  // F-56: membedakan "sesi habis" dari "logout sendiri", termasuk fire pertama authStore.onChange.
+  const rusak = []
+  let jumlahCek = 0
+  const cek = (label, dapat, harus) => {
+    jumlahCek++
+    if (dapat !== harus) rusak.push(`${label}: dapat=${JSON.stringify(dapat)} harus=${JSON.stringify(harus)}`)
+  }
+  // Cold start: SDK memanggil listener SEGERA saat dilangganan dengan store kosong. Tanpa
+  // penjaga "pernah terautentikasi", setiap buka aplikasi akan berbunyi "sesi berakhir".
+  resetSessionState()
+  cek('cold start belum pernah auth', observeAuthChange(null, null), null)
+  cek('cold start tetap kosong', sessionEndReason(), null)
+  observeAuthChange('token-1', { id: 'rec-1' })
+  cek('setelah login tidak ada catatan', sessionEndReason(), null)
+  cek('kedaluwarsa terdeteksi', observeAuthChange(null, null), 'expired')
+  cek('alasan bertahan', sessionEndReason(), 'expired')
+  clearSessionEndReason()
+  cek('dibersihkan setelah dibaca', sessionEndReason(), null)
+  resetSessionState()
+  observeAuthChange('token-2', { id: 'rec-2' })
+  markIntentionalLogout()
+  cek('logout sengaja', observeAuthChange(null, null), 'logout')
+  cek('fire ulang tidak berubah', observeAuthChange(null, null), 'logout')
+  resetSessionState()
+  observeAuthChange('token-3', { id: 'rec-3' })
+  markIntentionalLogout()
+  cek('login baru menghapus penanda', observeAuthChange('token-4', { id: 'rec-4' }), null)
+  cek('penanda benar-benar hilang', sessionEndReason(), null)
+  resetSessionState()
+  cek('token tanpa model saat cold start', observeAuthChange('token-5', null), null)
+  cek('model tanpa token saat cold start', observeAuthChange(null, { id: 'rec-6' }), null)
+  // wiring layar.
+  if (!srcLayout.includes('observeAuthChange(')) rusak.push('app/_layout.tsx tidak memanggil observeAuthChange')
+  const idxTanda = srcProfile.indexOf('markIntentionalLogout()')
+  const idxBersih = srcProfile.indexOf('pb.authStore.clear()')
+  if (idxTanda === -1 || idxBersih === -1) rusak.push('logout di profile.tsx tidak memakai markIntentionalLogout')
+  else if (idxTanda > idxBersih) rusak.push('markIntentionalLogout() dipanggil SESUDAH authStore.clear() — listener terlanjur membaca ini sebagai kedaluwarsa')
+  if (!srcWelcome.includes('sessionEndReason')) rusak.push('welcome.tsx tidak membaca sessionEndReason')
+  if (!srcWelcome.includes('clearSessionEndReason')) rusak.push('welcome.tsx tidak membersihkan penanda setelah dibaca (banner akan menempel selamanya)')
+  if (!/session ended/i.test(srcWelcome)) rusak.push('welcome.tsx tidak punya copy "session ended"')
+  if (/authRefresh/.test([srcLayout, srcSignIn, srcSignUp, srcProfile, baca('lib/pocketbase.ts')].join(''))) {
+    rusak.push('ada pemanggil authRefresh — asumsi "5 hari lalu putus" (duration 432000, tanpa refresh) tidak berlaku lagi, banner harus dinilai ulang')
+  }
+  resetSessionState()
+  if (rusak.length) {
+    line('RED', 'F-56', `sesi berakhir tidak bisa dibedakan dari logout: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-56', `state machine sesi lulus ${jumlahCek} cek (cold start null, clear->expired, mark->logout, login ulang menghapus penanda); _layout/profile/welcome terhubung; tidak ada authRefresh`)
   }
 }
 

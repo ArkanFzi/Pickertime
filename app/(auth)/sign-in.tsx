@@ -7,6 +7,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { pb } from '@/lib/pocketbase';
+import { describeResetFailure, describeSignInFailure, isValidEmail, passwordResetCopy } from '@/lib/authContract';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function SignInScreen() {
@@ -22,6 +23,7 @@ export default function SignInScreen() {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
+  const [forgotFailed, setForgotFailed] = useState<string | null>(null);
 
   async function handleSignIn() {
     if (!email || !password) {
@@ -33,7 +35,7 @@ export default function SignInScreen() {
       await pb.collection('Profiles').authWithPassword(email, password);
       router.replace('/');
     } catch (error: any) {
-      Alert.alert('Sign In Failed', error.message || 'Check your credentials.');
+      Alert.alert('Sign In Failed', describeSignInFailure(error));
     } finally {
       setLoading(false);
     }
@@ -44,8 +46,7 @@ export default function SignInScreen() {
       Alert.alert('Email Required', 'Please enter your registered email address.');
       return;
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(forgotEmail.trim())) {
+    if (!isValidEmail(forgotEmail)) {
       Alert.alert('Invalid Email', 'Please enter a valid email address.');
       return;
     }
@@ -53,11 +54,16 @@ export default function SignInScreen() {
     setForgotLoading(true);
     try {
       await pb.collection('Profiles').requestPasswordReset(forgotEmail.trim());
+      // Terukur di backend uji (smtp.enabled=false): respons tetap HTTP 200 `true` baik untuk
+      // email terdaftar maupun tidak. Jadi "sukses" hanya berarti permintaan DITERIMA —
+      // bukan bukti email sampai. Formulernya tetap enumeration-safe.
+      setForgotFailed(null);
       setForgotSent(true);
     } catch (error: any) {
-      // PocketBase mengembalikan sukses bahkan jika email tidak terdaftar
-      // (mencegah email enumeration attack) — tampilkan sukses tetap
-      setForgotSent(true);
+      // F-38: kegagalan asli (jaringan, server mati, rate limit) dulu dirapatkan jadi layar
+      // "cek email" yang sama, sehingga user mengira tautan reset sudah dikirim.
+      setForgotSent(false);
+      setForgotFailed(describeResetFailure(error));
     } finally {
       setForgotLoading(false);
     }
@@ -67,6 +73,7 @@ export default function SignInScreen() {
     setForgotVisible(false);
     setForgotEmail('');
     setForgotSent(false);
+    setForgotFailed(null);
     setForgotLoading(false);
   }
 
@@ -166,18 +173,29 @@ export default function SignInScreen() {
               </TouchableOpacity>
             </View>
 
-            {forgotSent ? (
+            {forgotFailed ? (
+              /* Failure State (F-38) */
+              <View style={styles.successWrap}>
+                <View style={styles.successIcon}>
+                  <Ionicons name="alert-circle" size={48} color="#F87171" />
+                </View>
+                <Text style={styles.modalTitle}>Request Failed</Text>
+                <Text style={styles.modalSubtitle}>
+                  The reset request never reached the server, so no link was sent.
+                </Text>
+                <Text style={styles.forgotErrorDetail}>{forgotFailed}</Text>
+                <TouchableOpacity style={styles.doneBtn} onPress={handleForgotPassword} activeOpacity={0.85}>
+                  <Text style={styles.doneBtnText}>Try again</Text>
+                </TouchableOpacity>
+              </View>
+            ) : forgotSent ? (
               /* Success State */
               <View style={styles.successWrap}>
                 <View style={styles.successIcon}>
                   <Ionicons name="checkmark-circle" size={48} color="#34D399" />
                 </View>
                 <Text style={styles.modalTitle}>Check Your Inbox</Text>
-                <Text style={styles.modalSubtitle}>
-                  If an account with{'\n'}
-                  <Text style={styles.emailHighlight}>{forgotEmail}</Text>
-                  {'\n'}exists, a reset link has been sent.
-                </Text>
+                <Text style={styles.modalSubtitle}>{passwordResetCopy(forgotEmail)}</Text>
                 <TouchableOpacity style={styles.doneBtn} onPress={closeForgotModal} activeOpacity={0.85}>
                   <Text style={styles.doneBtnText}>Got it</Text>
                 </TouchableOpacity>
@@ -292,6 +310,12 @@ const styles = StyleSheet.create({
   modalGlow: {
     position: 'absolute', top: -40, right: -40, width: 150, height: 150,
     borderRadius: 75, backgroundColor: 'rgba(0,212,255,0.08)',
+  },
+  forgotErrorDetail: {
+    color: 'rgba(248, 113, 113, 0.75)',
+    fontSize: 12,
+    marginTop: 6,
+    textAlign: 'center',
   },
   modalHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
