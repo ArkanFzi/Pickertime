@@ -1061,6 +1061,27 @@ tombol yang terbukti mati dengan koordinat terukur.
 - Data uji tertinggal di backend uji (bukan produksi): task `rzbusi008v4bbjq` "Uji-Jadwal-Bulat" dan
   `yv5v65cw6yr156z` yang start-nya sudah digeser dua kali. Tidak dihapus.
 
+## M12 — `Workspace_Events` ditegakkan (T-21 / CFG-15 jalur Hermes, 2026-10-09)
+
+Satu-satunya baris terbuka di tracker `openclaw-docker/TODO.md` yang pemiliknya "aku" dan tidak
+digerbang keputusan kamu: prasyarat loop belajar (§8 `docs/05_agent/hermes_sentral.md`).
+
+| Yang diubah | Bukti terukur |
+|---|---|
+| `pb_migrations/1791526402_workspace_events_ketat.js` (baru) | Diterapkan pada `ghcr.io/muchobien/pocketbase:0.40.4` kontainer uji (`/tmp/t21`, skema lama → seed 3 baris legacy → migrasi): `[T-21] baris=3 dinormalisasi=1 occurred_at{dariPayload=2 fallbackCreated=1} kosongSebelumSet="" pattern=6 nilai indeks=idx_events_user_occurred`. Nilai crc32 nama diverifikasi dulu dengan `node:zlib` (`event_type`=2467634050, `occurred_at`=2277522715) supaya id field identik dengan yang akan dibuat PocketBase — id tidak berubah, jadi tidak ada DROP kolom. |
+| Penegakan + siklus balik | 15 assertion (`tools/test/tmp/verify-t21.mjs`, scratch) semuanya OK: baris legacy selamat (`items=3`), baris nakal jadi `UNKNOWN` dan **masih bisa ditulis** (`PATCH is_processed → HTTP 200`), nilai di luar daftar ditolak (`HTTP 400 validation_invalid_format`), `occurred_at` round-trip, filter rentang hari menghasilkan 2 baris, indeks terlihat di `sqlite_master` **dan** dipakai perencana (`EXPLAIN QUERY PLAN → USING INDEX idx_events_user_occurred`). Rollback: `echo y \| docker run -i … migrate down 1 --dir=/pb_data` → `occurred_at` hilang, pattern `""`, indeks hilang, **7 baris tetap ada**; `migrate up` memasangkan lagi (`Applied …`). |
+| `app/focus.tsx:22-33` | Satu waktu dihitung sekali dipakai dua tempat (`occurred_at` + `payload.timestamp`) supaya keduanya tidak berbeda; `npx tsc --noEmit` rc=0. |
+| `tools/pb/pb-schema-verify.mjs` (gerbang CI "Skema PocketBase + hook AI") | `EXPECT` bertambah `occurred_at`; pemeriksaan baru: `Workspace_Events penegakan skema` (pattern non-kosong, `occurred_at` date, `required=false`), `event_type haram harus 400` (sebelum ini verifier **selalu** menulis nilai sah, jadi keberadaan pattern tidak pernah dibuktikan), `filter(occurred_at rentang hari)`. Run nyata di backend bermigrasi + `pb_hooks` terpasang: `DONE t21m :: semua pemeriksaan lulus` rc=0. Dihilangkan ulang dari pohon branch `feat/workspace-events-ketat` ini (bukan dari cabang lain): `19 OK / 0 FAIL`, termasuk `Workspace_Events event_type haram harus 400 :: HTTP 400` dan `penegakan skema :: pattern=^(…|UNKNOWN)$ occurred_at=date(required=false)`. |
+| `tools/test/enum-contract.mjs` (baru: kontrak kedua) | Union TS `app/focus.tsx` vs `EVENTS` di migrasi, dua arah + larangan menulis sentinel, dan gagal keras kalau sumber kebenarannya tidak terbaca (anti-vacuous). Keadaan benar: `GREEN … = persis pattern (5 nilai)` rc=0. Kasus negatif (union ditambah `SALAH_SATU`): `RED app/focus.tsx :: union :: SALAH_SATU tidak ada di pattern server` rc=1; berkas dipulihkan (md5 cocok). |
+| `docs/02_migration/pocketbase_schema.md` | Bagian koleksi 4 ditulis ulang sesuai keadaan; `createRule` dikoreksi (teks lama `@request.auth.id != ""` adalah kondisi pra-F-03); jebakan 4–7 ditambahkan (baris yang menabrak pattern terkunci dari tulis; ganti tipe = DROP kolom; field `json` di JSVM adalah `[]byte`; `migrate` tidak punya `--confirm`). |
+| Gerbang lain tidak ada yang berubah | `test:enum` 0, `test:batch` 0, `test:findings` 0 (`semua temuan sudah tertutup`), `test:ai-proxy` 0 (`Jalur proxy AI bersih`), `tsc` 0 — semuanya di node 22.23.2 + backend uji dengan key sampah (`INVALID-KEY-PROBE-ONLY`). Di branch T-22 (`7b3151a`): remedy `node-gate.sh` terbukti menunjuk direktori nyata. |
+
+Sengaja **tidak** disentuh: `tools/pb/pb-prod-smoke.mjs:60` (daftar field-nya dipakai melawan
+produksi; menambah `occurred_at` di sana akan merah sebelum deploy — perubahan itu harus satu
+aksi dengan `deploy.yml`, bukan sekarang), `tools/pb/pb-compat-test.mjs:108` (ia membangun
+koleksinya sendiri untuk uji SDK 0.26.9, jadi pattern tidak berlaku di sana), dan
+`is_processed` (F-62 — sisi tulis sudah aman, tapi pemakai yang menulis kembali belum ada).
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan
@@ -1110,3 +1131,15 @@ tombol yang terbukti mati dengan koordinat terukur.
   `https://iam.googleapis.com/...`. STS membandingkan secara literal, bukan setelah normalisasi URI.
   Aturan: (a) jangan filter field sebelum paham skema resource-nya; (b) setiap asumsi yang jadi
   penyebab kegagalan pipeline ditulis kembali sebagai komentar yang menyebut nilai persisnya.
+- [ ] **H10** Dugaan sebab wajib diuji dengan **eksperimen pemisah** sebelum ditulis sebagai sebab,
+  walau namanya sudah berbunyi seperti temuan. Pelajaran M12 (2026-10-09): dua dugaan saya dalam
+  satu jam, dan keduanya terbantahkan oleh satu perintah ukur. (a) "PocketBase menolak perubahan
+  skema kalau ada baris lama yang menabrak pattern" — salah; `PATCH /api/collections` dengan
+  pattern baru justru **HTTP 200** padahal baris nakalnya masih ada; penyebab sebenarnya adalah
+  loop backfill yang men-`save` baris itu **setelah** pattern terpasang. (b) "`rec.get('occurred_at')`
+  memberi placeholder tanggal nol sehingga penjaga kosong ikut salah" — juga salah; nilai terukur
+  `""`; yang benar-benar macet adalah `payload`: field `json` datang sebagai bungkus `[]byte`
+  (bukan string, bukan objek) sehingga `raw.timestamp` = `undefined` dan `dariPayload=0`.
+  Aturan: setiap kali sebuah kegagalan akan dijelaskan dengan kata "karena", jalankan lebih dulu
+  satu perintah yang membedakan penjelasan itu dari pesaingnya — di sini cukup satu PATCH API dan
+  satu `console.log(typeof raw)`.

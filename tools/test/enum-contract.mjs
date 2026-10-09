@@ -82,5 +82,48 @@ for (const [file, label, get] of SOURCES) {
     console.log(`GREEN ${file} :: ${label} :: ${values.join(', ')}`)
   }
 }
+// Kontrak kedua (T-21): Workspace_Events.event_type.
+// Sumber kebenarannya BUKAN snapshot — event_type ditegakkan lewat `pattern` pada migrasi
+// (text -> select akan me-DROP kolom, jadi pilih pattern). Tanpa bagian ini, menambah nilai
+// event di app/focus.tsx tidak akan terdeteksi sampai server menolaknya di perangkat.
+const MIG_DIR = join(ROOT, 'pb_migrations')
+const migrasiEv = readdirSync(MIG_DIR)
+  .filter((f) => /workspace_events.*\.js$/.test(f))
+  .sort()
+const fileEv = migrasiEv.length ? `pb_migrations/${migrasiEv[migrasiEv.length - 1]}` : null
+if (!fileEv) {
+  console.error('Migrasi Workspace_Events tidak ditemukan — kontrak event_type tidak punya sumber kebenaran.')
+  process.exit(1)
+}
+const srcEv = read(fileEv)
+const allowedEv = listIn(fileEv, 'EVENTS')
+const sentinel = (srcEv.match(/const SENTINEL = '([^']+)'/) || [])[1] || null
+if (!allowedEv.length || !sentinel) {
+  console.error(`${fileEv}: EVENTS atau SENTINEL tidak terbaca — periksa pola script ini.`)
+  process.exit(1)
+}
+const unionEv = (() => {
+  const m = read('app/focus.tsx').match(/type:\s*((?:'[A-Z_]+'\s*\|?\s*)+)/)
+  return m ? [...m[1].matchAll(/'([A-Z_]+)'/g)].map((x) => x[1]) : []
+})()
+if (!unionEv.length) {
+  console.error('app/focus.tsx: union tipe event_type tidak terbaca — periksa pola script ini.')
+  process.exit(1)
+}
+console.log(`Workspace_Events.event_type (sumber kebenaran, ${fileEv}): ${allowedEv.join(', ')} + sentinel ${sentinel}`)
+for (const v of unionEv.filter((x) => !allowedEv.includes(x))) {
+  bad++
+  console.log(`RED  app/focus.tsx :: union :: ${v} tidak ada di pattern server -> semua event jenis itu ditolak 400`)
+}
+for (const v of allowedEv.filter((x) => !unionEv.includes(x) && x !== sentinel)) {
+  bad++
+  console.log(`RED  ${fileEv} :: pattern :: ${v} diizinkan server tapi tidak pernah dikirim aplikasi -> periksa cabang yang berubah`)
+}
+if (unionEv.includes(sentinel)) {
+  bad++
+  console.log(`RED  app/focus.tsx :: menulis sentinel ${sentinel} (penanda baris warisan migrasi)`)
+}
+if (!bad) console.log(`GREEN app/focus.tsx :: union :: ${unionEv.join(', ')} = persis pattern (${allowedEv.length} nilai)`)
+
 console.log(bad ? `\n${bad} sumber memakai nilai kategori yang ditolak backend.` : '\nSemua sumber cocok dengan skema.')
 process.exit(bad ? 1 : 0)

@@ -59,16 +59,35 @@ boleh membuat record, dan sign-up dari aplikasi akan gagal.
 `duration_seconds` (number ≥ 0), `completed` (bool), `created`, `updated`.
 
 ### 4. `Workspace_Events` (base) — jembatan OpenClaw
-`user` (relation → Profiles), `event_type` (text required: START_FOCUS, STOP_FOCUS,
-PAUSE_FOCUS, RESET_FOCUS, SESSION_COMPLETE), `payload` (json), `is_processed` (bool),
-`created`, `updated`.
+`user` (relation → Profiles), `event_type` (text required, `pattern`
+`^(START_FOCUS|STOP_FOCUS|PAUSE_FOCUS|RESET_FOCUS|SESSION_COMPLETE|UNKNOWN)$`),
+`payload` (json), `occurred_at` (date, TIDAK wajib), `is_processed` (bool),
+`created`, `updated`. Indeks `idx_events_user_occurred` pada `(user, occurred_at)`.
+
+Bunyi di atas adalah hasil migrasi `1791526402_workspace_events_ketat.js` (T-21, 2026-10-09).
+Tiga hal yang perlu diketahui sebelum menambah jenis event:
+
+- `UNKNOWN` bukan jenis event aplikasi. Ia nilai penanda untuk baris lama yang `event_type`-nya
+  di luar daftar saat migrasi itu jalan; `app/focus.tsx` tidak pernah menulisnya, tapi skema
+  mengizinkannya — itu harga supaya baris warisan tetap bisa ditulis (lihat jebakan 4).
+  Gerbang statis `npm run test:enum` membandingkan union TS dengan `EVENTS` di migrasi, jadi
+  menambah jenis event tanpa migrasi (atau sebaliknya) membuat CI merah.
+- `occurred_at` dibuat tidak wajib karena build aplikasi yang sudah terpasang di perangkat belum
+  mengirimnya; memaksanya = semua penulisan event balikan 400 sampai aplikasi di-update.
+  Baris lama diisi dari `payload.timestamp`, dan kalau payload tidak punya timestamp dipakai
+  `created` (dugaan, bukan fakta — dicetak di log migrasi sebagai `fallbackCreated=`).
+- Yang dibaca loop belajar adalah `occurred_at`, bukan `payload.timestamp`: filter per hari di
+  atas JSON tidak bisa dibuat dan tidak punya indeks.
 
 API Rules untuk tiga koleksi base: `list`/`view`/`update`/`delete` =
-`@request.auth.id != "" && user = @request.auth.id`, `create` = `@request.auth.id != ""`.
+`@request.auth.id != "" && user = @request.auth.id`, `create` =
+`@request.auth.id != "" && user = @request.auth.id` (diikat oleh migrasi
+`1790909800_ownership_create_rule.js` sesudah temuan F-03; teks lama menyebut `create` hanya
+`@request.auth.id != ""` — itu kondisi yang memperbolehkan user menulis atas nama user lain).
 Aturan ini sudah diverifikasi: user lain mendapat 0 record dan tidak bisa membaca profil
 user lain.
 
-## Tiga jebakan yang sudah ditemukan (jangan diulang)
+## Jebakan yang sudah ditemukan (jangan diulang)
 
 1. **`created`/`updated` tidak otomatis dibuat saat koleksi dibuat lewat API.** Kalau
    field `autodate` tidak disertakan di `fields`, filter `created >= "..."` pada koleksi itu
@@ -82,6 +101,32 @@ user lain.
    back `2026-10-02 02:57:12.158Z`.
 3. **`@request.ip` bukan aturan yang valid**; ekspresi selalu-benar untuk registrasi publik
    adalah string kosong `""`.
+4. **Baris yang menabrak `pattern` baru tidak bisa ditulis lagi — selamanya.** Terukur pada
+   0.40.4: mengubah skema lewat API saat ada baris `event_type` di luar daftar **diterima**
+   (HTTP 200), tapi menulis baris itu setelahnya — bahkan hanya `{"is_processed":true}` —
+   ditolak `HTTP 400 {"event_type":{"code":"validation_invalid_format"}}`. Jadi menegakkan
+   enum pada koleksi yang sudah berisi data wajib menormalisasi barisnya **lebih dulu**, dan
+   kegagalan migrasi itu aman: satu migrasi = satu transaksi, perubahan skema ikut
+   di-rollback (terukur: pattern kembali kosong, 3 baris utuh).
+5. **Jangan ganti tipe field untuk menegakkan daftar nilai.** Id field = tipe + crc32 nama
+   (`text2467634050` → `select2467634050`), dan PocketBase membandingkan field berdasar id:
+   ganti tipe = kolom di-DROP lalu dibuat ulang = data baris lama musnah. `pattern` pada tipe
+   `text` mengubah opsi tanpa mengubah id.
+6. **Di dalam migrasi JSVM, field `json` bukan string dan bukan objek.** `rec.get('payload')`
+   muncul sebagai bungkus `[]byte` (terukur: `typeof=object`, `ctor=Array`, keys `0..n` +
+   `marshalJSON,scan,string,unmarshalJSON,value`), sehingga `raw.timestamp` = `undefined` dan
+   `JSON.parse(raw)` tidak pernah masuk cabang yang benar. Ambil teksnya dengan
+   `rec.getString('payload')` (atau `raw.value()`), baru `JSON.parse`.
+7. **`migrate` tidak punya flag `--confirm`** dan `migrate down` bertanya interaktif: pakai
+   `echo y | docker run -i ...` dan ingat `--dir=/pb_data` (default image menunjuk
+   `/usr/local/bin/pb_data`, jadi tanpa itu rollback menjalankan DB yang salah):
+
+   ```bash
+   echo y | docker run -i --name pb-rollback --rm \
+     -v "$PWD/../pb_data_uji:/pb_data" -v "$PWD/pb_migrations:/pb_migrations:ro" \
+     ghcr.io/muchobien/pocketbase:0.40.4 \
+     migrate down 1 --dir=/pb_data --migrationsDir=/pb_migrations --hooksDir=/pb_hooks
+   ```
 
 ## Menambah/mengubah koleksi
 
