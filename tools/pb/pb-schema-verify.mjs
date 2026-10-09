@@ -1,6 +1,15 @@
 import PocketBase from 'pocketbase'
 
 const BASE = process.argv[2]
+if (!BASE) {
+  console.error('Pemakaian: node tools/pb/pb-schema-verify.mjs <URL-backend-uji> [label]. Tanpa argumen pertama BASE = undefined dan setiap request mati sebagai ClientResponseError status 0 (terjadi 2026-10-09, disalahbaca sebagai regresi hook).')
+  process.exit(2)
+}
+// Alat ini MENULIS dan MENGHAPUS record, jadi backend produksi bukan targetnya.
+if (/elarisnoir/.test(BASE)) {
+  console.error('DILARANG menjalankan perkakas mutasi ini ke backend produksi. BASE harus 127.0.0.1.')
+  process.exit(1)
+}
 const tag = process.argv[3] || BASE
 const SU_EMAIL = process.env.PB_SU_EMAIL || 'su1@local.test'
 const SU_PW = process.env.PB_SU_PASSWORD || ''
