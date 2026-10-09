@@ -1537,9 +1537,20 @@ record; guard yang sama sudah ada di `snapshot-f57.mjs:18`). Setelah edit: `rc=0
 
 Sweep keadaan akhir grup ini, semua `rc=0`: `typecheck`; `test:findings` **25** hijau **0** merah;
 `test:snapshot` **2** hijau; `test:docs`; `test:enum`; `test:batch`; `bash -n` **13** berkas shell
-`syntax_bad=0`; gerbang H4 xtrace `0`; scan rahasia `0` berkas. Branch ini menambah **satu** file
-pemicu `deploy.yml` (`pb_hooks/ai_proxy.pb.js`) di atas empat yang sudah dicatat di M19 — jadi
-deploy nanti membawa kelompok 3 + kunci model dalam satu aksi.
+`syntax_bad=0`; gerbang H4 xtrace `0`; scan rahasia `0` berkas.
+
+Koreksi atas kalimat yang saya tulis sendiri sebelum diukur (kelas H1, dan ini kesalahan saya di
+sesi ini, bukan warisan): tadinya ditulis "branch ini menambah **satu** file pemicu `deploy.yml` di
+atas empat yang sudah dicatat di M19". Angka barusan menyatakan **4**, bukan 5. Diukur ulang dengan
+`git diff --name-only origin/main...origin/dev | grep -E '^(pb_hooks/|pb_migrations/|tools/deploy/|\.github/workflows/)'`
+-> tetap **4** file pemicu yang berbeda `main`↔`dev` (`pb_hooks/ai_proxy.pb.js`,
+`1790909763_collections_snapshot.js`, `1791526402_workspace_events_ketat.js`,
+`tools/deploy/pickertime-pb-agent.sh`), karena `pb_hooks/ai_proxy.pb.js` **sudah** ada di daftar
+M19 (`action_plan_2026-10-08.md:570`) — PR ini mengubah **isinya**, bukan menambah file pemicu
+baru. `.github/workflows/deploy.yml` tidak termasuk diff (identik di kedua branch). Bukti bahwa
+merge ke `dev` tidak men-deploy: `gh workflow view deploy.yml` -> **Total runs 5**, run terakhir
+tetap `#5` (PR #13). Deploy nanti tetap satu aksi membawa kelompok 3 + kunci model, dengan
+**4** file pemicu — dan itu angka yang dipakai untuk persetujuan pemilik.
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
