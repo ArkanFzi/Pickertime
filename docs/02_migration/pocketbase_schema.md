@@ -127,6 +127,17 @@ user lain.
      ghcr.io/muchobien/pocketbase:0.40.4 \
      migrate down 1 --dir=/pb_data --migrationsDir=/pb_migrations --hooksDir=/pb_hooks
    ```
+8. **Batas waktu di filter dikirim sebagai detik UTC (epoch) atau `"YYYY-MM-DD HH:MM:SS"` —
+   jangan `toISOString()`.** Kolom tanggal disimpan sebagai teks `YYYY-MM-DD HH:MM:SS.mmmZ`,
+   dan literal ber-huruf "T" dibandingkan PocketBase sebagai teks, bukan instans (terukur pada
+   satu baris `2026-10-08 22:00:00.000Z` dengan tiga ejaan batas untuk instans yang sama:
+   `"2026-10-08T17:00:00.000Z"` -> **0 baris**, `"2026-10-08 17:00:00.000Z"` -> **1**,
+   `1791478800` -> **1**; `' ' < 'T'` menjelaskan arah kesalahannya). Tanpa kutip pun epoch
+   diterima. Ini pernah senyap merusak statistik mingguan `app/(tabs)/insights.tsx`, yang
+   memotong minggu dengan `monday.toISOString()` sehingga setiap baris pada tanggal UTC yang
+   sama dengan batas hilang dari hitungan (F-79; nomornya F-75 dulu, diubah karena F-75/F-76/F-78
+   sudah dipakai register `openclaw-docker`). Guard: `tools/test/findings.mjs` memindai
+   pola `>= "${…toISOString()}"` di `app/ store/ lib/` dan menuntut nol.
 
 ## Menambah/mengubah koleksi
 

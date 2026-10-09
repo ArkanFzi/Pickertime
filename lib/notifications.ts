@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { Task } from '@/store/useStore';
+import { resolveLeadMinutes } from '@/lib/taskContract';
 
 // Expo Go SDK 53+ no longer supports expo-notifications remote/push features.
 // We lazy-load the module to prevent app crashes during import.
@@ -72,7 +73,7 @@ export async function scheduleTaskNotification(task: Task): Promise<string | nul
     if (status !== 'granted') return null;
 
     const startTime = new Date(task.start_time);
-    const leadMinutes = task.alarm_minutes_before || 10;
+    const leadMinutes = resolveLeadMinutes(task.alarm_minutes_before);
     const triggerDate = new Date(startTime.getTime() - leadMinutes * 60000);
 
     if (triggerDate.getTime() <= Date.now()) {

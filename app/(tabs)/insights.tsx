@@ -8,6 +8,7 @@ import { LineChart } from 'react-native-chart-kit';
 import { useStore } from '@/store/useStore';
 import { pb } from '@/lib/pocketbase';
 import { getAIInsight } from '@/lib/gemini';
+import { localWeekStart, localWeekStartEpoch } from '@/lib/localDay';
 
 const { width } = Dimensions.get('window');
 
@@ -85,17 +86,14 @@ export default function InsightsScreen() {
 
   async function loadRealData() {
     setLoadingData(true);
-    const now = new Date();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - (now.getDay() === 0 ? 6 : now.getDay() - 1));
-    monday.setHours(0, 0, 0, 0);
+    const awalMinggu = localWeekStartEpoch();
 
     let latestTrend = focusTrend;
 
     // 1. Fetch Focus Sessions
     try {
       const sessions = await pb.collection('Focus_Sessions').getFullList({
-        filter: `user = "${user!.id}" && created >= "${monday.toISOString()}"`,
+        filter: `user = "${user!.id}" && created >= ${awalMinggu}`,
       });
 
       if (sessions && sessions.length > 0) {
@@ -129,7 +127,7 @@ export default function InsightsScreen() {
 
       // 2. Fetch Weekly Completion
       const tasks = await pb.collection('Tasks').getFullList({
-        filter: `user = "${user!.id}" && start_time >= "${monday.toISOString()}"`,
+        filter: `user = "${user!.id}" && start_time >= ${awalMinggu}`,
         fields: 'is_completed',
       });
 
@@ -360,9 +358,7 @@ export default function InsightsScreen() {
 }
 
 function getWeekRange(): string {
-  const now = new Date();
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - now.getDay() + 1);
+  const monday = localWeekStart();
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
   return `${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${sunday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;

@@ -20,6 +20,19 @@ export type TaskWritePayload = {
   alarm_minutes_before?: number;
 };
 
+export const LEAD_DEFAULT_MINUTES = 10;
+
+/**
+ * Lead Smart Alarm dari nilai tersimpan. 0 adalah nilai sah ("tepat waktu") dan batas
+ * 0-1440 sudah ditegakkan server (terukur: create dengan 1441 -> HTTP 400
+ * validation_max_number_constraint), jadi `|| 10` di sisi jadwal dulu diam-diam
+ * memindahkan alarm user yang memilih 0 menjadi 10 menit sebelum mulai (F-48).
+ * Default hanya berlaku untuk payload yang tidak membawa field ini.
+ */
+export function resolveLeadMinutes(alarmMinutesBefore: number | null | undefined): number {
+  return alarmMinutesBefore ?? LEAD_DEFAULT_MINUTES;
+}
+
 /**
  * Kembalikan pesan masalah atau null kalau payload aman ditulis.
  * Aturan ini meniru yang ditegakkan server (title wajib, category/priority select),
