@@ -652,7 +652,7 @@ hijau — blok F-60 membaca isi file ini, jadi perubahannya ikut dinilai gerbang
 **Koreksi angka blast radius (kelas H1, kesalahan sendiri di sesi ini).** Kalimat pertama bagian ini
 saya tulis dengan dugaan bahwa kunci model menambah **satu** file pemicu `deploy.yml` di atas **4**
 yang dicatat M19 di atas. Diukur ulang sesudah PR #33 masuk `dev`
-(`git diff --name-only origin/main...origin/dev | grep -E '^(pb_hooks/|pb_migrations/|tools/deploy/|\.github/workflows/)'`):
+(`git diff --name-only origin/main...origin/dev | grep -E -e '^(pb_hooks/|pb_migrations/|tools/deploy/)' -e '^\.github/workflows/deploy\.yml$'`):
 jumlahnya tetap **4** — `pb_hooks/ai_proxy.pb.js` sudah lebih dulu ada di daftar M19 (baris 570
 dokumen ini), jadi PR ini mengubah **isinya**, bukan menambah file pemicu baru.
 `.github/workflows/deploy.yml` tidak muncul di diff (identik di `main` dan `dev`), dan merge ke
@@ -660,3 +660,51 @@ dokumen ini), jadi PR ini mengubah **isinya**, bukan menambah file pemicu baru.
 terakhir tetap `#5`. Untuk persetujuan pemilik, angka yang berlaku: **28** commit `main`..`dev`,
 **48** file berbeda, **4** file pemicu deploy, **1** migrasi baru yang belum pernah jalan di produksi
 (`1791526402_workspace_events_ketat.js`).
+
+---
+
+## Keadaan produksi terukur, pra-deploy (2026-10-10)
+
+Diukur lewat IAP SSH ke `hermes-openclaw-vm` dengan skrip yang dijalankan `sudo python3 -` dari
+stdin (berkasnya di `tools/test/tmp/`, di-gitignore). Semuanya **baca-saja**: satu koneksi
+`sqlite3` `mode=ro`, `docker inspect`, `os.listdir`, `GET /api/records`. Tidak ada tulis, tidak ada
+`rsync`, tidak ada restart, tidak ada `ack` pesan Pub/Sub.
+
+| Yang diukur | Nilai | Artinya untuk satu deploy nanti |
+|---|---|---|
+| `_migrations` DB produksi | **10** baris. `1790909763_collections_snapshot.js` (batch 1790914253477868) dan `1790909800_ownership_create_rule.js` (1791379711184390) **sudah tercatat**; `1791526402_workspace_events_ketat.js` **tidak ada** | Hanya **1** migrasi yang akan dijalankan. Snapshot yang saya ubah di `dev` **tidak** akan jalan ulang — persis semantik yang diukur di kelompok 3, kini terkonfirmasi di produksi asli |
+| Baris per koleksi | `Profiles` **0**, `Tasks` **0**, `Focus_Sessions` **0**, `Workspace_Events` **0** | Langkah 2 migrasi (normalisasi ke `UNKNOWN` + backfill `occurred_at`) menyentuh **0** baris; sentinel `UNKNOWN` tidak akan pernah ada di produksi; `pattern` di langkah 3 tidak bisa ditolak data lama |
+| Kolom `Workspace_Events` sekarang | `created, event_type, id, is_processed, payload, updated, user` = **7**, tanpa `occurred_at`; indeks: hanya `sqlite_autoindex` | Produksi memang skema pra-kelompok-3; deploy menambah `occurred_at` + `idx_events_user_occurred` |
+| `/opt/pickertime/app/pb_migrations` | **2** berkas, sama persis dengan yang tercatat di DB; `app/pb_hooks` **1** berkas (`ai_proxy.pb.js`) | Tidak ada berkas yatim yang ditinggalkan `rsync` aditif (agen sengaja tanpa `--delete`) |
+| `/opt/pickertime/releases` | **5** entri: `run-37209210419-5788455b`, `run-37628720967-a1ef8c74`, `run-manual-144007-a896d22a`, `run-manual-167929-a896d22a`, `run-manual-36374-b81b18a2` | Baseline rollback deploy terakhir (`#5` = run 37628720967) ada di disk; `workflow_dispatch` action=rollback tinggal menyebut `deploy_id` itu |
+| Sisa rollback manual | `pb_hooks.rolledback-run-manual-36374-b81b18a2-rollback` dan `pb_migrations.rolledback-run-manual-36374-b81b18a2-rollback` masih di `$REMOTE_APP` | Tidak mengganggu deploy (di luar dua direktori yang di-rsync), tapi ini sampah hasil rollback manual — keputusan pemilik: hapus atau pindah |
+| Container | image `ghcr.io/muchobien/pocketbase:0.40.4`, status `running`, `restart_count` **0**, `StartedAt` **2026-10-07T13:28:35Z**, policy `unless-stopped` | Deploy akan restart; `restart_count 0` = tidak ada crash-loop yang sedang menutupi penyebab lain |
+| Mount | `/opt/pickertime/pb_data`→`/pb_data` (rw), `app/pb_hooks`→`/pb_hooks` (rw), `app/pb_migrations`→`/pb_migrations` (rw) | Rollback agen = tukar isi direktori ke baseline + restart, **bukan** restore DB |
+| Env container vs `/opt/pickertime/.env` | panjang **identik**: `GEMINI_API_KEY 53`, `PB_ADMIN_EMAIL 29`, `PB_ADMIN_PASSWORD 48`; **0** var bernama `MODEL`/`GEMINI_MODEL` | Invarian M8.1 saat ini utuh (file = container) → restart deploy tidak memutus kredensial. Tidak ada jalur env yang bisa mengembalikan alias model: namanya hanya bisa berubah lewat PR |
+| `data.db` | `/opt/pickertime/pb_data/data.db`, `uid 0 gid 0` mode **0600**, 217088 B, `-wal` 0 B | Catatan CFG-27 ("root:root **644**") **tidak lagi cocok** dengan keadaan terukur; mode-nya sekarang 600, jadi isinya tinggal dikoreksi, bukan dikerjakan |
+| Backup | `backup-state.env`: `LAST_OK=2026-10-08T12:49:21Z`, `LAST_KEY=pb_backup_acme_20261008124918.zip`, `LAST_SIZE=294586`; dua arsip 2026-10-08 di `pb_data/backups` | Ada titik restore sebelum keputusan "buang data" yang ditunda (field write-only, F-62) |
+| Jangkauan API dari host VM | `http://127.0.0.1:8090/api/health` -> **connection refused**; IP container `172.19.0.6:8090` -> **200**; superuser `auth-with-password` -> **200** (token 223), dan field wajibnya **`identity`**, bukan `email` | Setiap perkakas baca-produksi harus memakai `pb_ip()` seperti agen; dokumentasi yang menulis `localhost:8090` di host VM menyesatkan. Payload `email` menghasilkan **400** `identity: Cannot be blank.` |
+
+Yang **tidak** berubah oleh deploy ini: **0** baris data ditulis atau dihapus, tidak ada koleksi yang
+dibuat/dibuang, dan tidak ada satu pun kredensial yang disentuh.
+
+## Insiden sesi ini: `GEMINI_API_KEY` produksi tercetak di keluaran terminal (butuh tindakan pemilik)
+
+Probe baca-saja pertama saya mencetak `[x for x in json.loads(envs) if "GEMINI" in x]` — yaitu
+pasangan `K=V` **lengkap**, sehingga *nilai* key produksi (53 karakter, awalan `AQ.`) muncul di
+stdout dan ikut terdokumentasi di transkrip sesi ini. Nilainya **tidak** pernah saya tulis ke berkas
+ter-track mana pun (scan rahasia di bawah tetap `0`), dan sumber kebocorannya adalah perintah saya
+sendiri, bukan repo.
+
+Yang harus dilakukan pemilik, dan tidak bisa saya kerjakan karena merupakan tulisan di Google:
+**rotasi key di Google AI Studio** — perlakukan key ini sebagai sudah terbaca pihak ketiga. Setelah
+rotasi, nilai baru **wajib** masuk ke `--env-file`/`.env` **sebelum** `docker run` ulang, sesuai
+invarian M8.1; kalau hanya diganti lewat dashboard, restart berikutnya menimpanya lagi.
+
+Satu celah nyata ikut terlihat dari insiden ini: pola `secret-scan` di `ci.yml`
+(`AIza[0-9A-Za-z_-]{20,}|gsk_…|ghp_…|github_pat_…|gho_…|cfut_…`) **tidak** mengenal bentuk key
+`AQ.…`, jadi key yang bocor hari ini akan lolos dari gerbang kalau suatu saat masuk berkas.
+Ditambahkan `AQ\.[0-9A-Za-z_-]{20,}`; diukur di `dev`: `hits_lama=0`, `hits_baru=0` pada seluruh
+pohon ter-track (tidak ada positif palsu). Aturan turunannya saya tulis sebagai hutang proses H9 di
+`TODO.md`: probe environment container hanya boleh mencetak **panjang** nilai, jangan pernah
+mencetak `K=V`.

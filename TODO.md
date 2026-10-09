@@ -1542,7 +1542,7 @@ Sweep keadaan akhir grup ini, semua `rc=0`: `typecheck`; `test:findings` **25** 
 Koreksi atas kalimat yang saya tulis sendiri sebelum diukur (kelas H1, dan ini kesalahan saya di
 sesi ini, bukan warisan): tadinya ditulis "branch ini menambah **satu** file pemicu `deploy.yml` di
 atas empat yang sudah dicatat di M19". Angka barusan menyatakan **4**, bukan 5. Diukur ulang dengan
-`git diff --name-only origin/main...origin/dev | grep -E '^(pb_hooks/|pb_migrations/|tools/deploy/|\.github/workflows/)'`
+`git diff --name-only origin/main...origin/dev | grep -E -e '^(pb_hooks/|pb_migrations/|tools/deploy/)' -e '^\.github/workflows/deploy\.yml$'`
 -> tetap **4** file pemicu yang berbeda `main`↔`dev` (`pb_hooks/ai_proxy.pb.js`,
 `1790909763_collections_snapshot.js`, `1791526402_workspace_events_ketat.js`,
 `tools/deploy/pickertime-pb-agent.sh`), karena `pb_hooks/ai_proxy.pb.js` **sudah** ada di daftar
@@ -1551,6 +1551,51 @@ baru. `.github/workflows/deploy.yml` tidak termasuk diff (identik di kedua branc
 merge ke `dev` tidak men-deploy: `gh workflow view deploy.yml` -> **Total runs 5**, run terakhir
 tetap `#5` (PR #13). Deploy nanti tetap satu aksi membawa kelompok 3 + kunci model, dengan
 **4** file pemicu — dan itu angka yang dipakai untuk persetujuan pemilik.
+
+## M21 — Keadaan produksi diukur sebelum satu deploy, dan satu key bocor ke keluaran (2026-10-10)
+
+Sebelum meminta persetujuan merge `dev` -> `main`, keadaan produksi **diukur**, bukan diasumsikan.
+Alatnya: IAP SSH ke `hermes-openclaw-vm`, skrip Python dijalankan `sudo python3 -` dari stdin
+(berkas di `tools/test/tmp/`, di-gitignore). Semua **baca-saja** — `sqlite3 mode=ro`, `docker
+inspect`, `os.listdir`, `GET /api/.../records`; nol tulis, nol restart, nol ack. Tabel lengkap ada
+di `docs/04_audit/action_plan_2026-10-08.md` §"Keadaan produksi terukur, pra-deploy".
+
+| Yang menentukan keputusan | Terukur | Konsekuensi |
+|---|---|---|
+| Isi `_migrations` produksi | **10** baris; snapshot `1790909763` dan `1790909800` **sudah tercatat**, `1791526402` **belum** | Deploy menjalankan **1** migrasi. Snapshot yang diubah di `dev` tidak jalan ulang — semantik kelompok 3 terkonfirmasi di DB asli |
+| Baris data | `Profiles 0`, `Tasks 0`, `Focus_Sessions 0`, `Workspace_Events 0` | Normalisasi `UNKNOWN` + backfill `occurred_at` menyentuh **0** baris; `pattern` tidak bisa ditolak data lama; **0** akun yang bisa terputus |
+| Skema `Workspace_Events` | **7** kolom, tanpa `occurred_at`; hanya `sqlite_autoindex` | Produksi = keadaan pra-kelompok-3, persis yang dikira |
+| `app/pb_migrations` vs DB | 2 berkas = 2 migrate JS yang tercatat; `app/pb_hooks` 1 berkas | Tidak ada yatim yang ditinggalkan `rsync` aditif agen |
+| `releases/` | **5** entri, termasuk `run-37628720967-a1ef8c74` (= run deploy `#5`) | Baseline rollback deploy terakhir tersedia; rollback = `workflow_dispatch` action=rollback + `deploy_id` itu |
+| Container | `pocketbase:0.40.4`, `running`, `restart_count 0`, `StartedAt 2026-10-07T13:28:35Z`, `unless-stopped` | Tidak ada crash-loop sebelum deploy |
+| Env container vs `/opt/pickertime/.env` | panjang identik `53 / 29 / 48`; **0** var model | Invarian M8.1 utuh -> restart deploy tidak memutus kredensial; nama model hanya bisa berubah lewat PR |
+| `data.db` | uid 0 gid 0 mode **0600**, 217088 B | Catatan CFG-27 ("644") **sudah tidak cocok**; yang tersisa cuma mengoreksi catatan, bukan mengerjakan VM |
+| Backup | `LAST_OK=2026-10-08T12:49:21Z`, `pb_backup_acme_20261008124918.zip`, 294586 B | Titik restore ada sebelum keputusan "buang data" yang ditunda |
+| Jangkauan API dari host | `127.0.0.1:8090` **refused**; `172.19.0.6:8090` **200**; auth superuser **200** dengan field **`identity`** (bukan `email` -> 400) | Perkakas baca-produksi wajib pakai `pb_ip()` seperti agen; `localhost:8090` di host VM menyesatkan |
+
+**Insiden yang harus dibayar pemilik.** Probe pertama saya mencetak `[x for x in envs if "GEMINI"
+in x]` — pasangan `K=V` lengkap — sehingga **nilai** `GEMINI_API_KEY` produksi (53 karakter, awalan
+`AQ.`) muncul di stdout dan masuk transkrip sesi. Tidak ada berkas ter-track yang memuatnya
+(`secret_hits=0` sebelum dan sesudah), dan nilainya tidak saya salin ke mana pun lagi. Karena key
+sudah dianggap terbaca pihak ketiga: **rotasi di Google AI Studio**, lalu nilai baru masuk
+`--env-file`/`.env` **sebelum** `docker run` ulang (M8.1; kalau hanya lewat dashboard, restart
+berikutnya menimpanya). Rotasi adalah tulisan di Google, jadi tidak bisa saya kerjakan.
+
+Satu celah ikut kelihatan: pola `secret-scan` `ci.yml` hanya mengenal `AIza…`, `gsk_…`, `ghp_…`,
+`github_pat_…`, `gho_…`, `cfut_…` — bentuk `AQ.…` **lolos**. Ditambah `AQ\.[0-9A-Za-z_-]{20,}` dan
+diuji dua arah: sintetis `AQ.Ab8RN6SYNTHETIK…` -> **TERDETEKSI**, `AIza…` sintetis -> **TERDETEKSI**,
+`"kunci AQ pendek"` dan `AQ.abc` -> **lolos** (tidak ada positif palsu), pohon ter-track -> `hits=0`.
+`.github/workflows/ci.yml` bukan path pemicu `deploy.yml`, jadi perluasan ini tidak menambah blast
+radius; jumlah file pemicu tetap **4**.
+
+Sweep grup ini, semua `rc=0`: `typecheck`; `test:findings` **25** hijau **0** merah; `test:snapshot`
+**2** hijau; `test:docs` (23 markdown ter-track, 11 dinilai); `test:enum`; `test:batch`; `bash -n`
+**13** berkas `syntax_bad=0`; scan rahasia `hits=0` dengan pola baru. Catatan infra yang menghemat
+satu ronde panik: keempat container `pt-pb-*` sudah **`Exited (0)` 4 jam** sebelum sweep ini
+(reboot host; keempatnya tanpa `--restart`), jadi gerbang DB keluar dengan `rc=1` dan **0** baris
+hijau — bukan regresi. Perilaku alatnya benar (keluar dengan `Backend uji tidak siap di …`, bukan
+hijau palsu); pemulihannya satu baris: `docker start pt-pb-test pt-pb-snaponly pt-pb-snapfull
+pt-pb-applied`, lalu angka di atas kembali seperti semula.
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
@@ -1642,3 +1687,13 @@ tetap `#5` (PR #13). Deploy nanti tetap satu aksi membawa kelompok 3 + kunci mod
   `git status` lebih dulu), diverifikasi `wc -l` = 23 dan `git status` bersih, baru edit satu baris
   dengan `Edit`. Aturan: berkas yang sudah ada diedit pakai `Edit`; `Write` dipakai untuk berkas
   baru, atau setelah `Read` whole-file.
+- [ ] **H13** Probe environment (container, `.env`, metadata) WAJIB mencetak **panjang** atau
+  `sha256` nilai — jangan pernah mencetak pasangan `K=V`, meskipun tujuannya cuma "melihat kunci apa
+  yang ada". Pelajaran terukur 2026-10-10: `if "GEMINI" in x` di atas elemen `K=V` yang sudah
+  ter-split mencetak **nilai** `GEMINI_API_KEY` produksi ke stdout, dan itu masuk transkrip sesi;
+  key-nya sekarang wajib dirotasi pemilik. Dua aturan turunannya: (a) pola scan rahasia harus
+  mencakup bentuk key yang benar-benar dipakai proyek — `AQ.…` tidak dikenal `AIza…` dan lolos dari
+  gerbang, kini ditambahkan dan diuji dua arah; (b) klaim jangkauan juga punya kelas kegagalan yang
+  sama — `127.0.0.1:8090` di host VM **refused** sementara `172.19.0.6:8090` **200**, jadi dokumen
+  yang menulis `localhost:8090` untuk perkakas di host itu salah arah, dan payload superuser 0.40
+  memakai `identity` (mengirim `email` -> **400** `Cannot be blank.`).

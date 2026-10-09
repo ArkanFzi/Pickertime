@@ -96,7 +96,9 @@ jobs:
 
       - name: Cari pola kredensial nyata (nama file saja, isi tidak dicetak)
         run: |
-          pat='AIza[0-9A-Za-z_-]{20,}|gsk_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|gho_[A-Za-z0-9]{30,}|cfut_[A-Za-z0-9_-]{10,}'
+          # `AQ.` ditambahkan 2026-10-10: itu bentuk API key Google yang dipakai produksi, dan pola
+          # `AIza...` saja tidak mengenalinya. Jangan pernah mencetak `K=V` environment container.
+          pat='AIza[0-9A-Za-z_-]{20,}|AQ\.[0-9A-Za-z_-]{20,}|gsk_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|gho_[A-Za-z0-9]{30,}|cfut_[A-Za-z0-9_-]{10,}'
           hits=$(git grep -I -l -E "$pat" -- . | wc -l)
           echo "secret_hits=$hits"
           [ "$hits" -eq 0 ] || { git grep -I -l -E "$pat" -- .; echo "DITEMUKAN kandidat rahasia di file ter-track"; exit 1; }
