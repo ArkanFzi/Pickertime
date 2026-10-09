@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '@/store/useStore';
 import { pb } from '@/lib/pocketbase';
 import { cancelAllTaskNotifications } from '@/lib/notifications';
+import { markIntentionalLogout } from '@/lib/session';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -18,6 +19,8 @@ export default function ProfileScreen() {
     await cancelAllTaskNotifications();
     await refreshArmedAlarms();
     setTasks([]);
+    // Logout yang memang ditekan user jangan sampai dibaca sebagai sesi kedaluwarsa (F-56).
+    markIntentionalLogout();
     pb.authStore.clear();
     setUser(null);
     setProfile(null);

@@ -7,6 +7,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { pb, loadInitialAuth } from '@/lib/pocketbase';
 import { useStore } from '@/store/useStore';
+import { observeAuthChange } from '@/lib/session';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -57,6 +58,10 @@ export default function RootLayout() {
 
     // Listen to auth changes
     const removeListener = pb.authStore.onChange((token, model) => {
+      // SDK memanggil listener ini segera saat dilangganan, jadi yang memutuskan apakah
+      // token kosong itu logout, sesi kedaluwarsa, atau aplikasi yang baru start adalah
+      // observeAuthChange (F-56).
+      observeAuthChange(token, model);
       if (model) {
         setUser(model);
         loadProfile(model.id);

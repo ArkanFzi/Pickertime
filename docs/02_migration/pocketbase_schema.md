@@ -87,6 +87,34 @@ API Rules untuk tiga koleksi base: `list`/`view`/`update`/`delete` =
 Aturan ini sudah diverifikasi: user lain mendapat 0 record dan tidak bisa membaca profil
 user lain.
 
+## Permukaan auth `Profiles` — fakta terukur (2026-10-09, PocketBase 0.40.4)
+
+Diukur terhadap backend uji lokal lewat `tools/test/findings.mjs` (blok F-37/F-38) dan probe buangan
+yang sudah dihapus. Ini bagian yang paling sering ditebak dari dokumentasi dan paling mahal kalau salah,
+jadi setiap baris di bawah punya bentuk respons aslinya.
+
+| Permintaan | Hasil terukur | Konsekuensi untuk aplikasi |
+|---|---|---|
+| `POST /api/collections/Profiles/records` (email baru) | HTTP 201, `verified: false` | Signup bisa langsung dipakai: `requireVerified` mati. |
+| create dengan **email sudah dipakai** | HTTP 400 `Failed to create record.`, `data.data.email.code = "validation_not_unique"` (`"Value must be unique."`) | Satu-satunya penanda yang boleh dipakai untuk menawarkan "lanjutkan login". **Bukan** `validation_record_exists` — itu tebakan audit lama dan tidak pernah dikirim server. |
+| `authWithPassword` email **tidak ada** | HTTP 400 `Failed to authenticate.`, `data = {}` | — |
+| `authWithPassword` email ada, **password salah** | HTTP 400 `Failed to authenticate.`, `data = {}` | Kedua body **identik**, jadi pesan login tidak boleh menyalah satu bidang (`lib/authContract.ts :: describeSignInFailure`). |
+| `POST /api/collections/Profiles/requests-password-reset` | HTTP 200, isi `true` — **sama saja** untuk email terdaftar maupun tidak; `smtp.enabled=false` dan **0** baris log mailer | `true` hanya berarti permintaan diterima. Jangan pernah menulis "cek email Anda" sebagai janji (`passwordResetCopy`). |
+| hapus record milik sendiri (`delete(ownId)` dengan token user) | berhasil | Probe gate boleh bersih-bersih tanpa kredensial superuser. |
+| `Profiles.authToken.duration` | `432000` (5 hari), dan aplikasi **tidak** memanggil `authRefresh` | Sesi pasti putus; `lib/session.ts` menandai `expired` vs `logout` supaya tidak terasa seperti aplikasi hangus. |
+
+Dua jebakan yang bukan bentuk data:
+
+1. **Kunci settings mailer adalah `smtp`, bukan `mailer`.** Membaca `settings.mailer.enabled`
+   menghasilkan `undefined` — terlihat seperti "mailer aktif" padahal tidak ada objeknya.
+2. **`authStore.onChange` dipanggil segera saat dilangganan**, dengan store kosong kalau aplikasi
+   baru dibuka. Listener yang menyimpulkan "sesi berakhir" dari `model == null` akan berteriak
+   setiap cold start; butuh penjaga "pernah terautentikasi" (`lib/session.ts :: wasAuthenticated`).
+
+Aturan API yang menegakkannya: `create`/`list`/`view`/`update`/`delete` pada tiga koleksi terikat
+`@request.auth.id != "" && user = @request.auth.id` (F-03). Signup tetap bisa jalan tanpa token
+karena `Profiles.create` memakai endpoint koleksi, bukan endpoint auth.
+
 ## Proxy AI (`pb_hooks/ai_proxy.pb.js`) — kontrak, bukan vendor
 
 Route-nya **`POST /api/ai/complete`**. Nama itu sengaja menyebut pekerjaan, bukan penyedia:

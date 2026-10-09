@@ -236,3 +236,52 @@ Jebakan baru dari sesi ini:
    menempatkan pemeriksaan rute di blok F-42, jadi mutasi klien menghasilkan F-42 merah dan **F-60 hijau**
    — temuan yang justru sedang diuji. Pemeriksaan rute/penamaan dipindah ke blok F-60 dan `lib/gemini.ts`
    masuk daftar pemanggil yang wajib menunjuk `/api/ai/complete`.
+
+---
+
+## Status 2026-10-09 (sore) — gelombang 2: permukaan auth & sesi
+
+Semua angka di bawah diukur hidup terhadap `pt-pb-test` `127.0.0.1:8099` (PocketBase 0.40.4,
+bind-mount `pb_hooks/` repo ini, tanpa `GEMINI_API_KEY` nyata — tidak relevan untuk auth).
+Probe memakai akun sekali pakai yang dihapus sendiri lewat token milik record itu, jadi
+`Profiles` tidak menampung sisa.
+
+| ID | Keadaan | Bukti terukur |
+|---|---|---|
+| **F-37** | **ditutup** — kegagalan `Profiles.create` karena email sudah dipakai tidak lagi jadi jalan buntu: `isEmailAlreadyRegistered` membaca kode server, layar menawarkan "Lanjutkan masuk" dengan password yang tadi diketik, dan kalau login itu gagal arahnya jelas (reset password). Validasi klien (`validateSignUp`) dijalankan **sebelum** request. | **Koreksi tebakan audit**: rencana lama menulis `error.data.email.code === validation_record_exists`; yang benar-benar dikirim server adalah `data.data.email.code = "validation_not_unique"` (`"Value must be unique."`, HTTP 400 `Failed to create record.`). Rantai terukur di gate: create probe -> **201**, create duplikat -> **HTTP 400 `validation_not_unique`**, `authWithPassword` password sama -> **token issued**, self-delete -> **204**, sisa baris probe -> **0**. `validateSignUp` menolak **4/4** bidang kosong (nama/email/password/role) dan lolos untuk form valid. Layar: **4** slot `fieldErrors.*` inline, Alert generik `"Missing Info"` hilang. Mutasi `PB_EMAIL_TAKEN_CODE` -> `"validation_record_exists"` -> `RED F-37 … kode server aktual "validation_not_unique" berbeda dari PB_EMAIL_TAKEN_CODE="validation_record_exists"` — gerbangnya mati kalau kode server berubah, bukan kalau tebakan lama dipakai lagi. |
+| **F-38** | **sebagian** — separuh pertama (error ditelan, UI selalu "cek email") ditutup; separuh kedua (**taut reset masuk ke deep link** + nasib `verified`/`requestVerification`) masih **keputusan**, bukan kode. | Terukur: `requestPasswordReset` -> **HTTP 200 `true`** untuk email yang **tidak pernah terdaftar** maupun yang terdaftar, `smtp.enabled=false` (kunci settings-nya `smtp`; probe yang membaca `s.mailer` mencetak `mailer.enabled=undefined`), dan **0** baris log mailer. Artinya `true` bukan bukti apa pun, jadi copy sekarang hanya menjanjikan "diterima server" dan secara eksplisit menyebut syarat mailer. Catch tidak lagi membuka layar sukses: `setForgotFailed(describeResetFailure(error))` + layar kegagalan sendiri dengan tombol coba ulang (**2** state). `describeResetFailure` menghasilkan **2** pesan berbeda untuk status `0` vs `429`. Untuk login, body "email tidak ada" dan "password salah" **identik** (HTTP 400 `Failed to authenticate.`, `data = {}`) — jadi `describeSignInFailure` memakai `Email atau password tidak cocok.` dan tidak menyalah satu bidang. Mutasi catch kembali ke `setForgotSent(true)` -> `RED F-38 masih ada setForgotSent(true) di dalam catch`. Yang belum: `/_/#/auth/confirm-*` tetap menunjuk dashboard yang diblokir 404 di edge, dan `verified` tidak dibaca di mana pun. |
+| **F-56** | **ditutup untuk bagian "logout diam-diam"** — `expired` vs `logout` dibedakan di modul murni (`lib/session.ts`), `_layout.tsx` melapor ke sana, `profile.tsx` menandai dulu sebelum `authStore.clear()`, `welcome.tsx` menampilkan banner "sesi berakhir" lalu membersihkan penanda. Perpanjangan `duration`/refresh terjadwal tetap **keputusan**. | `Profiles.authToken.duration = 432000` (5 hari) dan **0** pemanggil `authRefresh` di `app/`, `store/`, `lib/` — itu yang membuat sesi pasti putus, dan gerbangnya merah kalau seseorang menambah `authRefresh` tanpa menilai ulang banner. State machine **12/12** cek lulus, termasuk dua yang menelan biaya satu sesi debugging: SDK memanggil listener `authStore.onChange` **segera** saat dilangganan, jadi fire pertama (store kosong, belum pernah auth) **tidak boleh** dibaca sebagai sesi berakhir — tanpa penjaga `wasAuthenticated`, mutasinya menghasilkan `RED F-56 cold start belum pernah auth: dapat="expired" harus=null` (4 kasus cold start sekaligus). |
+
+Alat pada keadaan akhir, semuanya `rc=0`:
+
+```
+npm run test:findings   # 16 baris hijau: F-01 02 03 34 48 79 80 42 44 45 46 47 60 37 38 56
+npm run test:enum       # 7/7 sumber + event_type
+npm run test:batch      # F-02h
+npx tsc --noEmit        # rc=0
+bash -n tools/test/*.sh tools/deploy/*.sh   # 10/10 bersih (shellcheck tidak terpasang di host ini)
+```
+
+`npm run test:preflight` tetap merah **2** baris, keduanya perangkat (`no devices/emulators found`,
+`adb reverse` kosong) — bukan regresi dari pekerjaan ini.
+
+Bukti anti-vakum: tiga mutasi terpisah (kode konstanta F-37, isi catch F-38, penjaga `wasAuthenticated`
+F-56) masing-masing membuat **barisnya sendiri** merah dan tidak menyentuh baris lain; pemulihan diverifikasi
+`md5sum` terhadap snapshot sebelum mutasi (7 file diperiksa `SAMA`, `findings.mjs` satu-satunya yang berbeda
+karena perbaikan checker di bawah).
+
+Jebakan baru dari sesi ini:
+
+1. **Checker statis yang cocok ke banyak blok bisa menilai blok yang salah.** Regex
+   `/catch \(error: any\) \{[\s\S]*?\n    \} finally/` untuk layar reset justru menangkap catch
+   `handleSignIn` (bentuknya sama), sehingga mutasi F-38 sempat merah hanya karena pemeriksaan
+   *lain* (`describeResetFailure(error)` hilang) — bukan karena pemeriksaan yang dimaksud.
+   Dippersempit dengan jangkar nama fungsi: `/async function handleForgotPassword\(\)[\s\S]*?catch …/`.
+2. **Polaritas assertion bisa terbalik dan gate justru menyalahkan kode yang benar.** Assertion
+   "harus hanya true untuk kode email unik" dulu ditulis `if (!isEmailAlreadyRegistered(...))`,
+   yang berarti menuntut **true** untuk error field lain. Run pertama berbunyi
+   `RED F-37 … tidak cukup spesifik` padahal fungsinya benar. Aturan praktis: baris baru harus
+   dilihat **dua** kali — sekali GREEN pada kode benar, sekali RED pada mutasi.
+3. **Jangan pakai string literal untuk jumlah yang bisa dihitung.** Baris F-56 sempat mengklaim
+   "lulus 14 cek" padahal ada 12. Sekarang `jumlahCek` dan `jumlahTolakan` diturunkan dari
+   eksekusi, sama seperti `KASUS.length` di F-45.

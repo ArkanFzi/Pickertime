@@ -15,6 +15,12 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { pb } from '@/lib/pocketbase';
 import { useStore } from '@/store/useStore';
+import {
+  duplicateAccountMessage,
+  isEmailAlreadyRegistered,
+  validateSignUp,
+  type AuthFieldErrors,
+} from '@/lib/authContract';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ROLES = [
@@ -35,10 +41,22 @@ export default function SignUpScreen() {
   const [role, setRole] = useState('Professional');
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({});
+
+  async function finishLogin(nextPassword: string) {
+    // Langkah kedua dari pasangan create+login. Kalau ini yang gagal, akunnya sudah ada
+    // tapi user belum masuk — keadaan yang dulu jadi jalan buntu (F-37).
+    const authData = await pb.collection('Profiles').authWithPassword(email.trim(), nextPassword);
+    if (authData?.record) {
+      setUser(authData.record);
+    }
+    router.replace('/(auth)/context-setup');
+  }
 
   async function handleSignUp() {
-    if (!email || !password || !name) {
-      Alert.alert('Missing Info', 'Please fill in all fields.');
+    const errors = validateSignUp({ name, email, password, role });
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
       return;
     }
     setLoading(true);
@@ -53,15 +71,7 @@ export default function SignUpScreen() {
         emailVisibility: true,
       });
 
-      // Auto-login after signup
-      const authData = await pb.collection('Profiles').authWithPassword(email, password);
-
-      // Set user in global state
-      if (authData?.record) {
-        setUser(authData.record);
-      }
-
-      router.replace('/(auth)/context-setup');
+      await finishLogin(password);
     } catch (error: any) {
       // Log full error for debugging
       console.error('Signup Error Full:', JSON.stringify(error?.data ?? error));
@@ -69,10 +79,26 @@ export default function SignUpScreen() {
       // Build a user-friendly error message from PocketBase field errors
       let errorMsg = error.message || 'Error creating account.';
       if (error?.data?.data) {
-        const fieldErrors = Object.entries(error.data.data)
+        const fieldMessages = Object.entries(error.data.data)
           .map(([field, err]: any) => `${field}: ${err.message}`)
           .join('\n');
-        if (fieldErrors) errorMsg = fieldErrors;
+        if (fieldMessages) errorMsg = fieldMessages;
+      }
+      // F-37: email sudah dipakai = bukan jalan buntu. Tawarkan lanjut masuk dengan
+      // password yang tadi diketik; kalau passwordnya memang beda, arahkan ke reset.
+      if (isEmailAlreadyRegistered(error)) {
+        Alert.alert('Akun sudah ada', duplicateAccountMessage(false), [
+          { text: 'Batal', style: 'cancel' },
+          {
+            text: 'Lanjutkan masuk',
+            onPress: () => {
+              finishLogin(password)
+                .then(() => setFieldErrors({}))
+                .catch(() => Alert.alert('Akun sudah ada', duplicateAccountMessage(true)));
+            },
+          },
+        ]);
+        return;
       }
       Alert.alert('Sign Up Failed', errorMsg);
     } finally {
@@ -116,11 +142,12 @@ export default function SignUpScreen() {
             {/* Email */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Email</Text>
+              {fieldErrors.email ? <Text style={styles.fieldError}>{fieldErrors.email}</Text> : null}
               <View style={styles.inputWrap}>
                 <Ionicons name="mail-outline" size={16} color="rgba(255,255,255,0.3)" style={styles.inputIcon} />
                 <TextInput
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(v) => { setEmail(v); setFieldErrors((e) => ({ ...e, email: undefined })); }}
                   placeholder="you@example.com"
                   placeholderTextColor="rgba(255,255,255,0.25)"
                   cursorColor="#00D4FF"
@@ -134,6 +161,7 @@ export default function SignUpScreen() {
             {/* Password */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Password</Text>
+              {fieldErrors.password ? <Text style={styles.fieldError}>{fieldErrors.password}</Text> : null}
               <View style={styles.inputWrap}>
                 <Ionicons name="lock-closed-outline" size={16} color="rgba(255,255,255,0.3)" style={styles.inputIcon} />
                 <TextInput
@@ -250,6 +278,11 @@ export default function SignUpScreen() {
 }
 
 const styles = StyleSheet.create({
+  fieldError: {
+    color: '#F87171',
+    fontSize: 12,
+    marginTop: 4,
+  },
   container: { flex: 1, backgroundColor: '#0A0F1D' },
   glow1: {
     position: 'absolute', top: -160, left: 0, right: 0,
