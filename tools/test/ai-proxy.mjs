@@ -8,6 +8,9 @@ if (/elarisnoir/.test(URL)) {
   process.exit(1)
 }
 
+const { requireTestBackend } = await import('./backend-guard.mjs')
+await requireTestBackend(URL)
+
 const { default: PocketBase } = await import('pocketbase')
 
 let red = 0
