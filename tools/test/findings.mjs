@@ -317,6 +317,26 @@ const tanpaKomentar = (isi) =>
     const awal = b.trimStart()
     return !(awal.startsWith('//') || awal.startsWith('*') || awal.startsWith('/*'))
   }).join('\n')
+// Snapshot dibaca sebagai data (isinya JSON murni), sama seperti gate statis lain:
+// kalau bentuknya berubah, gerbang mati dengan pesan, tidak diam-diam hijau.
+const snapshotCollections = () => {
+  const [berkas] = readdirSync(join(AKAR, 'pb_migrations')).filter((f) => /collections_snapshot\.js$/.test(f))
+  if (!berkas) {
+    console.error('Snapshot koleksi tidak ditemukan di pb_migrations — gerbang skema tidak punya sumber.')
+    process.exit(1)
+  }
+  const arr = baca(`pb_migrations/${berkas}`).match(/const snapshot = (\[[\s\S]*?\n  \];)/)
+  if (!arr) {
+    console.error(`${berkas} tidak lagi berbentuk "const snapshot = [...]" — gerbang skema kehilangan sumbernya.`)
+    process.exit(1)
+  }
+  try {
+    return { berkas, isi: JSON.parse(arr[1].replace(/;$/, '')) }
+  } catch (err) {
+    console.error(`${berkas} berisi array snapshot yang bukan JSON utuh: ${err.message} — gerbang mati, tidak diam-diam hijau.`)
+    process.exit(1)
+  }
+}
 const srcGemini = baca('lib/gemini.ts')
 const srcHook = baca('pb_hooks/ai_proxy.pb.js')
 const srcIndex = baca('app/(tabs)/index.tsx')
@@ -1074,6 +1094,86 @@ let f50row = null
     line('RED', 'F-61', `permukaan mati masih tersisa: ${rusak.join(' | ')}`)
   } else {
     line('GREEN', 'F-61', `SSO tanpa handler dicabut (${jejakSso} jejak), ${CABUT.length} dependensi nol-impor dicabut, state mati (avatar_url, onboardingComplete) hilang dari store, WEEK_LABELS=${pakai}x (masih hidup, jangan ikut "bersih-bersih")`)
+  }
+}
+
+// ── Gelombang 4 kelompok 3: skema (F-52, F-57) ────────────────────────────────────────
+// F-52: `Focus_Sessions.task` ber-`cascadeDelete: false` dan `required: false`. Diperukur
+// 2026-10-09 di backend uji: DELETE task SUKSES, sesi yang menunjuknya tetap ada dengan
+// `task = ""` (SET-NULL, bukan RESTRICT, bukan CASCADE), duration & completed utuh, dan
+// insights.tsx tidak pernah membaca `.task` sehingga riwayat mingguan tidak berubah.
+// Putusannya: riwayat fokus dipertahankan, relasinya dilepas. Yang dijaga di bawah adalah
+// putusan itu — cascade yang menyala atau delete yang ditolak sama-sama merah.
+{
+  const rusak = []
+  const judul = `F-52 hapus task ${Date.now()}`
+  const sesi = []
+  let taskId = null
+  try {
+    const task = await A.pb.collection('Tasks').create({ ...taskPayload({ title: judul }), user: A.id })
+    taskId = task.id
+    const jumlahSebelum = (await A.pb.collection('Focus_Sessions').getFullList({ filter: `user = "${A.id}"` })).length
+    const s1 = await A.pb.collection('Focus_Sessions').create({ user: A.id, task: task.id, duration_seconds: 600, completed: true })
+    const s2 = await A.pb.collection('Focus_Sessions').create({ user: A.id, task: task.id, duration_seconds: 900, completed: false })
+    sesi.push(s1.id, s2.id)
+    if (s1.task !== task.id) rusak.push(`sesi baru tidak menunjuk task (task=${JSON.stringify(s1.task)}) — uji yatim ini tidak berarti`)
+    await A.pb.collection('Tasks').delete(taskId)
+    taskId = null
+    for (const [id, dur] of [[s1.id, 600], [s2.id, 900]]) {
+      let r
+      try {
+        r = await A.pb.collection('Focus_Sessions').getOne(id)
+      } catch {
+        rusak.push(`sesi ${id} hilang bersama task — cascadeDelete menyala, riwayat fokus user ikut terhapus`)
+        continue
+      }
+      if (r.task !== '') rusak.push(`sesi ${id} masih menunjuk task yang sudah dihapus (task=${JSON.stringify(r.task)})`)
+      if (r.duration_seconds !== dur) rusak.push(`sesi ${id} kehilangan durasi (${r.duration_seconds} != ${dur})`)
+    }
+    const jumlahSesudah = (await A.pb.collection('Focus_Sessions').getFullList({ filter: `user = "${A.id}"` })).length
+    if (jumlahSesudah !== jumlahSebelum + 2) {
+      rusak.push(`jumlah sesi user berubah tanpa penghapusan eksplisit: ${jumlahSebelum} +2_create -> ${jumlahSesudah}`)
+    }
+    if (/\.task\b/.test(tanpaKomentar(srcInsights))) {
+      rusak.push('insights.tsx membaca `.task` padahal sesi yatim ber-`task = ""` — riwayat pasca-hapus bisa salah hitung')
+    }
+    const rel = snapshotCollections().isi
+      .find((c) => c.name === 'Focus_Sessions').fields.find((f) => f.name === 'task')
+    if (rel.cascadeDelete !== false) rusak.push(`snapshot: Focus_Sessions.task cascadeDelete=${rel.cascadeDelete}, putusan F-52 adalah SET-NULL (false)`)
+    if (rel.required !== false) rusak.push(`snapshot: Focus_Sessions.task required=${rel.required}, sesi yatim ber-"" akan ditolak saat simpan ulang`)
+    if (rusak.length) {
+      line('RED', 'F-52', `semantik hapus task menyimpang dari putusan: ${rusak.join(' | ')}`)
+    } else {
+      line('GREEN', 'F-52', `DELETE task sukses, ${sesi.length} sesi yatim bertahan (task="", durasi 600/900 utuh), jumlah sesi ${jumlahSebelum}->${jumlahSesudah}, insights tidak menyentuh .task, snapshot cascadeDelete=false required=false`)
+    }
+  } catch (err) {
+    line('RED', 'F-52', `probe yatim berhenti: ${err.message}`)
+  } finally {
+    for (const id of sesi) await A.pb.collection('Focus_Sessions').delete(id).catch(() => {})
+    if (taskId) await A.pb.collection('Tasks').delete(taskId).catch(() => {})
+  }
+}
+
+// F-57: snapshot harus berdiri sendiri. Snapshot lama (terukur 2026-10-09) menghasilkan
+// install fresh dengan createRule longgar + Workspace_Events 7 kolom, padahal server hasil
+// rantai penuh punya 3 createRule kepemilikan dan 8 kolom. Yang menilai kecocokan skema ke
+// file adalah tools/test/snapshot-f57.mjs (butuh install fresh, dijalankan CI); blok ini
+// menjaga sisi statis yang bisa dibaca tanpa server: createRule kepemilikan ADA di dalam
+// snapshot, bukan hanya di migrasi sesudahnya.
+{
+  const rusak = []
+  const owned = ['Tasks', 'Focus_Sessions', 'Workspace_Events']
+  const KETAT = '@request.auth.id != "" && user = @request.auth.id'
+  const { berkas, isi: snapshot } = snapshotCollections()
+  for (const nama of owned) {
+    const c = snapshot.find((x) => x.name === nama)
+    if (!c) { rusak.push(`${nama} tidak ada di snapshot`); continue }
+    if (c.createRule !== KETAT) rusak.push(`${nama}.createRule di snapshot = ${JSON.stringify(c.createRule)}`)
+  }
+  if (rusak.length) {
+    line('RED', 'F-57', `snapshot belum berdiri sendiri: ${rusak.join(' | ')}`)
+  } else {
+    line('GREEN', 'F-57', `${owned.length} createRule kepemilikan sudah di dalam ${berkas} (${owned.join(', ')}), bukan hanya di 1790909800`)
   }
 }
 

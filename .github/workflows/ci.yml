@@ -142,9 +142,32 @@ jobs:
           node tools/test/seed.mjs
           node tools/test/findings.mjs
 
+      - name: Snapshot berdiri sendiri (F-57)
+        run: |
+          # Container kedua, install fresh, HANYA file snapshot yang di-mount. Kalau ada
+          # rule atau kolom yang hidup karena migrasi sesudah snapshot, langkah ini merah
+          # sementara langkah di atas tetap hijau — itu persis lubang yang ditutup F-57.
+          mkdir -p /tmp/pb-snap-only
+          cp pb_migrations/*collections_snapshot.js /tmp/pb-snap-only/
+          docker run -d --name pb-snap -p 127.0.0.1:8091:8090 \
+            -e PB_ADMIN_EMAIL=ci@local.test \
+            -e PB_ADMIN_PASSWORD=ci-only-password-123 \
+            -v /tmp/pb-snap-only:/pb_migrations \
+            ghcr.io/muchobien/pocketbase:0.40.4
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8091/api/health >/dev/null; then echo "sehat setelah $i percobaan"; break; fi
+            sleep 2
+          done
+          PB_SNAP_URL=http://127.0.0.1:8091 \
+          PB_SU_EMAIL=ci@local.test \
+          PB_SU_PASSWORD=ci-only-password-123 \
+            node tools/test/snapshot-f57.mjs
+
       - name: Log PocketBase saat gagal
         if: failure()
-        run: docker logs pb
+        run: |
+          docker logs pb
+          docker logs pb-snap || true
 
   guard-main:
     name: main hanya hasil merge PR
