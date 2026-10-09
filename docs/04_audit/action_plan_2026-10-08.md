@@ -648,3 +648,15 @@ dan selama ini tidak punya guard produksi (yang punya hanya `snapshot-f57.mjs:18
 langsung: `rc=2` dan `rc=1` dengan pesan yang benar. Setelah edit, pemanggilan yang sah tetap
 `rc=0` dengan **21** `OK` / **0** `FAIL` (angka tidak berubah), dan `test:findings` tetap **25**
 hijau — blok F-60 membaca isi file ini, jadi perubahannya ikut dinilai gerbang.
+
+**Koreksi angka blast radius (kelas H1, kesalahan sendiri di sesi ini).** Kalimat pertama bagian ini
+saya tulis dengan dugaan bahwa kunci model menambah **satu** file pemicu `deploy.yml` di atas **4**
+yang dicatat M19 di atas. Diukur ulang sesudah PR #33 masuk `dev`
+(`git diff --name-only origin/main...origin/dev | grep -E '^(pb_hooks/|pb_migrations/|tools/deploy/|\.github/workflows/)'`):
+jumlahnya tetap **4** — `pb_hooks/ai_proxy.pb.js` sudah lebih dulu ada di daftar M19 (baris 570
+dokumen ini), jadi PR ini mengubah **isinya**, bukan menambah file pemicu baru.
+`.github/workflows/deploy.yml` tidak muncul di diff (identik di `main` dan `dev`), dan merge ke
+`dev` terbukti tidak men-deploy: `gh workflow view deploy.yml` mencetak **Total runs 5** dengan run
+terakhir tetap `#5`. Untuk persetujuan pemilik, angka yang berlaku: **28** commit `main`..`dev`,
+**48** file berbeda, **4** file pemicu deploy, **1** migrasi baru yang belum pernah jalan di produksi
+(`1791526402_workspace_events_ketat.js`).
