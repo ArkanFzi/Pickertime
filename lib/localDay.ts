@@ -3,8 +3,8 @@
 // perangkat — task 05:00 WIB disimpan 2026-10-08 22:00:00.000Z, jadi pemotongan tengah
 // malam UTC buangnya mulai 07:00 WIB (F-34); (2) literal ber-huruf "T" dibandingkan
 // PocketBase sebagai TEKS terhadap kolom tanggal yang berbentuk "YYYY-MM-DD HH:MM:SS.mmmZ"
-// karena ' ' < 'T', sehingga `start_time >= "2026-10-08T17:00:00.000Z"` -> 1 baris sementara
-// bentuk "2026-10-08 17:00:00.000Z" dan epoch -> 2 baris untuk data yang sama (F-75).
+// karena ' ' < 'T', sehingga atas satu baris data: `start_time >= "2026-10-08T17:00:00.000Z"`
+// -> 0 baris, sementara bentuk "2026-10-08 17:00:00.000Z" dan epoch 1791478800 -> 1 baris (F-79).
 export function toPbEpoch(d: Date): number {
   return Math.floor(d.getTime() / 1000);
 }

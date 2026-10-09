@@ -180,7 +180,7 @@ try {
   }
 }
 
-// F-75 — batas tanggal yang ditulis dengan huruf "T" (format ISO) dibandingkan PocketBase
+// F-79 — batas tanggal yang ditulis dengan huruf "T" (format ISO) dibandingkan PocketBase
 // sebagai TEKS terhadap kolom "YYYY-MM-DD HH:MM:SS.mmmZ" (karena ' ' < 'T'), sehingga baris
 // pada UTC-date yang sama hilang tanpa pesan. Diperiksa dua hal: jebakannya masih ada (guard
 // tidak boleh pelan-pelan jadi hiasan) dan tidak ada satu pun filter `>= "<…toISOString()>"`
@@ -205,12 +205,12 @@ const jalan = (d) => {
 }
 for (const dir of ['app', 'store', 'lib']) jalan(join(AKAR, dir))
 
-const f75Title = 'F-75 batas ISO T'
-let f75row = null
+const f79Title = 'F-79 batas ISO T'
+let f79row = null
 try {
-  await bersihkanSisa(f75Title)
-  f75row = await A.pb.collection('Tasks').create(taskPayload({
-    user: A.id, title: f75Title,
+  await bersihkanSisa(f79Title)
+  f79row = await A.pb.collection('Tasks').create(taskPayload({
+    user: A.id, title: f79Title,
     start_time: '2026-10-08T22:00:00.000Z',
     end_time: '2026-10-08T22:30:00.000Z',
   }))
@@ -219,23 +219,23 @@ try {
   const spasi = `"${jam.toISOString().replace('T', ' ')}"`
   const epoch = String(Math.floor(jam.getTime() / 1000))
   const cari75 = async (batas) => (await A.pb.collection('Tasks').getFullList({
-    filter: `user = "${A.id}" && title = "${f75Title}" && start_time >= ${batas}`,
+    filter: `user = "${A.id}" && title = "${f79Title}" && start_time >= ${batas}`,
   })).length
   const [nIso, nSpasi, nEpoch] = [await cari75(isoT), await cari75(spasi), await cari75(epoch)]
   if (nSpasi !== 1 || nEpoch !== 1) {
-    line('RED', 'F-75', `bentuk batas yang benar justru tidak menemukan baris "${f75row.start_time}" (spasi=${nSpasi}, epoch=${nEpoch})`)
+    line('RED', 'F-79', `bentuk batas yang benar justru tidak menemukan baris "${f79row.start_time}" (spasi=${nSpasi}, epoch=${nEpoch})`)
   } else if (nIso !== 0) {
-    line('RED', 'F-75', `jebakan ${isoT} tidak terbukti lagi (dapat=${nIso}) — penafsiran server berubah, guard ini harus dinilai ulang, bukan dihapus diam-diam`)
+    line('RED', 'F-79', `jebakan ${isoT} tidak terbukti lagi (dapat=${nIso}) — penafsiran server berubah, guard ini harus dinilai ulang, bukan dihapus diam-diam`)
   } else if (jejakISO.length) {
-    line('RED', 'F-75', `${jejakISO.length} filter masih membandingkan tanggal dengan literal ISO ber-"T": ${jejakISO.join(', ')}`)
+    line('RED', 'F-79', `${jejakISO.length} filter masih membandingkan tanggal dengan literal ISO ber-"T": ${jejakISO.join(', ')}`)
   } else {
-    line('GREEN', 'F-75', `baris "${f75row.start_time}": ${isoT} -> 0 baris, ${spasi} -> 1, epoch -> 1; ${jejakISO.length} filter ISO-"T" di app/store/lib`)
+    line('GREEN', 'F-79', `baris "${f79row.start_time}": ${isoT} -> 0 baris, ${spasi} -> 1, epoch -> 1; ${jejakISO.length} filter ISO-"T" di app/store/lib`)
   }
 } catch (err) {
-  line('RED', 'F-75', `probe batas ISO gagal: status=${err.status ?? '-'} ${String(err.message).slice(0, 120)}`)
+  line('RED', 'F-79', `probe batas ISO gagal: status=${err.status ?? '-'} ${String(err.message).slice(0, 120)}`)
 }
 
-// F-76 — rumus awal minggu `now.getDate() - now.getDay() + 1` melompat ke Senin BERIKUTNYA
+// F-80 — rumus awal minggu `now.getDate() - now.getDay() + 1` melompat ke Senin BERIKUTNYA
 // pada hari Minggu (terukur: 13 dari 91 tanggal 1 Sep – 30 Nov 2026 berbeda, dan itu persis
 // 13 dari 13 hari Minggu; 13 hari Sabtu cocok), dan label rentang minggu Insights memakainya.
 // localWeekStart harus selalu mendarat di Senin, termasuk hari Minggu.
@@ -250,18 +250,18 @@ try {
   const insightsSrc = readFileSync(new URL('../../app/(tabs)/insights.tsx', import.meta.url), 'utf8')
   const masihRumus = /now\.getDate\(\)\s*-\s*now\.getDay\(\)\s*\+\s*1/.test(insightsSrc)
   if (meleset.length) {
-    line('RED', 'F-76', `localWeekStart meleset pada: ${meleset.join(', ')}`)
+    line('RED', 'F-80', `localWeekStart meleset pada: ${meleset.join(', ')}`)
   } else if (masihRumus) {
-    line('RED', 'F-76', 'app/(tabs)/insights.tsx masih menghitung awal minggu dengan rumus lama (melompat pada hari Minggu)')
+    line('RED', 'F-80', 'app/(tabs)/insights.tsx masih menghitung awal minggu dengan rumus lama (melompat pada hari Minggu)')
   } else if (!insightsSrc.includes('localWeekStart(')) {
-    line('RED', 'F-76', 'app/(tabs)/insights.tsx tidak memakai localWeekStart — gerbang ini kehilangan pegangan')
+    line('RED', 'F-80', 'app/(tabs)/insights.tsx tidak memakai localWeekStart — gerbang ini kehilangan pegangan')
   } else {
-    line('GREEN', 'F-76', `Senin..Minggu (5–11 Okt 2026) semuanya mendarat di ${new Date(senin).toDateString()}; insights.tsx memakai localWeekStart`)
+    line('GREEN', 'F-80', `Senin..Minggu (5–11 Okt 2026) semuanya mendarat di ${new Date(senin).toDateString()}; insights.tsx memakai localWeekStart`)
   }
 }
 
 // Baris bukti dari pemeriksaan lain dibersihkan di akhir.
-const bukti = [f34row, f75row, spoofed].filter(Boolean)
+const bukti = [f34row, f79row, spoofed].filter(Boolean)
 for (const t of bukti) {
   await A.pb.collection('Tasks').delete(t.id).catch(() => {})
 }

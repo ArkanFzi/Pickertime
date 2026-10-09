@@ -90,7 +90,8 @@ user lain.
    `1791478800` -> **1**; `' ' < 'T'` menjelaskan arah kesalahannya). Tanpa kutip pun epoch
    diterima. Ini pernah senyap merusak statistik mingguan `app/(tabs)/insights.tsx`, yang
    memotong minggu dengan `monday.toISOString()` sehingga setiap baris pada tanggal UTC yang
-   sama dengan batas hilang dari hitungan (F-75). Guard: `tools/test/findings.mjs` memindai
+   sama dengan batas hilang dari hitungan (F-79; nomornya F-75 dulu, diubah karena F-75/F-76/F-78
+   sudah dipakai register `openclaw-docker`). Guard: `tools/test/findings.mjs` memindai
    pola `>= "${…toISOString()}"` di `app/ store/ lib/` dan menuntut nol.
 
 ## Menambah/mengubah koleksi
