@@ -473,3 +473,89 @@ Dua jebakan yang sudah pernah dicatat sesi sebelumnya muncul lagi, dan keduanya 
    `npm uninstall` supaya `package.json` + lock tetap satu sumber. Aturan yang lebih aman: kalau
    satu perintah mengubah berkas yang ada diff-nya, jangan `git checkout -- <file>` —
    balikkan bagian yang spesifik.
+
+## Status 2026-10-09 (malam 4) — gelombang 4 kelompok 3: skema (F-52, F-57)
+
+PR #30 kelompok 2 sudah masuk `dev` (`6aac31b..527aeed`) dan **tidak men-deploy apa pun** — ia
+tidak menyentuh satu pun path filter `deploy.yml`. Kelompok 3 adalah kelompok pertama yang
+menyentuhnya: branch `fix/skema-sisa` mengubah `pb_migrations/**`, jadi **merge ke `main` akan
+menyalakan `deploy.yml`** (pub/sub → agen root di VM → pasang + restart). Merge ke `dev` tetap
+aman. Ini sengaja dinyatakan ke pemilik sebelum ada PR ke `main`.
+
+**F-52 — putusannya: riwayat fokus dipertahankan, relasi dilepas.** Yang kuukur di backend uji,
+bukan disimpulkan dari kata `cascadeDelete`: `DELETE` task **sukses**, dua sesi yang menunjuknya
+**tetap ada** dengan `task = ""` (SET-NULL — bukan RESTRICT yang menolak hapus, bukan CASCADE yang
+membawa riwayat), `duration_seconds` dan `completed` utuh, jumlah sesi user **3 → 5** (+2 probe,
+0 hilang). `insights.tsx` tidak menyebut `.task` **sedikit pun**, jadi statistik mingguan tidak
+peduli pada sesi yatim — itu alasan tidak ada perubahan UI. Putusan sekarang dijaga gerbang
+`GREEN F-52`: lengan perilaku (server), lengan `cascadeDelete/required` (file), dan lengan statis
+"insights tidak menyentuh `.task`".
+
+**F-57 — snapshot sekarang berdiri sendiri.** Angka pembedanya: sebelum, install fresh dari
+snapshot saja membalas `createRule = "@request.auth.id != \"\""` untuk tiga koleksi dan
+`Workspace_Events` dengan **7** field; rantai penuh punya createRule kepemilikan dan **8** field.
+Sesudah resnap, install **snapshot-saja** identik dengan rantai penuh — 9 koleksi, **76** field,
+cocok butir demi butir — dan lintas-user write **400**, anonim **400**, milik sendiri **200**,
+`event_type` haram **400**. Enam nilai yang benar-benar berubah (3 `createRule`, `occurred_at`,
+pattern `event_type`, `oauth2.providers` di 2 koleksi); diff jadi **+43/−20** setelah kunci
+diurutkan, dari +182/−168 kalau urutan API dibiarkan.
+
+Tiga hal yang kuukur dulu sebelum menulis klaim:
+
+1. **Resnap tidak mengubah env yang sudah berjalan.** Di container throwaway yang sudah
+   menerapkan ketiga file, `listRule` ketat di dalam `1790909763` kuganti `null` lalu
+   `docker restart` → **0** kunci berubah, `Tasks.listRule` masih ketat. File yang sudah tercatat
+   diterapkan tidak dijalankan ulang. Konsekuensinya dua sisi: produksi tidak tersentuh oleh edit
+   ini, **dan** justru karena itu rantai file-lah satu-satunya yang dipulihkan saat bencana —
+   itu isi F-57.
+2. **Index `idx_events_user_occurred` tidak bisa ikut ke snapshot.** Env yang sudah menjalankan
+   #3 membalas `indexes: []` pada `GET /api/collections/Workspace_Events`, padahal index-nya ada:
+   `app.db().createIndex()` menulis di luar model koleksi. Restore dari snapshot saja kehilangan
+   index itu (akibatnya di jalur baca, bukan di aturan akses), dan memindahkannya ke `indexes`
+   snapshot membuat #3 gagal di install fresh (`createIndex` tanpa `IF NOT EXISTS`). Ditulis di
+   komentar file supaya tidak "diperbaiki" oleh orang yang tidak tahu angka ini.
+3. **`docs-contract` boleh diperketat sekarang.** Komentar lama gate itu jujur bahwa ia hanya
+   menilai "teks rule PERNAH ada di skema" dan bahwa memperbaiki itu butuh resnap (F-57). Sesudah
+   resnap, rule dibaca dari snapshot saja; migrasi sesudahnya jadi penjaga — rule yang tidak ada
+   di snapshot membuat gate mati dengan `rc=1` (dibuktikan dengan mutasi `up` pada #2).
+
+Perkakas: `tools/test/snapshot-f57.mjs` + `npm run test:snapshot` + langkah CI baru di job `schema`
+(container kedua, port 8091, hanya file snapshot yang di-mount). `test:findings` naik **22 → 24**
+hijau dan angka itu juga hijau di **install fresh replika CI** (port 8098, `pb_data` kosong, hooks
++ migrations: `pb-schema-verify` **17/17 OK**, seed 4 dibuat/1 ditolak). Lima mutasi anti-vakum
+(M1 file pra-resnap, M2b `required` di file, M3 `cascadeDelete` di file, M4 `cascadeDelete` di
+server, M5 rule asing di up-#2) semuanya tertangkap di lengan yang benar; pemulihan diverifikasi
+`md5` (snapshot `ecabd128…`, #2 `8eae8279…`) dan server uji dikembalikan sampai definisi
+`Focus_Sessions`-nya **sama butir demi butir** dengan salinan sebelum mutasi.
+
+Hal yang lahir dari menjalankan, bukan dari membaca kode:
+
+- **Gate-nya sendiri punya bug:** menghapus satu kunci dari array snapshot meninggalkan koma
+  menggantung dan `snapshot-f57.mjs` mati sebagai tumpukan `JSON.parse`. Kedua pembaca snapshot
+  sekarang mem-parse dalam `try` dan mati dengan pesan posisi. Ini jebakan kelas H1 (perkakas yang
+  gagal terdengar seperti temuan).
+- **Mount `pb_migrations` RW menuliskan artefak ke repo.** PocketBase 0.40.4 membuat file migrasi
+  otomatis setiap koleksi diubah lewat API, dan container uji mem-mount direktori migrasi repo
+  secara tulis. Mutasi M4 melahirkan `1791547748_updated_Focus_Sessions.js` +
+  `1791547785_updated_Focus_Sessions.js` di working tree. Keduanya tidak kukommit dan sudah
+  dihapus. Aturan baru untuk probe skema: mount **salinan** direktori (mis. `/tmp/pb-snap-only`),
+  jangan repo — kalau tidak, artefak mutasi ikut masuk PR dan `deploy.yml` membacanya sebagai
+  perubahan skema.
+- **Gate bisa menyalahkan server padahal environment sendiri yang kurang.** `npm run test:snapshot`
+  tanpa `PB_SU_PASSWORD` membuat PocketBase membalas *An error occurred while validating the
+  submitted data* dan tool menulis "Superuser tidak bisa masuk di http://127.0.0.1:8097" — tuduhan
+  ke backend, padahal nilai bawaan di kode memang kosong (sengaja: tidak ada rahasia di kode).
+  Sekarang ada guard `PB_SU_PASSWORD belum diisi` sebelum auth; terbukti `rc=1` dengan pesan itu,
+  dan `rc=0` + dua hijau begitu env diisi.
+- **Gate yang diperketat langsung menggigit TODO-nya sendiri.** Baris F-57 mengutip keadaan lama
+  sebagai `createRule` longgar (verbatim `@request.auth.id != ""`); setelah teks itu hilang dari
+  snapshot, gate membacanya sebagai klaim saat ini dan merah di `TODO.md:1418`. Gate tidak bisa
+  membedakan kutipan historis dari klaim — jadi kutipannya ditulis ulang jadi prosa yang eksplisit
+  menyatakan "teks itu tidak ada lagi di file". Melembangkan pengecualian file akan membuat F-57
+  kembali tak terjaga.
+
+Belum diselesaikan di kelompok ini (butuh keputusan pemilik, bukan pembersihan sunyi):
+penghapusan field write-only (`Focus_Sessions.completed`, `Workspace_Events.is_processed`/`payload`,
+`Profiles.avatar_url`) yang berarti **membuang data** lewat migrasi baru; nasib `Workspace_Events`
+(F-62); penyempitan `EVENTS` untuk `RESET_FOCUS` sementara kontrol Pause/Resume di
+`app/focus.tsx:71-76` nyata tapi tidak pernah menulis event — itu kurang tulis, bukan skema longgar.

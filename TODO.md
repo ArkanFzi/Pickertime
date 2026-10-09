@@ -1404,6 +1404,71 @@ Yang sengaja **tidak** diselesaikan di kelompok ini:
 - **Sisa F-06/F-27**: izin kalender hilang dari manifest *hasil generate*, tapi perangkat yang
   terpasang baru bersih setelah build ulang + pasang APK.
 
+## M19 — Gelombang 4 kelompok 3: skema (2026-10-09, branch `fix/skema-sisa`)
+
+Lanjutan langkah 6 urutan yang direncanakan: **F-52** (semantik hapus task vs riwayat fokus) dan
+**F-57** (snapshot yang tidak berdiri sendiri). Kelompok pertama yang menyentuh `pb_migrations/**`
+— dan `deploy.yml` punya path filter di sana, jadi **merge ke `main` menyalakan deploy ke GCP**;
+merge ke `dev` tidak. Kelompok ini tidak mengubah kode client.
+
+| ID | Putusan | Bukti terukur |
+|---|---|---|
+| **F-52** | **Riwayat fokus dipertahankan, relasinya dilepas** (SET-NULL), bukan cascade dan bukan menolak hapus. Tidak ada perubahan UI: `syncDeleteTask` tetap hapus server dulu lalu filter lokal. | Di backend uji: `DELETE /api/collections/Tasks/records/<id>` -> **sukses**; 2 sesi yang menunjuknya **tetap ada** dengan `task = ""` (tipe string), `duration_seconds` 600/900 dan `completed` utuh; jumlah sesi user **3 -> 5** (+2 probe, 0 hilang). `insights.tsx` tidak pernah menyebut `.task` (**0** muncul, baris komentar dibuang) jadi statistik mingguan tidak terpengaruh yatim. Diikat jadi gerbang `GREEN F-52` di `tools/test/findings.mjs` (perilaku + `cascadeDelete:false`/`required:false` di snapshot). |
+| **F-52 anti-vakum** | — | (a) `cascadeDelete` dinyalakan **di server** lewat `PATCH /api/collections/pbc_11562789` -> `RED F-52 … sesi bm76j0petf5eg9d hilang bersama task` + jumlah `3 +2_create -> 3`; definisi dipulihkan dan dibandingkan butir demi butir (`server == awal: True`). (b) `cascadeDelete` dinyalakan **di file saja** -> merah pada lengan snapshot, lengan perilaku tetap hijau. (c) `insights.tsx` dikasih `.task` -> merah lengan statis. |
+| **F-57** | Snapshot di-resnap dari install fresh setelah seluruh rantai jalan, sehingga `createRule` kepemilikan (F-03) dan pengetatan `Workspace_Events` (#3) ada **di dalam** file. Migrasi #2 dan #3 **tidak dihapus** — keduanya jadi no-op yang menjelaskan sejarah. | Sebelum: install fresh dari snapshot lama membalas createRule longgar untuk 3 koleksi — isinya `@request.auth.id != ""` tanpa klausa kepemilikan, dan teks itu **tidak ada lagi** di file sesudah resnap — sementara `Workspace_Events` punya **7** field; rantai penuh punya createRule kepemilikan dan **8** field. Sesudah resnap: install **snapshot-saja** = **rantai penuh**, 9 koleksi cocok butir demi butir (rule, indeks, **76** field), dan tulis-lintas-user -> **400**, anonim -> **400**, milik sendiri -> **200**, `event_type` haram -> **400**. Isian file: 3 `createRule`, `occurred_at` (date, `required:false`), pattern `event_type`, `oauth2.providers` (2 koleksi) = **6** perubahan nyata, diff **+43/−20** baris setelah kunci diurutkan (tanpa pengurutan: +182/−168). |
+| **Resnap tidak menyentuh env yang sudah jalan** | Diperiksa, bukan diasumsikan. | File applied **tidak** dijalankan ulang: di container throwaway yang sudah menerapkan ketiga migrasi, `listRule` ketat pada `1790909763` diganti `null` + `docker restart` -> **0** kunci berubah, `Tasks.listRule` masih ketat. |
+| **Index #3 tidak bisa ikut snapshot** | `idx_events_user_occurred` sengaja dibiarkan tetap dibuat oleh `app.db().createIndex()` di #3. | Env yang sudah menjalankan #3 membalas `GET /api/collections/Workspace_Events` dengan `indexes: []` — index DB-level tidak dilaporkan model koleksi, jadi snapshot tidak bisa membawanya: restore dari snapshot saja kehilangan index itu (akibatnya jalur baca, **bukan** aturan akses). Menaruhnya di `indexes` snapshot juga membuat #3 gagal di install fresh (`createIndex` tanpa IF NOT EXISTS). |
+| **`test:docs` diperketat** | Rule yang boleh dikutip dokumen hanya rule yang ada **di snapshot**; migrasi sesudah snapshot berubah peran jadi penjaga. | Komentar lama gate ini ("gate ini menilai apakah teks rule PERNAH ada di skema … itu butuh resnap (F-57)") sudah tidak benar sejak resnap, jadi dihapus. Mutasi: `up` pada #2 menugaskan rule yang tidak ada di snapshot -> `rc=1` dengan pesan `Snapshot tidak lagi berdiri sendiri (F-57) …`; dipulihkan -> `rc=0` (`md5 8eae8279…`). |
+
+Perkakas keadaan akhir, semua `rc=0`: `typecheck`; `test:findings` **24** baris hijau (sebelum
+kelompok ini 22); `test:snapshot` (baru, `npm run test:snapshot`); `test:docs`; `test:enum`;
+`test:batch`; `bash -n` 13 berkas shell (`syntax_bad=0`); gerbang H4 xtrace `0`; scan rahasia
+`0` berkas. CI mendapat langkah baru `Snapshot berdiri sendiri (F-57)` di job `schema`: container
+kedua di port 8091 yang **hanya** memuat file snapshot, lalu `tools/test/snapshot-f57.mjs`.
+Rantai penuh di-install-fresh juga dijalankan lokal sebagai replika CI (port 8098, hooks +
+migrations, `pb_data` kosong): `pb-schema-verify` **17/17 OK**, `seed` 4 task dibuat + 1 ditolak,
+`findings` **24** hijau.
+
+Anti-vakum kelompok ini: **5** mutasi (M1 file pra-resnap, M2b `required` di file saja,
+M3 `cascadeDelete` di file saja, M4 `cascadeDelete` di server, M5 rule baru di up-#2), **5**
+tertangkap pada lengan yang benar — M1 sengaja hanya menyentuh lengan perilaku (`skema==snapshot`
+tetap hijau karena server memang dibangun dari file itu), M2b/M3 sebaliknya. Pemulihan diverifikasi
+`md5`: snapshot `ecabd128…`, #2 `8eae8279…`; `providers` dihapus-then-pulih juga dicek lewat
+`md5sum -c`.
+
+Satu bug gate ditemukan oleh mutasinya sendiri: menghapus satu kunci dari array snapshot
+meninggalkan koma menggantung dan `tools/test/snapshot-f57.mjs` mati dengan tumpukan `JSON.parse`.
+Kini kedua pembaca snapshot (`snapshot-f57.mjs` dan `snapshotCollections()` di `findings.mjs`)
+membungkus parse dengan pesan `"bukan JSON utuh: <posisi>"` + `exit 1`.
+
+Bug perkakas yang sama, kelas lain: `npm run test:snapshot` tanpa `PB_SU_PASSWORD` menuduh
+backendnya ("Superuser tidak bisa masuk di http://127.0.0.1:8097") padahal nilai bawaan di kode
+memang kosong. Guard `PB_SU_PASSWORD belum diisi` sekarang mati sebelum auth — terbukti `rc=1`
+dengan pesan itu dan `rc=0` + dua hijau setelah env diisi. Dan `test:docs` yang diperketat
+menggigit baris TODO ini sendiri: kutipan verbatim rule keadaan lama dibaca sebagai klaim keadaan
+sekarang (`RED F68 TODO.md:1418`), jadi kutipannya ditulis ulang sebagai prosa yang menyebut teks
+itu tidak ada lagi di file — bukan pengecualian baru untuk gate-nya.
+
+Jebakan baru yang harus diingat (belum pernah tercatat di H1..Hn): **container uji mem-mount
+`pb_migrations` repo secara RW**, dan PocketBase 0.40.4 menulis file migrasi otomatis ke direktori
+itu setiap kali koleksi diubah lewat API. Mutasi F-52 di server melahirkan dua file di working
+tree — `1791547748_updated_Focus_Sessions.js` (up `cascadeDelete:true`) dan
+`1791547785_updated_Focus_Sessions.js` (up `false`). Keduanya **tidak di-commit** dan sudah
+dihapus; probe yang mengubah skema harus memakai salinan direktori (`/tmp/pb-snap-only`), bukan
+mount repo — kalau tidak, artefak mutasi ikut masuk PR dan `deploy.yml` menganggapnya perubahan
+skema.
+
+Yang sengaja **tidak** diselesaikan di kelompok ini:
+
+- **Field write-only** `Focus_Sessions.completed`, `Workspace_Events.is_processed` / `payload`,
+  dan `Profiles.avatar_url`: menghapus kolom = migrasi baru yang **membuang data**, jadi ini
+  keputusan pemilik, bukan pembersihan sunyi. `docs/04_audit/action_plan_2026-10-08.md` mencatatnya
+  sebagai `[!] butuh kamu`.
+- **Nasib `Workspace_Events` (F-62)** dan **penyempitan `EVENTS`** (`RESET_FOCUS` belum tentu
+  mati: `app/focus.tsx:71-76` punya kontrol Pause/Resume yang tidak pernah menulis event).
+- **Narrowing `event_type`** tidak dilakukan; pattern sekarang sudah ada di dua tempat (snapshot
+  dan #3) dan `snapshot-f57.mjs` akan merah kalau keduanya sampai berselisih.
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan

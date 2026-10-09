@@ -1,5 +1,14 @@
 /// <reference path="../pb_data/types.d.ts" />
 migrate((app) => {
+  // F-57: isinya export install fresh 0.40.4 setelah seluruh rantai migrasi jalan
+  // (GET /api/collections?perPage=200, kunci created/updated dibuang, `users` tidak dibawa
+  // karena PocketBase membuatnya sendiri). createRule kepemilikan (F-03) dan pengetatan
+  // Workspace_Events sudah ada di file ini, jadi restore dari snapshot saja tidak lagi
+  // mengembalikan rule longgar. 1790909800 dan 1791526402 tetap di tempat: env yang sudah
+  // menerapkan filenya tidak menjalankannya ulang (terukur: 0 kunci berubah), dan index
+  // dari app.db().createIndex() tidak dipindah ke mari karena model koleksi tidak
+  // melaporkannya — menaruhnya di sini justru membuat #3 gagal saat install fresh.
+  // Kunci diurutkan agar resnap berikutnya hanya menampilkan perubahan nyata.
   const snapshot = [
     {
       "createRule": null,
@@ -557,7 +566,8 @@ migrate((app) => {
           "id": "",
           "name": "",
           "username": ""
-        }
+        },
+        "providers": []
       },
       "otp": {
         "duration": 180,
@@ -818,7 +828,8 @@ migrate((app) => {
           "id": "",
           "name": "",
           "username": ""
-        }
+        },
+        "providers": []
       },
       "otp": {
         "duration": 180,
@@ -855,7 +866,7 @@ migrate((app) => {
       "viewRule": "@request.auth.id != \"\" && id = @request.auth.id"
     },
     {
-      "createRule": "@request.auth.id != \"\"",
+      "createRule": "@request.auth.id != \"\" && user = @request.auth.id",
       "deleteRule": "@request.auth.id != \"\" && user = @request.auth.id",
       "fields": [
         {
@@ -1052,7 +1063,7 @@ migrate((app) => {
       "viewRule": "@request.auth.id != \"\" && user = @request.auth.id"
     },
     {
-      "createRule": "@request.auth.id != \"\"",
+      "createRule": "@request.auth.id != \"\" && user = @request.auth.id",
       "deleteRule": "@request.auth.id != \"\" && user = @request.auth.id",
       "fields": [
         {
@@ -1152,7 +1163,7 @@ migrate((app) => {
       "viewRule": "@request.auth.id != \"\" && user = @request.auth.id"
     },
     {
-      "createRule": "@request.auth.id != \"\"",
+      "createRule": "@request.auth.id != \"\" && user = @request.auth.id",
       "deleteRule": "@request.auth.id != \"\" && user = @request.auth.id",
       "fields": [
         {
@@ -1183,21 +1194,6 @@ migrate((app) => {
           "required": false,
           "system": false,
           "type": "relation"
-        },
-        {
-          "autogeneratePattern": "",
-          "help": "",
-          "hidden": false,
-          "id": "text2467634050",
-          "max": 0,
-          "min": 0,
-          "name": "event_type",
-          "pattern": "",
-          "presentable": false,
-          "primaryKey": false,
-          "required": true,
-          "system": false,
-          "type": "text"
         },
         {
           "help": "",
@@ -1239,6 +1235,33 @@ migrate((app) => {
           "presentable": false,
           "system": false,
           "type": "autodate"
+        },
+        {
+          "help": "",
+          "hidden": false,
+          "id": "date2277522715",
+          "max": "",
+          "min": "",
+          "name": "occurred_at",
+          "presentable": false,
+          "required": false,
+          "system": false,
+          "type": "date"
+        },
+        {
+          "autogeneratePattern": "",
+          "help": "",
+          "hidden": false,
+          "id": "text2467634050",
+          "max": 0,
+          "min": 0,
+          "name": "event_type",
+          "pattern": "^(START_FOCUS|STOP_FOCUS|PAUSE_FOCUS|RESET_FOCUS|SESSION_COMPLETE|UNKNOWN)$",
+          "presentable": false,
+          "primaryKey": false,
+          "required": true,
+          "system": false,
+          "type": "text"
         }
       ],
       "id": "pbc_1840989740",

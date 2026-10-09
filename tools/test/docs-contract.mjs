@@ -10,8 +10,9 @@
 // versi node di dokumen dicatat di bawah F54 — kegagalan kelas sama, ID berbeda jangan dicuri.
 //
 // Sumber kebenaran dibaca dari repo, bukan dari ingatan:
-//   pb_migrations/*collections_snapshot.js  -> nama koleksi, tipe field, nilai select
-//   pb_migrations/<ts>_*.js sesudah snapshot -> rule API efektif (snapshot mendahului F-03)
+//   pb_migrations/*collections_snapshot.js  -> nama koleksi, tipe field, nilai select, rule API
+//   pb_migrations/<ts>_*.js sesudah snapshot -> hanya diperiksa supaya tidak memperkenalkan rule
+//                                            yang hilang dari snapshot (F-57), bukan sumber kutipan
 //   .nvmrc                                  -> versi node
 //   root repo                               -> file *.example yang disebut dokumen
 // (pola event_type Workspace_Events dinilai di gate lain: tools/test/enum-contract.mjs)
@@ -60,23 +61,32 @@ const selectValues = (nama) => {
 const NVM = read('.nvmrc').trim()
 const NODE_MAJOR = Number(NVM.split('.')[0])
 
-// ── sumber kebenaran 3: rule API efektif ───────────────────────────────────────────
-// Snapshot saja TIDAK cukup: snapshot 1790909763 dibuat SEBELUM migrasi 1790909800
-// (F-03) mengikat createRule ke pemilik, jadi membaca snapshot polos akan menyebut rule
-// yang sudah lama mati di server sebagai kebenaran. Rule efektif = nilai di snapshot
-// ditambah nilai yang ditugaskan migrasi sesudah snapshot. Batasnya ditulis jujur:
-// gate ini menilai apakah sebuah teks rule PERNAH ada di skema, bukan apakah ia rule
-// milik koleksi X — itu butuh resnap (F-57).
-const SNAP_TS = Number(snapshotFile.match(/^(\d+)/)[1])
+// ── sumber kebenaran 3: rule API ───────────────────────────────────────────────────
+// Sejak resnap F-57 (2026-10-09) snapshot-lah yang memuat createRule kepemilikan (F-03).
+// Sebelum itu gate ini harus mengakui migrasi 1790909800 sebagai sumber tambahan, dan
+// batasnya ditulis jujur: yang dinilai "apakah teks rule PERNAH ada di skema". Sekarang
+// rule yang boleh dikutip dokumen hanya rule yang ADA DI DALAM snapshot. Migrasi sesudah
+// snapshot masih dibaca, tapi perannya berubah jadi penjaga: teks rule yang muncul di sana
+// tanpa ada di snapshot berarti snapshot sudah tidak berdiri sendiri — lubang F-57 yang
+// sama, dan gate ini mati dengan pesan, bukan diam-diam hijau.
 const RULE_SET = new Set()
 for (const c of appCollections) {
   for (const k of ['listRule', 'viewRule', 'createRule', 'updateRule', 'deleteRule']) RULE_SET.add(c[k] ?? null)
 }
+const SNAP_TS = Number(snapshotFile.match(/^(\d+)/)[1])
 const MIG_DIR = join(ROOT, 'pb_migrations')
+const LUAR_SNAPSHOT = []
 for (const f of readdirSync(MIG_DIR).filter((x) => /^\d+_.*\.js$/.test(x) && Number(x.match(/^(\d+)/)[1]) > SNAP_TS).sort()) {
   const srcMig = read(join('pb_migrations', f))
   const up = srcMig.split(/\}\s*,\s*\(app\)\s*=>/)[0] // hanya naik — bagian down memuat nilai lama
-  for (const m of up.matchAll(/([A-Za-z]*Rule)\s*=\s*(?:'([^']*)'|"([^"]*)")/g)) RULE_SET.add(m[2] ?? m[3])
+  for (const m of up.matchAll(/([A-Za-z]*Rule)\s*=\s*(?:'([^']*)'|"([^"]*)")/g)) {
+    const nilai = m[2] ?? m[3]
+    if (!RULE_SET.has(nilai)) LUAR_SNAPSHOT.push(`${f} :: ${m[1]} = ${JSON.stringify(nilai)}`)
+  }
+}
+if (LUAR_SNAPSHOT.length) {
+  console.error(`Snapshot tidak lagi berdiri sendiri (F-57) — rule hanya ada di migrasi sesudah snapshot:\n  ${LUAR_SNAPSHOT.join('\n  ')}\nResnap snapshot, jangan tambahkan sumber ke gate ini.`)
+  process.exit(1)
 }
 const RULE_TULIS = [...RULE_SET].filter((r) => typeof r === 'string' && r.length > 0)
 
@@ -196,7 +206,7 @@ for (const rel of tracked) {
       // nilai di dalam kutipannya, kalau tidak klaim yang benar akan jadi merah.
       const teks = m[1].replace(/^[A-Za-z]*Rule\s*[:=]\s*/, '').trim().replace(/^['"]|['"]$/g, '').trim()
       if (!RULE_SET.has(teks)) {
-        catat('F68', rel, i + 1, `rule "${teks}" tidak pernah ada di skema (snapshot + migrasi); yang ada: ${RULE_TULIS.join(' | ')}`)
+        catat('F68', rel, i + 1, `rule "${teks}" tidak ada di snapshot (sumber tunggal sejak F-57); yang ada: ${RULE_TULIS.join(' | ')}`)
       }
     }
   }

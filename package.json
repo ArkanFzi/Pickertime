@@ -12,6 +12,7 @@
     "test:seed": "node tools/test/seed.mjs",
     "test:enum": "node tools/test/enum-contract.mjs",
     "test:docs": "node tools/test/docs-contract.mjs",
+    "test:snapshot": "bash tools/test/node-gate.sh node tools/test/snapshot-f57.mjs",
     "test:findings": "bash tools/test/node-gate.sh node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/test/findings.mjs",
     "test:batch": "bash tools/test/node-gate.sh node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/test/task-batch.mjs",
     "test:ai-proxy": "bash tools/test/node-gate.sh node tools/test/ai-proxy.mjs",
