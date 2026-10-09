@@ -1250,6 +1250,52 @@ catch reset -> setForgotSent(true)
 - **Bukti perangkat**: banner "sesi berakhir" dan Alert "Lanjutkan masuk" belum pernah dilihat di ponsel;
   keduanya baru diverifikasi sebagai state machine + rantai probe.
 
+## M16 — Gelombang 5: dokumen diikat ke skema (2026-10-09, branch `docs/kontrak-dokumen`)
+
+Langkah 6 urutan yang direncanakan (gelombang 4–5, satu PR per kelompok). Kelompok ini dokumen &
+nama (F-66, F-67, F-68). Gerbang dibangun **dahulu** supaya daftar merah keluar dari perkakas,
+bukan dari saya sambil membaca dokumen.
+
+Alat baru: `tools/test/docs-contract.mjs` (`npm run test:docs`) + job CI `Kontrak dokumen terhadap
+skema`. Menilai **11** dari **23** berkas markdown ter-track; **12** dikecualikan lewat `EXCLUDE`
+yang tiap entrinya punya alasan + ID temuan.
+
+| ID | Yang diubah | Bukti terukur |
+|---|---|---|
+| **F-66** | `ai_strategy.md:12` -> "koleksi `Workspace_Events` di PocketBase"; `PROJECT_ROADMAP.md:43` -> "PocketBase + OpenClaw". `openclaw_bridge.md` **tidak** disentuh. | **2** merah -> **0**. Situs ketiga menunggu keputusan **F-70** (dikejar atau diarsip), jadi F-66 dicatat **sebagian (2/3)**, bukan selesai. |
+| **F-67** | `CLAUDE.md` + `GEMINI.md` §3 ditulis ulang; nama koleksi persis skema (PascalCase). | **19** merah (CLAUDE 9, GEMINI 9, ROADMAP 1) -> **0**. Mutasi: satu nama koleksi ditulis dengan huruf kecil semua -> tepat **1** `RED F67 GEMINI.md:44 … harus \`Profiles\``. Bentuk lama tidak ditulis ulang di baris ini supaya baris ini sendiri bisa lolos gerbang yang sama. |
+| **F-68** | Tipe field (`start_time` bukan DateTime tapi `date`), select `category` + `Other`, nilai rule API verbatim, `docs/02` §1 ditambah paragraf `required` dengan `file:line` pemakai. | **12** merah: 2 tipe, 2 select, 8 rule. Rule yang dulu ditulis dokumen (`id = @request.auth.id`, `user = @request.auth.id`) adalah **potongan**; yang diverifikasi server: `@request.auth.id != "" && id = @request.auth.id` (Profiles) dan `@request.auth.id != "" && user = @request.auth.id` (tiga base). Empat mutasi per kelas: DateTime / buang `Other` / potongan rule / `*.example` fiktif -> masing-masing tepat **1** merah. |
+| **F-54** (kelas, bukan ID F-69 audit) | Anjuran versi node mayor 18/20 di `CLAUDE.md:22`/`GEMINI.md:22` -> 22.23.2 + syarat `>= 22.18` untuk `import` langsung `.ts`. | **2** merah -> **0**; mutasi: kembalikan anjuran mayor 18 di baris 22 -> `RED F54 CLAUDE.md:22 menyarankan node v18, .nvmrc mengunci 22.23.2`. |
+
+Bukti anti-vakum (skrip sekali-pakai di `/tmp/mutasi-docs.sh`, **7** mutasi + **1** kontrol):
+tiap mutasi menghasilkan tepat **1** baris merah dengan ID yang benar, kontrol pada keadaan
+akhir **0**, dan pemulihan diverifikasi `md5sum -c` pada **4** berkas (`CLAUDE.md`, `GEMINI.md`,
+`docs/PROJECT_ROADMAP.md`, `docs/01_architecture/ai_strategy.md`) = semuanya `OK`.
+
+Rentang angka gerbang, dicatat apa adanya supaya hijaunya tidak dibaca lebih tua dari umurnya:
+**29** merah pada run pertama (2 di antaranya positif-palsih buatanku sendiri: kurung prosa
+`is_processed (F-62 — …)` dan `created (dugaan, …)` ikut dinilai sebagai klaim tipe) -> **27**
+sesudah kurung hanya dinilai bila diawali kata tipe -> **35** sesudah pemeriksaan rule API
+ditambah -> **0** sesudah dokumen diperbaiki.
+
+Batas gerbang (ditulis juga di kepala `docs-contract.mjs`):
+
+1. Rule API dinilai sebagai **himpunan** (snapshot + nilai yang ditugaskan migrasi sesudah
+   snapshot), bukan per koleksi, karena snapshot `1790909763` lebih tua dari
+   `1790909800_ownership_create_rule.js` (F-03) — itu persis F-57, jangan disamarkan.
+2. Field yang hanya ada di migrasi (`occurred_at`) tidak dinilai; nama field tak dikenal dilewati.
+3. Hanya backtick di garis yang mengandung label `Rule:`/`Rule =` yang dinilai, supaya kiasan
+   "API Rules berbasis `@request.auth.id`" di `AGENTS.md:32`/`README.md:125`/`backend.md:12,41`
+   tidak jadi merah — kontrol negatif ini terbukti di keadaan hijau.
+
+### Sisa M16
+
+- **F-66 masih 1 situs**: `docs/03_automations/openclaw_bridge.md` (baris 7 dan 14) — butuh F-70.
+- **F-68 untuk dokumen lain belum dinilaikan menyeluruh**: `README.md:120-123` menyebut field tanpa
+  tipe (lolos, memang tidak mengklaim tipe); perluasan berikutnya adalah menilai rule *per
+  koleksi* begitu F-57 resnap.
+- Tidak ada perubahan skema, kode aplikasi, atau path pemicu deploy di PR ini.
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan
@@ -1330,3 +1376,13 @@ catch reset -> setForgotSent(true)
   sudah mencetak restore — jadi pembandingan `md5sum` terhadap `git show HEAD:<file>` sekarang menjadi
   langkah pembuka, bukan langkah penutup. `md5` working tree = `md5` HEAD =
   `a6d51d25f1109eea48c45d60de37a007` sesudah dibersihkan.
+
+- [ ] **H12** DILARANG menimpa berkas yang sudah ada dengan `Write` sebelum membaca **seluruh**
+  isinya. Pelajaran M16 (2026-10-09): `docs/01_architecture/ai_strategy.md` saya tulis ulang dari
+  potongan `sed -n '5,20p'` — hasilnya §4 "Masa Depan: Local LLM" dan judul aslinya **hilang**,
+  dan yang tersisa adalah karangan saya sendiri. Ketahuan bukan karena diperiksa, tapi karena
+  `git diff --stat` melapor (11 masuk / 7 keluar) di saat perubahan yang diminta satu baris.
+  Pemulihan: `git checkout HEAD -- <file>` (aman karena berkas itu bersih di awal sesi — dicek
+  `git status` lebih dulu), diverifikasi `wc -l` = 23 dan `git status` bersih, baru edit satu baris
+  dengan `Edit`. Aturan: berkas yang sudah ada diedit pakai `Edit`; `Write` dipakai untuk berkas
+  baru, atau setelah `Read` whole-file.

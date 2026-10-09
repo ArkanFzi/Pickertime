@@ -285,3 +285,65 @@ Jebakan baru dari sesi ini:
 3. **Jangan pakai string literal untuk jumlah yang bisa dihitung.** Baris F-56 sempat mengklaim
    "lulus 14 cek" padahal ada 12. Sekarang `jumlahCek` dan `jumlahTolakan` diturunkan dari
    eksekusi, sama seperti `KASUS.length` di F-45.
+
+---
+
+## Status 2026-10-09 (malam) — gelombang 5: dokumen diikat ke skema
+
+Rencana lama berbunyi "satu PR dokumen; tambahkan gate CI kecil yang menolak kata Appwrite dan
+nama koleksi lowercase". Urutannya dibalik: **gerbang dibangun dulu**, supaya daftar merah
+dihasilkan perkakas dan bukan oleh saya sambil membaca — dokumen yang diperbaiki tanpa gerbang
+bocor lagi (pelajaran F-01/F-03).
+
+`tools/test/docs-contract.mjs` menilai **11** dari **23** berkas markdown ter-track; **12**
+dikecualikan lewat `EXCLUDE` yang tiap entrinya punya alasan + ID temuan (audit, arsip,
+`docs/03_automations/openclaw_bridge.md` menunggu F-70, `docs/05_agent/`, `.claude/`). Sumber
+kebenaran dibaca dari repo: snapshot koleksi `1790909763_collections_snapshot.js`, migrasi
+**sesudah** snapshot untuk rule API, `.nvmrc`, dan isi root repo untuk file `*.example`.
+
+| ID | Keadaan | Bukti terukur |
+|---|---|---|
+| **F-66** | **sebagian** — 2 dari 3 situs ditutup: `docs/01_architecture/ai_strategy.md:12` sekarang menulis "koleksi `Workspace_Events` di PocketBase", `docs/PROJECT_ROADMAP.md:43` menulis "PocketBase + OpenClaw". Situs ketiga (`openclaw_bridge.md`) **sengaja tidak disentuh**: seluruh doknya menulis terhadap Appwrite dan nasibnya adalah keputusan **F-70**, bukan pekerjaan mekanis. | Run pertama: **2** merah. Sekarang **0**. Mutasi "sisipkan satu baris mengandung Appwrite di CLAUDE.md" -> `RED F66 CLAUDE.md:2 menyebut Appwrite`. Kontrol negatif sudah terbukti di keadaan hijau: `AGENTS.md:32`, `README.md:125`, `backend.md:12,41` menyebut `@request.auth.id` sebagai kiasan dan **tidak** ikut merah. |
+| **F-67** | **ditutup** — `CLAUDE.md` dan `GEMINI.md` §3 ditulis ulang dengan nama PascalCase persis seperti skema; `docs/PROJECT_ROADMAP.md:39` ikut. | **19** merah pada run pertama (CLAUDE 9, GEMINI 9, ROADMAP 1) — semua bentuk `profiles`/`tasks`/`focus_sessions`/`workspace_events`. Mutasi `Profiles` -> `profiles` di GEMINI.md -> `RED F67 GEMINI.md:44 koleksi \`profiles\` harus \`Profiles\`` (tepat 1 merah). |
+| **F-68** | **ditutup untuk dokumen agen** — tipe field, daftar select, nilai rule dan referensi file contoh di `CLAUDE.md`/`GEMINI.md` sekarang sama dengan snapshot; `docs/02_migration/pocketbase_schema.md` §1 ditambah satu paragraf yang menjawab sub-klaim "`role`/`energy_pref` tidak disebut `required:false`" dengan angka dan `file:line` pemakai. | **12** merah (2 `start_time (DateTime)` vs tipe server `date`, 2 select `category` tanpa `Other`, 8 teks rule yang tidak pernah ada di skema). Semua anjuran rule lama (`id = @request.auth.id`, `user = @request.auth.id`) adalah **potongan**, bukan rule yang dikirim server; yang diverifikasi: `@request.auth.id != "" && id = @request.auth.id` (Profiles) dan `@request.auth.id != "" && user = @request.auth.id` (tiga koleksi base). Mutasi per kelas: DateTime -> 1 merah, buang `Other` -> 1 merah (`hilang: Other`), tulis potongan rule di sel header -> 1 merah, rujuk `Caddyfile.tidak.ada.example` -> 1 merah. |
+| **F-54** (kelas, bukan F-69) | **ditutup untuk dokumen** — `CLAUDE.md:22`/`GEMINI.md:22` tidak lagi menganjurkan "v18.x atau v20.x LTS"; sekarang 22.23.2 + alasan (`>= 22.18` untuk `import` langsung `.ts`). | **2** merah di run pertama; mutasi mengembalikan "versi v18.x" -> `RED F54 CLAUDE.md:22 menyarankan node v18, .nvmrc mengunci 22.23.2`. ID dicatat di bawah F-54 karena **F-69 di rencana ini adalah keputusan provider AI** — gerbang tidak boleh mencuri ID temuan lain. |
+
+Perkakas pada keadaan akhir, semuanya `rc=0`:
+
+```
+npm run typecheck      # tsc --noEmit
+npm run test:docs      # 11 dinilai / 12 dikecualikan -> "Semua klaim dokumen cocok"
+npm run test:enum      # 7/7 sumber + event_type
+npm run test:findings  # 16 baris hijau
+npm run test:batch
+```
+
+Gerbang didaftarkan sebagai `scripts.test:docs` dan job CI baru **bernama sendiri**,
+`Kontrak dokumen terhadap skema`, bukan langkah tambahan di dalam `contract` — alasan: job
+`contract` butuh `npm ci` sedangkan gerbang dokumen hanya butuh node + git, dan mencampur keduanya
+membuat satu kegagalan menyeret job yang tidak relevan. Nama ini **tidak** dipasang sebagai
+required check (required tetap `Type-check` + `Skema PocketBase + hook AI`), dan `.github/workflows/ci.yml`
+bukan path pemicu deploy — merge ini tidak men-deploy apa pun.
+
+Batas yang ditulis jujur di kepala gerbang, supaya hijaunya tidak dibaca lebih besar dari
+yang ia periksa:
+
+1. Rule API diuji sebagai **himpunan** (snapshot + nilai yang ditugaskan migrasi sesudah
+   snapshot), bukan sebagai "rule milik koleksi X". Penyebabnya terukur: snapshot
+   `1790909763` dibuat **sebelum** `1790909800_ownership_create_rule.js` (F-03), jadi
+   `Tasks.createRule` di snapshot masih `@request.auth.id != ""`. Itu persis F-57; sampai resnap,
+   gate tidak boleh mengklaim tahu pemetaan rule-per-koleksi.
+2. Field yang baru ada di migrasi (`occurred_at`) **tidak dinilai** — nama field yang tidak ada
+   di snapshot dilewati, jadi klaim salah tentang field itu lolos. Perluasan yang sama dengan (1).
+3. Tanda kurung hanya dinilai kalau diawali kata tipe yang dikenal (`date`, `DateTime`,
+   `Select:`, `.`). Versi pertama menangkap `{2,90}` karakter dan menelan prosa:
+   `TODO.md:1083` (`is_processed (F-62 — …)`) dan `pocketbase_schema.md:78`
+   (`created (dugaan, …)`) ikut merah padahal keduanya kalimat, bukan klaim tipe. Dua
+   positif-palsih buatanku sendiri itu yang menurunkan angka 29 -> 27 sebelum pemeriksaan rule.
+
+Jebakan baru dari sesi ini (berulang, jadi dituliskan lagi): **menimpa berkas dengan `Write`
+sebelum membacanya whole-file menghancurkan isi.** `docs/01_architecture/ai_strategy.md` (23
+baris di HEAD) saya tulis ulang dari potongan `sed -n '5,20p'` dan §4 "Masa Depan: Local LLM"
+hilang beserta judul aslinya. Ketahuan dari `git diff` (11 masuk / 7 keluar) lalu dipulihkan
+`git checkout HEAD -- <file>` dan diverifikasi `wc -l` = 23 + `git status` bersih sebelum edit
+satu baris yang sebenarnya. Untuk berkas yang sudah ada: baca seluruhnya, atau pakai `Edit`.

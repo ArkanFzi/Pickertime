@@ -10,7 +10,7 @@ Ekosistem produktivitas AI-powered berbasis **React Native (Expo)** di sisi mobi
 - **Backend**: PocketBase 0.40.4 self-hosted via Docker (`ghcr.io/muchobien/pocketbase:0.40.4`) di VM `hermes-openclaw-vm`.
 - **Reverse Proxy**: Cloudflare Tunnel khusus (`pickertime-pb`), SSL termination di edge Cloudflare — tidak ada port publik.
 - **AI Engine**: Google Gemini API (`gemini-flash-lite-latest`), diproxy secara aman via PocketBase JS Hook (`pb_hooks/ai_proxy.pb.js`).
-- **Automation Bridge**: OpenClaw listener via collection `workspace_events`.
+- **Automation Bridge**: OpenClaw listener via koleksi `Workspace_Events`.
 
 ---
 
@@ -19,7 +19,8 @@ Ekosistem produktivitas AI-powered berbasis **React Native (Expo)** di sisi mobi
 Sebelum mengembangkan fitur, investigasi bug, atau mengubah kode, pastikan checklist berikut terpenuhi:
 
 ### 1. Prasyarat Lingkungan Frontend
-- **Node.js**: v18.x atau v20.x LTS.
+- **Node.js**: 22.23.2, ditegakkan lewat `.nvmrc` (perkakas uji di `tools/test/` butuh
+  node >= 22.18 untuk `import` langsung berkas `.ts`).
 - **Dependencies**: `npm install`.
 - **Environment Variable**: Buat file `.env` di root project:
   ```env
@@ -38,20 +39,22 @@ Sebelum mengembangkan fitur, investigasi bug, atau mengubah kode, pastikan check
   - `PB_ENCRYPTION_KEY`: Kunci enkripsi 32-karakter untuk data PocketBase.
 - **Caddy Setup**: Gunakan `Caddyfile.example` untuk domain publik dan konfigurasi CORS header.
 
-### 3. Skema Koleksi PocketBase (Setup Wajib di Dashboard `/_/`)
-Pastikan 4 koleksi utama sudah dibuat dengan API Rules yang sesuai:
-1. **`profiles`** (atau modifikasi bawaan `users`):
-   - Field: `full_name` (Text), `role` (Select: Student, Professional, Researcher, Creator, Freelancer), `focus_goal` (Text), `energy_pref` (Select: Morning, Afternoon, Night Owl).
-   - API Rules: `id = @request.auth.id`.
-2. **`tasks`**:
-   - Field: `user` (Relation -> `profiles`), `title` (Text), `category` (Select: Work, Study, Health, Personal), `start_time` (DateTime), `duration_minutes` (Number), `is_completed` (Bool), `has_alarm` (Bool).
-   - API Rules: `user = @request.auth.id`.
-3. **`focus_sessions`**:
-   - Field: `user` (Relation -> `profiles`), `task` (Relation -> `tasks`, Optional), `duration_seconds` (Number), `completed` (Bool).
-   - API Rules: `user = @request.auth.id`.
-4. **`workspace_events`**:
-   - Field: `user` (Relation -> `profiles`), `event_type` (Text), `payload` (JSON), `is_processed` (Bool, default false).
-   - API Rules: `user = @request.auth.id`.
+### 3. Skema Koleksi PocketBase
+Empat koleksi aplikasi: `Profiles` (auth), `Tasks`, `Focus_Sessions`, `Workspace_Events`.
+Skema TIDAK dibuat manual lewat dashboard `/_/` — ia diproduksi oleh `pb_migrations/`, dan
+tabel lengkap + jebakannya ada di `docs/02_migration/pocketbase_schema.md`. Tabel di bawah ini
+hanya ringkasan; `npm run test:docs` membandingkannya dengan snapshot koleksi di repo.
+
+| Koleksi | Field yang dipakai aplikasi | Rule list/view/update/delete | Rule create |
+|---|---|---|---|
+| `Profiles` | `full_name` (Text), `email` (Email), `role` (Select: Student, Professional, Researcher, Creator, Freelancer), `focus_goal` (Text), `energy_pref` (Select: Morning, Afternoon, Night Owl), `avatar_url` (File) | `@request.auth.id != "" && id = @request.auth.id` | `""` — sengaja publik, ini jalur sign-up |
+| `Tasks` | `user` (Relation -> `Profiles`), `title` (Text), `description` (Text), `category` (Select: Work, Study, Health, Personal, Other), `priority` (Select: High, Medium, Low), `start_time` (Date), `end_time` (Date), `duration_minutes` (Number), `is_completed` (Bool), `has_alarm` (Bool), `alarm_minutes_before` (Number) | `@request.auth.id != "" && user = @request.auth.id` | `@request.auth.id != "" && user = @request.auth.id` |
+| `Focus_Sessions` | `user` (Relation -> `Profiles`), `task` (Relation -> `Tasks`), `duration_seconds` (Number), `completed` (Bool) | `@request.auth.id != "" && user = @request.auth.id` | `@request.auth.id != "" && user = @request.auth.id` |
+| `Workspace_Events` | `user` (Relation -> `Profiles`), `event_type` (Text), `occurred_at` (Date), `payload` (JSON), `is_processed` (Bool) | `@request.auth.id != "" && user = @request.auth.id` | `@request.auth.id != "" && user = @request.auth.id` |
+
+`event_type` ditegakkan lewat `pattern`, bukan `select`: mengganti tipe field akan me-DROP
+kolomnya (lihat `pb_migrations/1791526402_workspace_events_ketat.js`), dan `npm run test:enum`
+menolak nilai event yang ada di kode tapi tidak ada di pola server — atau sebaliknya.
 
 ---
 

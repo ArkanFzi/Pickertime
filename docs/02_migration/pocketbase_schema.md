@@ -47,6 +47,15 @@ API Rules: `list`/`view`/`update`/`delete` = `@request.auth.id != "" && id = @re
 `create` = `""` (string kosong = registrasi publik). Nilai `null` berarti hanya superuser yang
 boleh membuat record, dan sign-up dari aplikasi akan gagal.
 
+Rule di atas harus dibaca bersama kolom `required`: yang wajib di skema hanya `id`, `full_name`,
+`email`, `password`, `tokenKey` — `role`, `focus_goal`, `energy_pref`, `avatar_url` boleh kosong
+(dibaca dari snapshot koleksi). Kode tidak memperlakukan ketiganya sebagai opsional:
+`app/(tabs)/index.tsx:48` dan `app/(tabs)/index.tsx:134` menambal `energy_pref` dengan
+`|| 'Morning'`, `app/(tabs)/profile.tsx:68` melakukan hal yang sama di layar, dan
+`app/(tabs)/timeline.tsx:155` mengirim `role` + `focus_goal` + `energy_pref` apa adanya ke prompt
+AutoPlan. Artinya profil yang dibuat lewat API tanpa onboarding tetap sah di server, tapi AI
+bekerja dengan nilai kosong dan layar menampilkan default yang bukan pilihan user.
+
 ### 2. `Tasks` (base)
 `user` (relation → Profiles, cascade), `title` (text required), `description` (text),
 `category` (select: Work/Study/Health/Personal/Other), `priority` (select: High/Medium/Low),

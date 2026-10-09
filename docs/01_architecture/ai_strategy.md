@@ -9,7 +9,7 @@ Pickertime menggunakan pendekatan **Hybrid AI** di mana kecerdasan dibagi menjad
 ### Skenario: Menyiapkan Sesi Fokus
 1.  **User** membuka aplikasi HP dan menekan "Start Focus".
 2.  **Aplikasi HP** memanggil Gemini AI untuk membuat 3 langkah persiapan (misal: "Siapkan kopi").
-3.  **Aplikasi HP** menulis event `START_FOCUS` ke Database Appwrite.
+3.  **Aplikasi HP** menulis event `START_FOCUS` ke koleksi `Workspace_Events` di PocketBase.
 4.  **OpenClaw** (di PC) mendeteksi event tersebut.
 5.  **OpenClaw** menjalankan skrip lokal:
     *   Mengaktifkan DND Windows/Mac.
