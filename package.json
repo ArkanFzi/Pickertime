@@ -11,14 +11,14 @@
     "test:preflight": "node tools/test/preflight.mjs",
     "test:seed": "node tools/test/seed.mjs",
     "test:enum": "node tools/test/enum-contract.mjs",
-    "test:findings": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/test/findings.mjs",
-    "test:batch": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/test/task-batch.mjs",
-    "test:ai-proxy": "node tools/test/ai-proxy.mjs",
+    "test:findings": "bash tools/test/node-gate.sh node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/test/findings.mjs",
+    "test:batch": "bash tools/test/node-gate.sh node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/test/task-batch.mjs",
+    "test:ai-proxy": "bash tools/test/node-gate.sh node tools/test/ai-proxy.mjs",
     "test:device:up": "bash tools/test/device-up.sh",
     "test:device:routes": "bash tools/test/device-routes.sh",
     "test:probe": "bash tools/test/device-probe.sh",
     "test:bundle": "node tools/test/bundle-url.mjs",
-    "test:auth:inject": "node --experimental-sqlite tools/test/auth-inject.mjs"
+    "test:auth:inject": "bash tools/test/node-gate.sh node --experimental-sqlite tools/test/auth-inject.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
