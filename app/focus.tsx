@@ -15,14 +15,20 @@ export default function FocusScreen() {
   async function triggerWorkspaceEvent(type: 'START_FOCUS' | 'STOP_FOCUS' | 'PAUSE_FOCUS' | 'RESET_FOCUS' | 'SESSION_COMPLETE') {
     if (!user) return;
     try {
+      // Satu nilai waktu untuk dua tempat: `occurred_at` (kolom yang bisa difilter, dipakai
+      // loop belajar) dan `payload.timestamp` (format lama, masih dibaca pihak yang sudah
+      // ada). Kalau keduanya dihitung terpisah, selisih milidetik membuat data tidak
+      // konsisten dan kolom baru kehilangan alasannya ada.
+      const terjadi = new Date().toISOString();
       await pb.collection('Workspace_Events').create({
         user: user.id,
         event_type: type,
+        occurred_at: terjadi,
         payload: {
           task_id: activeTask?.id || null,
           task_title: activeTask?.title || 'Deep Work',
           duration_minutes: activeTask?.duration_minutes || 25,
-          timestamp: new Date().toISOString()
+          timestamp: terjadi
         },
         is_processed: false
       });

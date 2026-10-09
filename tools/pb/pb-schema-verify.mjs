@@ -21,7 +21,7 @@ const EXPECT = {
   Profiles: ['full_name', 'role', 'focus_goal', 'energy_pref', 'avatar_url', 'created', 'updated'],
   Tasks: ['user', 'title', 'description', 'category', 'priority', 'start_time', 'end_time', 'duration_minutes', 'is_completed', 'has_alarm', 'alarm_minutes_before', 'created', 'updated'],
   Focus_Sessions: ['user', 'task', 'duration_seconds', 'completed', 'created', 'updated'],
-  Workspace_Events: ['user', 'event_type', 'payload', 'is_processed', 'created', 'updated'],
+  Workspace_Events: ['user', 'event_type', 'payload', 'occurred_at', 'is_processed', 'created', 'updated'],
 }
 const su = new PocketBase(BASE); su.autoCancellation(false)
 await t('superuser.auth', async () => 'ok')
@@ -38,6 +38,19 @@ for (const [name, want] of Object.entries(EXPECT)) {
   })
 }
 
+// T-21: `event_type` tidak boleh lagi text bebas, dan `occurred_at` harus kolom date sungguhan
+// (bukan di dalam JSON) — loop belajar memfilter per hari pada kolom ini. Diperiksa terpisah
+// dari EXPECT di atas karena EXPECT hanya melihat nama kolom, bukan penegakannya.
+await t('Workspace_Events penegakan skema', async () => {
+  const raw = await fetch(BASE + '/api/collections/Workspace_Events', { headers: { Authorization: su.authStore.token } }).then(r => r.json())
+  const et = raw.fields.find(f => f.name === 'event_type')
+  const oc = raw.fields.find(f => f.name === 'occurred_at')
+  if (!et || !et.pattern) throw new Error('event_type tanpa pattern: ' + JSON.stringify(et))
+  if (!oc || oc.type !== 'date') throw new Error('occurred_at bukan date: ' + JSON.stringify(oc))
+  if (oc.required !== false) throw new Error('occurred_at wajib membuat perangkat dengan build lama gagal menulis event; harus tidak wajib')
+  return 'pattern=' + et.pattern + ' occurred_at=' + oc.type + '(required=false)'
+})
+
 const app = new PocketBase(BASE); app.autoCancellation(false)
 await t('sign-up (anon)', async () => { await app.collection('Profiles').create({ email: EMAIL, password: 'Password123!', passwordConfirm: 'Password123!', full_name: 'Verify', role: 'Professional', emailVisibility: true }); return 'created' })
 await t('sign-in', async () => { const r = await app.collection('Profiles').authWithPassword(EMAIL, 'Password123!'); return 'resKeys=' + JSON.stringify(Object.keys(r)) + ' isValid=' + app.authStore.isValid })
@@ -48,7 +61,29 @@ if (task) {
   console.log(`     ${tag} :: round-trip :: start_time=${task.start_time} end_time=${task.end_time} created=${task.created} duration=${task.duration_minutes}`)
   await t('Tasks filter(created ISO)', async () => { const l = await app.collection('Tasks').getFullList({ filter: `user = "${uid}" && created >= "${new Date(Date.now() - 864e5).toISOString()}"` }); return 'count=' + l.length })
   await t('Focus_Sessions.create', () => app.collection('Focus_Sessions').create({ user: uid, task: task.id, duration_seconds: 2700, completed: true }))
-  await t('Workspace_Events.create', () => app.collection('Workspace_Events').create({ user: uid, event_type: 'START_FOCUS', payload: { task_id: task.id, task_title: 'Verify task', duration_minutes: 45, timestamp: iso }, is_processed: false }))
+  await t('Workspace_Events.create', async () => {
+    const rec = await app.collection('Workspace_Events').create({ user: uid, event_type: 'START_FOCUS', occurred_at: iso, payload: { task_id: task.id, task_title: 'Verify task', duration_minutes: 45, timestamp: iso }, is_processed: false })
+    if (!rec.occurred_at) throw new Error('occurred_at tidak disimpan: ' + JSON.stringify(rec.occurred_at))
+    return 'occurred_at=' + rec.occurred_at + ' created=' + rec.created
+  })
+  // Penegakan tulis: nilai di luar union aplikasi harus ditolak SERVER (F-01 untuk event_type —
+  // tanpa baris ini, verifier justru selalu menulis nilai yang sah dan tidak pernah membuktikan
+  // bahwa pattern ada).
+  await t('Workspace_Events event_type haram harus 400', async () => {
+    try {
+      const rec = await app.collection('Workspace_Events').create({ user: uid, event_type: 'START_FOCUSS', occurred_at: iso, payload: { timestamp: iso }, is_processed: false })
+      throw new Error('DITERIMA padahal di luar daftar (id=' + rec.id + ') — pattern tidak ditegakkan')
+    } catch (e) {
+      if (String(e.message).startsWith('DITERIMA')) throw e
+      if (e.status !== 400) throw new Error('expected HTTP 400, got ' + e.status + ' ' + String(e.message).slice(0, 80))
+      return 'HTTP 400 ' + JSON.stringify(e.data && e.data.event_type)
+    }
+  })
+  await t('Workspace_Events filter(occurred_at rentang hari)', async () => {
+    const l = await app.collection('Workspace_Events').getFullList({ filter: `user = "${uid}" && occurred_at >= "${new Date(Date.now() - 864e5).toISOString()}"` })
+    if (!l.length) throw new Error('filter pada occurred_at mengembalikan 0 baris padahal baru saja ditulis')
+    return 'count=' + l.length
+  })
   await t('cross-user isolation (expect rejection)', async () => {
     const other = new PocketBase(BASE); other.autoCancellation(false)
     const otherEmail = 'other-' + Date.now() + '@example.com'

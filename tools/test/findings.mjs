@@ -38,6 +38,9 @@ if (/elarisnoir/.test(BASE)) {
   process.exit(1)
 }
 
+const { requireTestBackend } = await import('./backend-guard.mjs')
+await requireTestBackend(BASE)
+
 const PW = process.env.PT_SEED_PASSWORD || 'Seed-local-1234'
 async function account(email, name) {
   const pb = new PocketBase(BASE)

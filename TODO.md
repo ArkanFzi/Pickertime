@@ -1061,6 +1061,26 @@ tombol yang terbukti mati dengan koordinat terukur.
 - Data uji tertinggal di backend uji (bukan produksi): task `rzbusi008v4bbjq` "Uji-Jadwal-Bulat" dan
   `yv5v65cw6yr156z` yang start-nya sudah digeser dua kali. Tidak dihapus.
 
+## M12 — `Workspace_Events` ditegakkan (T-21 / CFG-15 jalur Hermes, 2026-10-09)
+
+Satu-satunya baris terbuka di tracker `openclaw-docker/TODO.md` yang pemiliknya "aku" dan tidak
+digerbang keputusan kamu: prasyarat loop belajar (§8 `docs/05_agent/hermes_sentral.md`).
+
+| Yang diubah | Bukti terukur |
+|---|---|
+| `pb_migrations/1791526402_workspace_events_ketat.js` (baru) | Diterapkan pada `ghcr.io/muchobien/pocketbase:0.40.4` kontainer uji (`/tmp/t21`, skema lama → seed 3 baris legacy → migrasi): `[T-21] baris=3 dinormalisasi=1 occurred_at{dariPayload=2 fallbackCreated=1} kosongSebelumSet="" pattern=6 nilai indeks=idx_events_user_occurred`. Nilai crc32 nama diverifikasi dulu dengan `node:zlib` (`event_type`=2467634050, `occurred_at`=2277522715) supaya id field identik dengan yang akan dibuat PocketBase — id tidak berubah, jadi tidak ada DROP kolom. |
+| Penegakan + siklus balik | 15 assertion (`tools/test/tmp/verify-t21.mjs`, scratch) semuanya OK: baris legacy selamat (`items=3`), baris nakal jadi `UNKNOWN` dan **masih bisa ditulis** (`PATCH is_processed → HTTP 200`), nilai di luar daftar ditolak (`HTTP 400 validation_invalid_format`), `occurred_at` round-trip, filter rentang hari menghasilkan 2 baris, indeks terlihat di `sqlite_master` **dan** dipakai perencana (`EXPLAIN QUERY PLAN → USING INDEX idx_events_user_occurred`). Rollback: `echo y \| docker run -i … migrate down 1 --dir=/pb_data` → `occurred_at` hilang, pattern `""`, indeks hilang, **7 baris tetap ada**; `migrate up` memasangkan lagi (`Applied …`). |
+| `app/focus.tsx:22-33` | Satu waktu dihitung sekali dipakai dua tempat (`occurred_at` + `payload.timestamp`) supaya keduanya tidak berbeda; `npx tsc --noEmit` rc=0. |
+| `tools/pb/pb-schema-verify.mjs` (gerbang CI "Skema PocketBase + hook AI") | `EXPECT` bertambah `occurred_at`; pemeriksaan baru: `Workspace_Events penegakan skema` (pattern non-kosong, `occurred_at` date, `required=false`), `event_type haram harus 400` (sebelum ini verifier **selalu** menulis nilai sah, jadi keberadaan pattern tidak pernah dibuktikan), `filter(occurred_at rentang hari)`. Run nyata di backend bermigrasi + `pb_hooks` terpasang: `DONE t21m :: semua pemeriksaan lulus` rc=0. Dihilangkan ulang dari pohon branch `feat/workspace-events-ketat` ini (bukan dari cabang lain): `19 OK / 0 FAIL`, termasuk `Workspace_Events event_type haram harus 400 :: HTTP 400` dan `penegakan skema :: pattern=^(…|UNKNOWN)$ occurred_at=date(required=false)`. |
+| `tools/test/enum-contract.mjs` (baru: kontrak kedua) | Union TS `app/focus.tsx` vs `EVENTS` di migrasi, dua arah + larangan menulis sentinel, dan gagal keras kalau sumber kebenarannya tidak terbaca (anti-vacuous). Keadaan benar: `GREEN … = persis pattern (5 nilai)` rc=0. Kasus negatif (union ditambah `SALAH_SATU`): `RED app/focus.tsx :: union :: SALAH_SATU tidak ada di pattern server` rc=1; berkas dipulihkan (md5 cocok). |
+| `docs/02_migration/pocketbase_schema.md` | Bagian koleksi 4 ditulis ulang sesuai keadaan; `createRule` dikoreksi (teks lama `@request.auth.id != ""` adalah kondisi pra-F-03); jebakan 4–7 ditambahkan (baris yang menabrak pattern terkunci dari tulis; ganti tipe = DROP kolom; field `json` di JSVM adalah `[]byte`; `migrate` tidak punya `--confirm`). |
+| Gerbang lain tidak ada yang berubah | `test:enum` 0, `test:batch` 0, `test:findings` 0 (`semua temuan sudah tertutup`), `test:ai-proxy` 0 (`Jalur proxy AI bersih`), `tsc` 0 — semuanya di node 22.23.2 + backend uji dengan key sampah (`INVALID-KEY-PROBE-ONLY`). Di branch T-22 (`7b3151a`): remedy `node-gate.sh` terbukti menunjuk direktori nyata. |
+
+Sengaja **tidak** disentuh: `tools/pb/pb-prod-smoke.mjs:60` (daftar field-nya dipakai melawan
+produksi; menambah `occurred_at` di sana akan merah sebelum deploy — perubahan itu harus satu
+aksi dengan `deploy.yml`, bukan sekarang), `tools/pb/pb-compat-test.mjs:108` (ia membangun
+koleksinya sendiri untuk uji SDK 0.26.9, jadi pattern tidak berlaku di sana), dan
+`is_processed` (F-62 — sisi tulis sudah aman, tapi pemakai yang menulis kembali belum ada).
 ## M13 — Gelombang "bug kalender": batas hari dan minggu dihitung dari perangkat (branch `fix/batas-hari-lokal`, 2026-10-09)
 
 Lanjutan `docs/04_audit/action_plan_2026-10-08.md`. Semua angka di bawah adalah keluaran alat terhadap
@@ -1081,7 +1101,7 @@ otak ke aplikasi (`docs/14-fase-3-finalisasi.md:44`). Nomor lama tetap tercatat 
 | **F-79** (baru, ketemu saat memvalidasi perbaikan F-34) | Dua query mingguan `app/(tabs)/insights.tsx:96` dan `:130` sekarang epoch (`>= ${awalMinggu}`). | Satu baris, tiga ejaan batas untuk instans yang sama: `"2026-10-08T17:00:00.000Z"` -> **0 baris**, `"2026-10-08 17:00:00.000Z"` -> **1**, `1791478800` -> **1**. PocketBase membandingkan literal ber-huruf "T" sebagai **teks** terhadap kolom `YYYY-MM-DD HH:MM:SS.mmmZ` (`' ' < 'T'`), jadi setiap baris yang tanggal UTC-nya sama dengan tanggal batas tidak ikut terhitung — statistik mingguan kurang tanpa pesan. Guard: pemindaian rekursif `app/ store/ lib/` atas pola `>= "${…toISOString()}"` menuntut **0** (terukur `0 filter ISO-"T" di app/store/lib`). |
 | **F-80** (baru) | `getWeekRange()` (`insights.tsx:361`) dan query mingguan memakai `localWeekStart()`. | Rumus lama `now.getDate() - now.getDay() + 1` dibandingkan atas **91 tanggal (1 Sep – 30 Nov 2026): 13 tanggal beda, dan itu persis 13 dari 13 hari Minggu** (13 hari Sabtu cocok). Contoh `Sun Oct 04 2026` -> label lama "Oct 5 – Oct 11" padahal minggu datanya "Sep 28 – Oct 4". Assert baru: Senin..Minggu 5–11 Okt 2026 semuanya mendarat di `Mon Oct 05 2026`. Catatan jujur: rumus lama di `loadRealData` (`getDay()===0 ? 6 : getDay()-1`) **tidak** menyimpang (0/31 tanggal Okt) — bug query itu murni F-79. |
 | Gerbang `tools/test/findings.mjs` | Empat blok baru (F-34/F-48/F-79/F-80), `process.env.TZ = 'Asia/Jakarta'` sebelum satu pun `Date`, helper `bersihkanSisa(title)` per judul probe, guard impor: kalau salah satu fungsi `lib/*.ts` tidak terbaca sebagai function -> `process.exit(1)`. | Keadaan bersih: `GREEN F-01 F-03 F-02 F-34 F-48 F-79 F-80` + `baris bukti dibersihkan: 2` + `semua temuan sudah tertutup.` `rc=0`. Anti-vacuous: empat mutasi terpisah (store tidak memakai helper; `notifications.ts` dipotong dari fungsi; filter ISO-"T" disuntik ke `insights.tsx:130`; `getWeekRange` kembali ke rumus lama) -> **tepat satu baris RED per mutasi, `rc=1`**, berkas dipulihkan (`md5sum -c` OK). |
-| Jebakan di dokumentasi | `docs/02_migration/pocketbase_schema.md` jebakan 4: kirim batas sebagai epoch atau `"YYYY-MM-DD HH:MM:SS"`, jangan `toISOString()`. | Angka yang dikutip di jebakan itu adalah hasil probe di baris F-79 (0 / 1 / 1), bukan perkiraan. |
+| Jebakan di dokumentasi | `docs/02_migration/pocketbase_schema.md` jebakan 8 (nomor awal 4, dinaikkan setelah M12 masuk `dev` membawa jebakan 4–7): kirim batas sebagai epoch atau `"YYYY-MM-DD HH:MM:SS"`, jangan `toISOString()`. | Angka yang dikutip di jebakan itu adalah hasil probe di baris F-79 (0 / 1 / 1), bukan perkiraan. |
 
 ### Gerbang lain yang diulang setelah perubahan (semuanya rc=0)
 
@@ -1107,11 +1127,13 @@ jadi regresi kalender ini merah di CI tanpa perubahan pipa.
   (`store/useStore.ts:177`, satu-satunya call site nyata) tidak membaca hasilnya; mengubahnya jadi `{ ok, reason }` berarti
   menambah state + chip yang menjelaskan *mengapa* alarm tidak terpasang, dan itu dibuktikan di
   perangkat (suite A-2…A-7), bukan di node.
-- **Tabrakan buku yang sudah diketahui:** M12 (`feat/workspace-events-ketat`, commit `711bd3e`) dan
-  jebakan 4–7 di `docs/02_migration/pocketbase_schema.md` ada di branch lain yang belum masuk `dev`.
-  Keduanya menambah blok di posisi yang sama, jadi merge branch ini ke `dev` akan berkonflik dengan
-  M12 di `TODO.md` dan di penomoran jebakan — diselesaikan dengan menjaga urutan M12 lalu M13 dan
-  menomori ulang jebakan ISO-"T" di belakang 4–7, bukan dengan membuang salah satu.
+- **Tabrakan buku sudah terjadi dan sudah diselesaikan:** M12 masuk `dev` lebih dulu lewat PR #23
+  (merge `d48e7ade`), lalu `origin/dev` digabungkan ke branch ini dan konflik muncul persis di dua
+  tempat yang diperkirakan — `TODO.md` (dua seksi menambah blok pada posisi yang sama) dan
+  `docs/02_migration/pocketbase_schema.md` (M12 membawa jebakan 4–7, gelombang kalender membawa
+  jebakan ISO-"T" sebagai 4). Penyelesaian yang dipakai: seksi M12 dibaca lebih dulu lalu M13, dan
+  jebakan ISO-"T" dinomori ulang menjadi **#8** sehingga daftar jadi 1–8 berurutan;
+  `tools/test/findings.mjs` menggabung tanpa konflik. Tidak ada satu pun bukti yang dibuang.
 
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
@@ -1162,3 +1184,15 @@ jadi regresi kalender ini merah di CI tanpa perubahan pipa.
   `https://iam.googleapis.com/...`. STS membandingkan secara literal, bukan setelah normalisasi URI.
   Aturan: (a) jangan filter field sebelum paham skema resource-nya; (b) setiap asumsi yang jadi
   penyebab kegagalan pipeline ditulis kembali sebagai komentar yang menyebut nilai persisnya.
+- [ ] **H10** Dugaan sebab wajib diuji dengan **eksperimen pemisah** sebelum ditulis sebagai sebab,
+  walau namanya sudah berbunyi seperti temuan. Pelajaran M12 (2026-10-09): dua dugaan saya dalam
+  satu jam, dan keduanya terbantahkan oleh satu perintah ukur. (a) "PocketBase menolak perubahan
+  skema kalau ada baris lama yang menabrak pattern" — salah; `PATCH /api/collections` dengan
+  pattern baru justru **HTTP 200** padahal baris nakalnya masih ada; penyebab sebenarnya adalah
+  loop backfill yang men-`save` baris itu **setelah** pattern terpasang. (b) "`rec.get('occurred_at')`
+  memberi placeholder tanggal nol sehingga penjaga kosong ikut salah" — juga salah; nilai terukur
+  `""`; yang benar-benar macet adalah `payload`: field `json` datang sebagai bungkus `[]byte`
+  (bukan string, bukan objek) sehingga `raw.timestamp` = `undefined` dan `dariPayload=0`.
+  Aturan: setiap kali sebuah kegagalan akan dijelaskan dengan kata "karena", jalankan lebih dulu
+  satu perintah yang membedakan penjelasan itu dari pesaingnya — di sini cukup satu PATCH API dan
+  satu `console.log(typeof raw)`.
