@@ -36,11 +36,13 @@ Target utama adalah kemandirian penuh infrastruktur untuk menghindari batasan pl
 - [x] Pindahkan logika Gemini AI ke PocketBase JS Hooks (`pb_hooks`).
 
 ### Fase 4: OpenClaw Bridge Optimization
-- [ ] Pastikan tabel `workspace_events` aktif di backend baru.
+- [ ] Jalankan pemakai jembatan di sisi PC atas koleksi `Workspace_Events`; koleksinya sudah ada
+  dan skemanya ditegakkan lewat migrasi, tapi dokumen `docs/03_automations/openclaw_bridge.md`
+  masih menunggu keputusan F-70 (dikejar atau diarsipkan).
 - [ ] Hubungkan OpenClaw di PC lokal ke server PocketBase pribadi.
 
 ## 5. System Requirements (Confirmed)
-*   **Server RAM:** 32GB (Sangat mencukupi untuk Appwrite + OpenClaw + Monitoring tools).
+*   **Server RAM:** 32GB (Sangat mencukupi untuk PocketBase + OpenClaw + Monitoring tools).
 *   **OS Recommended:** Ubuntu 22.04 LTS / Debian 11+.
 
 ---
