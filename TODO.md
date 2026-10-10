@@ -1670,14 +1670,34 @@ dan kedua salinan wrapper mirror.
 **Dua koreksi yang lahir dari kebodohanku sendiri, dicatat biar tidak berulang.** (a) Wrapper mirror dan
 unit `repo-sync` **bukan** milik VM: `sudo find /home/arkan -maxdepth 4 -name "vm-repo-sync*"` → kosong,
 `~/.config/systemd/user` → tidak ada; semuanya di **laptop** (`348` byte, `162`/`158` byte, timer
-`active`). Ini sekaligus menjelaskan kenapa `systemctl --user` dari IAP kosong (§2.5). (b) Prediksi
-penghapusan T-18 meleset besar dan aku menemukannya lewat run nyata: timer `LAST Sat 2026-10-10
-01:10:00 WIB`; `--backup-dir` T-18 menangkap **503 berkas** (`383` di `.git/`, `120` di luar) termasuk
-**121 berkas `Sekawan_Media_Tasks/asw/research`** — bukan 80/63/15 seperti dry-run. Sisa kerusakan di VM:
-`asw/research` HEAD `2868970` utuh, `ls-files` **15.772**, `git status --porcelain` **37** entri `" D"`;
-`website-porto2` HEAD `c817d98`, 0 penghapusan tracked. Retensi `backup-dir` belum ada (T-14/CFG-29) dan
-run berikutnya `2026-10-11 01:10 WIB` → keputusan T-31 sudah tidak hipotetis; dua aksinya (tahan timer,
-pulihkan 121 berkas) milik pemilik, jadi aku tidak kerjakan.
+`active`). Ini sekaligus menjelaskan kenapa `systemctl --user` dari IAP kosong (§2.5). (b) Prediksiku
+sendiri yang salah baca, bukan prediksinya T-18: timer `LAST Sat 2026-10-10 01:10:00 WIB`, run nyata
+terjadi, dan `--backup-dir` T-18 menampung **503 berkas** (`383` di `.git/`, `120` di luar) — dulu kutulis
+"termasuk **121 berkas `asw/research`**, bukan 80/63/15 seperti dry-run". Itu keliru: `--backup-dir`
+menampung berkas yang **dihapus DAN yang ditimpa**, jadi 503 adalah cacah **jaring**, bukan cacah
+penghapusan. Setelah dipilah per berkas (`cmp` working tree VM vs jaring, `PROCESSED=120` = cacah `find`):
+**16 terhapus** (15 `asw/research` + 1 `Pickertime/components/__tests__/StyledText-test.js`), **99
+ditimpa**, **5 identik**; di `.git/` **136 ditimpa** + **247 tiada** (objek repack). Prediksi dry-run T-18
+"15 berkas `asw/research`" ternyata **TEPAT**. Yang 15 itu semuanya **untracked** di git VM → tidak
+terlapor `git status` dan cuma selamat di jaring; yang 28 ditimpa di `asw/research` semuanya tracked, jadi
+HEAD `2868970` bisa jadi pembanding. `37` entri `" D"` di repo itu **bukan** kerja run tadi malam:
+`/home/arkan/backups/mirror/` cuma punya **satu** stamp, dan sampelnya (`assets/jstree/dist/jstree.js`,
+`vendor/paragonie/random_compat/dist/random_compat.phar.pubkey`) **TIDAKDIJARING** plus tidak ada di laptop
+→ berkas vendored yang sudah dibuang run sebelum jaring terpasang.
+
+**Aksi yang diambil (keputusan pemilik: "tahan timer, jangan sentuh VM").** `systemctl --user stop
+repo-sync.timer` → `rc=0`, `is-active=inactive`, `list-timers | grep -c repo-sync` = `0`; lalu `disable`
+karena `Persistent=true` + `OnCalendar=*-*-* 01:10:00` + `UnitFileState=enabled` = run catch-up seketika
+pada boot/login berikutnya (penahanan tanpa `disable` bisa lepas sendiri). Terukur:
+`Removed …/timers.target.wants/repo-sync.timer`, `UnitFileState=disabled`. Re-arm sadar =
+`systemctl --user enable --now repo-sync.timer` **setelah** T-30/T-31 diputuskan. **Nol tulis ke VM**:
+15 berkas pulih-hanya-dari-jaring, 28 berkas menunggu putusan versi mana yang menang, dan
+`StyledText-test.js` sengaja **tidak** dipulihkan (itu kerja F-55/T-22). Konsekuensi yang perlu dibaca
+bersama: run `2026-10-11 01:10 WIB` **tidak akan terjadi** (timer ditahan), jadi kerusakan tidak bertambah
+tapi dua arah drift VM↔laptop juga tidak lagi disatukan — itu persis yang harus diputuskan T-30 dulu.
+Retensi jaring belum ada (T-14/CFG-29): satu stamp = **140.179.961 byte** (`du -sh` = `136M`), sisa disk VM
+60 GB. `website-porto2` HEAD `c817d98` dengan **0** penghapusan tracked; `asw/research` HEAD `2868970`
+utuh, `git ls-files` **15.772**, `staged deletion = 0`, `modules/rnd/views` masih **301** berkas.
 
 Gerbang di HEAD: perubahan hanya dokumen, `npm run test:docs` `rc=0`, `npx tsc --noEmit` `rc=0`.
 Register infra (`config-agentic`) ditambal terpisah; `TODO.md` repo itu sedang memegang kerja belum
@@ -1791,9 +1811,16 @@ di-commit dari sesi lain, jadi baris T-31/T-18 tidak kusentuh di sana.
   (mereka hidup di kontainer), dan `/pocketbase` tidak ada (biner sebenarnya
   `/usr/local/bin/pocketbase`). Aturan: setiap klaim keberadaan/versi menyebut sisi mana yang dibaca, dan
   `not found` di satu sisi **bukan** angka untuk sisi lain — cari dulu, baru catat.
-- [ ] **H15** Angka prediksi tidak boleh menggantikan angka kejadian, apalagi untuk aksi `--delete`.
-  Pelajaran M23: dry-run T-18 merencanakan **80** penghapusan (63 di `.git/`, 15 berkas `asw/research`);
-  run nyata `2026-10-10 01:10 WIB` menghasilkan **503** (383 di `.git/`, 121 `asw/research`) dan itu baru
-  ketahuan karena aku menghitung isi `backup-dir`, bukan membaca ulang dry-run. Aturan: setelah aksi yang
-  menghapus, tagih **jumlah berkas nyata** di jaring pengaman + `git status --porcelain` sasaran; dan
-  jangan centang "ada jaring" tanpa menguji jaring itu menampung kejadian sesungguhnya.
+- [ ] **H15** Cacah sebuah direktori **bukan** nama kejadian. Pelajaran M23: dry-run T-18 merencanakan
+  **80** penghapusan (63 di `.git/`, 17 di luar → 15 `asw/research` + 2 `Pickertime/components/__tests__/`);
+  run nyata `2026-10-10 01:10 WIB` mengisi `--backup-dir` dengan **503** berkas dan aku langsung menamai
+  angka itu "penghapusan" (lalu menulis "kena 6,3× dari perkiraan") — padahal `--backup` **juga** menampung
+  berkas yang **ditimpa**. Setelah dipilah per berkas dengan `cmp`: **16 terhapus** (15 `asw/research` +
+  `components/__tests__/StyledText-test.js`), **99 ditimpa**, **5 identik**, sisanya **383** di `.git/`
+  (136 ditimpa, 247 objek repack yang memang dibuang). Prediksi T-18 soal "15 `asw/research`" **tepat**;
+  yang meleset adalah tafsir alatku sendiri — kelas kesalahan H1 (angka benar, alat salah baca). Aturan:
+  (1) kalau klaimnya "N berkas terhapus", tagih dari **definisi** kejadian, bukan dari cacah wadahnya —
+  pilah dengan `cmp`/`[ -e ]` per berkas dan sebut kedua sisi; (2) bedakan **tracked vs untracked** di
+  sasaran, karena itu menentukan apakah jaring git masih bisa jadi jalan pemulihan (`15` yang terhapus itu
+  untracked → `git status` diam, cuma jaring yang menyelamatkan); (3) jangan centang "ada jaring" tanpa
+  menguji jaring itu menampung kejadian sesungguhnya.
