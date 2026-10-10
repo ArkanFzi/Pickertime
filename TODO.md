@@ -1637,6 +1637,52 @@ Menunggu pemilik: rotasi key (lalu langkah 2-6 runbook), dan keputusan
 atas dua direktori sisa rollback manual di `/opt/pickertime/app`
 (`pb_hooks.rolledback-run-manual-36374-b81b18a2-rollback`, `pb_migrations.rolledback-…-rollback`).
 
+## M23 — TAHAP 0 dilengkapi: baseline compat terukur, dan verdict "sudah terisolasi" dikoreksi (2026-10-10)
+
+Permintaan pemilik: selesaikan **TAHAP 0** (`docs/05_agent/hermes_sentral.md` §2). F-75 sudah menutup
+bentuk mesin pada 2026-10-08, tapi butir §2.3 ("versi = kunci compat") dan §2.4 sebagian belum pernah
+berangka. Semuanya diukur hari ini lewat `gcloud` + IAP SSH, **read-only**, tanpa satu pun aksi tulis di
+VM. Bukti lengkap tertulis di §2.5/§2.6/§2.7 dokumen itu; ringkasannya:
+
+| Yang tadinya tanpa angka | Terukur 2026-10-10 |
+|---|---|
+| `free -h` hari ini (syarat "≥1 GB") | available **1850 MB** lalu **1812 MB** (dua sampel), used 2073→2112, swap terpakai 268 MB |
+| Disk | 35 GB terpakai / **60 GB sisa (37%)**; `/var/lib/docker` perangkat yang sama dengan `/` |
+| `hermes --version` | host: **command not found**; kontainer: **Hermes Agent v0.21.3 (2026.9.14) · upstream b1858f33**, `/opt/hermes`, metode `docker` |
+| `node -v` | host: tidak ada; kontainer `hermes` **v26.5.1**, `openclaw-gateway`/`webhook-proxy` **v25.9.0**; gateway = `/usr/bin/python3.13` |
+| PocketBase | **0.40.4**, biner **`/usr/local/bin/pocketbase`** (bukan `/pocketbase`), `StartedAt 2026-10-07T13:28:35Z`, **`restarts=0`** → M8.1 tidak tersentuh |
+| `cloudflared --version` | **2026.9.1 (built 2026-09-11-13:48 UTC)** di kedua kontainer; `tunnel list` = **2 tunnel** (`arkan-server` **0 koneksi**, `openclaw-webhook` 6 koneksi) |
+| Lainnya | litellm **1.103.0**, nginx **1.31.6**, Debian 12 (bookworm) kernel `6.1.0-53-cloud-amd64` |
+| Service/timer host | **43** unit `active`, hanya `exim4` + 2 agen Google yang cocok kata kunci → tidak ada service PB/Hermes (penegas CFG-28); timer: `gog-watchdog` **60 dtk**, `pickertime-pb-agent` **60 dtk**, `pickertime-pb-backup` harian `03:23 UTC` |
+| Skills | **82** `SKILL.md` / 15 kategori di `/opt/data/skills`; host `~/.hermes` → **Permission denied** sebagai `arkan` |
+| Digest untuk pin (CFG-25/T-08) | `cloudflared:latest b269e8abd07a`, `litellm:main-latest 52abe19ecef0`, `gemini-agent:latest a2f83e106473`, `chroma:latest 1e0b73a187a2`, `nginx:alpine df221db836e1`, `hermes:local 1353556275cc`, `openclaw:local-node25 713d689ae2f0` |
+| Limit memori | **masih 2 dari 10** (`hermes` 2 GiB/1,5 CPU, `gemini-agent` 1 GiB/0,5 CPU; 8 sisanya `mem=0`) — konfirmasi ketiga CFG-23 |
+
+**F-82 (nomor baru; di register infra = CFG-34).** Pengulangan pengukuran membaca sisi host dan
+menemukan `sudo -n -l` → **`(ALL : ALL) NOPASSWD: ALL`** untuk `arkan`, plus `1001(docker)` di
+`id`. Artinya klaim §2(c) "isolate sebelum channel dibuka sudah terpenuhi, TAHAP 1.1 praktis selesai"
+hanya benar untuk uid **di dalam** kontainer `hermes`; di lapisan host, proses mana pun yang jalan
+sebagai `arkan` (mirror, penulis healthcheck CFG-30, agen yang memakai `sudo -n`) adalah root box.
+Pra-uji pencabutan dikerjakan supaya tidak menebabkan putus: **nol** pemanggil `sudo` di
+`pickertime-pb-agent.sh`, `pickertime-pb-backup.sh`, seluruh unit `/etc/systemd/system/*.service|*.timer`,
+dan kedua salinan wrapper mirror.
+
+**Dua koreksi yang lahir dari kebodohanku sendiri, dicatat biar tidak berulang.** (a) Wrapper mirror dan
+unit `repo-sync` **bukan** milik VM: `sudo find /home/arkan -maxdepth 4 -name "vm-repo-sync*"` → kosong,
+`~/.config/systemd/user` → tidak ada; semuanya di **laptop** (`348` byte, `162`/`158` byte, timer
+`active`). Ini sekaligus menjelaskan kenapa `systemctl --user` dari IAP kosong (§2.5). (b) Prediksi
+penghapusan T-18 meleset besar dan aku menemukannya lewat run nyata: timer `LAST Sat 2026-10-10
+01:10:00 WIB`; `--backup-dir` T-18 menangkap **503 berkas** (`383` di `.git/`, `120` di luar) termasuk
+**121 berkas `Sekawan_Media_Tasks/asw/research`** — bukan 80/63/15 seperti dry-run. Sisa kerusakan di VM:
+`asw/research` HEAD `2868970` utuh, `ls-files` **15.772**, `git status --porcelain` **37** entri `" D"`;
+`website-porto2` HEAD `c817d98`, 0 penghapusan tracked. Retensi `backup-dir` belum ada (T-14/CFG-29) dan
+run berikutnya `2026-10-11 01:10 WIB` → keputusan T-31 sudah tidak hipotetis; dua aksinya (tahan timer,
+pulihkan 121 berkas) milik pemilik, jadi aku tidak kerjakan.
+
+Gerbang di HEAD: perubahan hanya dokumen, `npm run test:docs` `rc=0`, `npx tsc --noEmit` `rc=0`.
+Register infra (`config-agentic`) ditambal terpisah; `TODO.md` repo itu sedang memegang kerja belum
+di-commit dari sesi lain, jadi baris T-31/T-18 tidak kusentuh di sana.
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan
@@ -1737,3 +1783,17 @@ atas dua direktori sisa rollback manual di `/opt/pickertime/app`
   sama — `127.0.0.1:8090` di host VM **refused** sementara `172.19.0.6:8090` **200**, jadi dokumen
   yang menulis `localhost:8090` untuk perkakas di host itu salah arah, dan payload superuser 0.40
   memakai `identity` (mengirim `email` -> **400** `Cannot be blank.`).
+- [ ] **H14** "Tidak ada" harus menyebut **mesin**. Pelajaran M23 (2026-10-10): probes §2.3 kutafsirkan
+  sebagai daftar perintah VM, lalu `ls ~/.local/bin/vm-repo-sync.sh` → *No such file*,
+  `~/.config/systemd/user` → *No such file*, `sudo find /home/arkan -name "vm-repo-sync*"` → kosong, dan
+  kesimpulanku hampir jadi "regresi T-04". Padahal ketiga berkas itu milik **laptop** (`348`/`162`/`158`
+  byte, timer `active`). Bentuk salah yang sama: `hermes`/`node`/`cloudflared` `command not found` di host
+  (mereka hidup di kontainer), dan `/pocketbase` tidak ada (biner sebenarnya
+  `/usr/local/bin/pocketbase`). Aturan: setiap klaim keberadaan/versi menyebut sisi mana yang dibaca, dan
+  `not found` di satu sisi **bukan** angka untuk sisi lain — cari dulu, baru catat.
+- [ ] **H15** Angka prediksi tidak boleh menggantikan angka kejadian, apalagi untuk aksi `--delete`.
+  Pelajaran M23: dry-run T-18 merencanakan **80** penghapusan (63 di `.git/`, 15 berkas `asw/research`);
+  run nyata `2026-10-10 01:10 WIB` menghasilkan **503** (383 di `.git/`, 121 `asw/research`) dan itu baru
+  ketahuan karena aku menghitung isi `backup-dir`, bukan membaca ulang dry-run. Aturan: setelah aksi yang
+  menghapus, tagih **jumlah berkas nyata** di jaring pengaman + `git status --porcelain` sasaran; dan
+  jangan centang "ada jaring" tanpa menguji jaring itu menampung kejadian sesungguhnya.
