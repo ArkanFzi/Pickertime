@@ -1597,6 +1597,46 @@ hijau — bukan regresi. Perilaku alatnya benar (keluar dengan `Backend uji tida
 hijau palsu); pemulihannya satu baris: `docker start pt-pb-test pt-pb-snaponly pt-pb-snapfull
 pt-pb-applied`, lalu angka di atas kembali seperti semula.
 
+## M22 — Urutan rotasi key -> recreate -> deploy, dan mekanisme produksi terukur (2026-10-10)
+
+Pemilik menerima rekomendasi: **`main` ditahan sampai `GEMINI_API_KEY` dirotasi**, lalu satu deploy
+membawa kelompok 3 + kunci model. Runbook lengkap ada di
+`docs/04_audit/action_plan_2026-10-08.md` §"Urutan rotasi key -> recreate -> deploy". Empat hal yang
+membentuk urutannya, semuanya terukur hari ini lewat IAP (baca-saja):
+
+| Terukur | Nilai | Kenapa mengubah urutan |
+|---|---|---|
+| Tidak ada unit systemd / compose untuk container | 4 unit `pickertime*` = agent + backup (`.service`/`.timer`), `glob /opt/pickertime/*.{yml,yaml}` = **0**, `Created 2026-10-02T04:10:52Z`, `RestartPolicy unless-stopped` | Container lahir dari `docker run` manual; tidak ada berkas yang bisa "cukup diedit" |
+| Env dibakar ke config container | file == container, sha256[:12] `f72d872b722a`/`1725400923b4`/`c37384c643fd` (len 53/29/48) | `docker restart` (aksi agen) **tidak** membaca ulang `.env` -> rotasi butuh **recreate dulu**, deploy kemudian |
+| Tidak ada port yang di-publish | `PortBindings {}`, `NetworkMode openclaw-docker_default`, IP `172.19.0.6`; `127.0.0.1:8090` host -> **refused** | Recreate harus tanpa `-p`; menambah publish port = memperluas permukaan produksi |
+| Hook produksi | `hook_model=di-inline: models/gemini-flash-lite-latest:generateContent` | Pin `gemini-3.5-flash-lite` belum ada di produksi sampai deploy jalan |
+
+Perkakas baru: `tools/deploy/pb-env-drift.sh` — pembanding env berkas vs env container untuk pemakaian
+berikutnya, tanpa pernah mencetak nilai (nama key + panjang + sha256[:12] saja; aturan H13). Dijalankan
+ke produksi: `rc=0`, `HASIL: file == container untuk 3 key, tidak ada drift.` Uji tiga arah di container
+buang: M1 sama -> `rc=0`; M2 tiga key BEDA -> `rc=1` `HASIL: DRIFT — 3 key berbeda`; M3 hook tanpa
+`const MODEL` -> `hook_model=tidak_ada_const_MODEL`. Bug yang lahir dari M2: backtick di dalam string
+ganda membuat shell **menjalankan** `docker restart` (`requires at least 1 argument`); dibuang, M2
+diulang bersih.
+
+Blast radius sekarang **5** file pemicu `deploy.yml` (4 lama + `tools/deploy/pb-env-drift.sh`) — cuma
+memicu, isi arsip tidak berubah: penerbit men-tar `pb_hooks`+`pb_migrations`+manifest
+(`publish-pb-deploy.sh:60,64-66`) dan agen menolak entri di luar itu (`pickertime-pb-agent.sh:193-200`).
+Sweep: `bash -n` **14** berkas shell `syntax_bad=0`, gerbang H4 `xtrace_files=0`, scan rahasia pola baru
+`hits=0`, `test:docs` `rc=0`.
+
+Host pengembangan **reboot 2026-10-10 07:42** (`uptime -s`), dan untuk kedua kalinya gerbang DB keluar
+`rc=1` dengan **0** baris hijau karena keempat `pt-pb-*` tidak punya restart policy — yang lain
+(`hermes`, `openclaw-gateway`, dll.) naik sendiri, mereka tidak. Ditambal permanen, lokal dan
+reversibel, tanpa membuat ulang container: `docker update --restart=unless-stopped pt-pb-test
+pt-pb-snaponly pt-pb-snapfull pt-pb-applied` (terukur: `HostConfig.RestartPolicy.Name =
+unless-stopped` untuk keempatnya), lalu `docker start` dan angka kembali seperti semula — `findings`
+**25** hijau **0** merah (`rc=0`), `test:snapshot` **2** hijau (`rc=0`).
+
+Menunggu pemilik: rotasi key (lalu langkah 2-6 runbook), dan keputusan
+atas dua direktori sisa rollback manual di `/opt/pickertime/app`
+(`pb_hooks.rolledback-run-manual-36374-b81b18a2-rollback`, `pb_migrations.rolledback-…-rollback`).
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan

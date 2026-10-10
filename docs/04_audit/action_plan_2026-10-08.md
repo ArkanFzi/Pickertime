@@ -708,3 +708,70 @@ Ditambahkan `AQ\.[0-9A-Za-z_-]{20,}`; diukur di `dev`: `hits_lama=0`, `hits_baru
 pohon ter-track (tidak ada positif palsu). Aturan turunannya saya tulis sebagai hutang proses H9 di
 `TODO.md`: probe environment container hanya boleh mencetak **panjang** nilai, jangan pernah
 mencetak `K=V`.
+
+---
+
+## Urutan rotasi key → recreate → deploy (keputusan pemilik 2026-10-10: `main` ditahan sampai key dirotasi)
+
+Mekanisme produksi lebih dulu diukur, karena urutan langkahnya bergantung ke situ. Semua lewat IAP
+SSH + `sudo python3 -`/`sudo bash -s`, **baca-saja**:
+
+| Fakta | Nilai terukur |Konsekuensi |
+|---|---|---|
+| Unit systemd container | `systemctl list-unit-files` -> 4 unit `pickertime*` (`pb-agent.service`, `pb-agent.timer`, `pb-backup.service`, `pb-backup.timer`); **tidak ada** unit untuk PocketBase; `glob /opt/pickertime/*.{yml,yaml}` = **0** | Container dibuat **manual** dengan `docker run` (`Created 2026-10-02T04:10:52Z`) dan bertahan karena `RestartPolicy.Name = unless-stopped`. Tidak ada berkas yang otomatis mengulang `docker run` itu |
+| Jaringan | `HostConfig.PortBindings = {}`, `.Ports` kosong, `NetworkMode = openclaw-docker_default`, IP `172.19.0.6`; `127.0.0.1:8090` di host -> **connection refused** | Publik hanya lewat cloudflared di jaringan yang sama. Recreate **tanpa `-p`**: menambah publish port = memperluas permukaan produksi |
+| Binds | tepat 3: `/opt/pickertime/pb_data`, `/opt/pickertime/app/pb_hooks`, `/opt/pickertime/app/pb_migrations` | Recreate tidak menyentuh data; DB tetap di host |
+| Env | `GEMINI_API_KEY` 53, `PB_ADMIN_EMAIL` 29, `PB_ADMIN_PASSWORD` 48; **file == container** (sha256[:12] `f72d872b722a` / `1725400923b4` / `c37384c643fd`) | Invarian M8.1 saat ini nol-drift, jadi membuat ulang container **tidak** akan menimpa superuser produksi dengan nilai lain |
+| Hook terpasang | `hook_model=di-inline: models/gemini-flash-lite-latest:generateContent` | Kunci model **belum** ada di produksi; itu persis yang dibawa deploy nanti |
+
+**Jebakan yang menentukan urutan:** nilai env **dibakar ke config container** saat `docker run`.
+`docker restart` — yang dilakukan agen deploy — tidak membaca ulang `/opt/pickertime/.env`. Jadi
+rotasi key butuh **recreate**, dan deploy setelahnya tetap memakai nilai baru karena config
+container-nya memang yang baru. Kalau urutan dibalik (deploy dulu, baru recreate), restart agen
+mengembalikan key lama dari config lama.
+
+Langkah, semuanya eksekusi pemilik (aku read-only):
+
+1. Rotasi key di Google AI Studio.
+2. Tulis nilai baru ke `/opt/pickertime/.env`, **hanya** `GEMINI_API_KEY`. `PB_ADMIN_*` jangan
+   disentuh: saat ini file == container, jadi mengubahnya berarti mengganti superuser produksi pada
+   start berikutnya (M8.1).
+3. `sudo bash -s < tools/deploy/pb-env-drift.sh` lewat IAP. Sebelum recreate hasil yang benar
+   justru `GEMINI_API_KEY BEDA` (baru di berkas, lama di container); sesudah recreate harus
+   `HASIL: file == container untuk 3 key, tidak ada drift.`
+4. Recreate (downtime beberapa detik, bind mount membuat DB tidak tersentuh):
+
+   ```
+   docker rm -f pickertime-pocketbase
+   docker run -d --name pickertime-pocketbase \
+     --network openclaw-docker_default --restart unless-stopped \
+     --env-file /opt/pickertime/.env \
+     -v /opt/pickertime/pb_data:/pb_data \
+     -v /opt/pickertime/app/pb_hooks:/pb_hooks \
+     -v /opt/pickertime/app/pb_migrations:/pb_migrations \
+     ghcr.io/muchobien/pocketbase:0.40.4
+   ```
+
+5. Verifikasi: `docker inspect -f '{{.State.Status}} {{.RestartCount}}'` -> `running 0`; ambil IP
+   baru (`pb_ip` agen) lalu `GET /api/health` -> 200; `pb-env-drift.sh` -> nol drift; satu panggilan
+   AI nyata -> `200` envelope `{ text, truncated }`.
+6. Baru merge `dev` -> `main`. Agen akan: gerbang pra-pasang, snapshot baseline, rsync aditif,
+   **restart sekali**, menjalankan **1** migrasi (`1791526402`; yang lain sudah tercatat di
+   `_migrations`), gerbang pasca-pasang, balas `applied`. Rollback kalau merah: `workflow_dispatch`
+   `action=rollback`, `snapshot=run-37628720967-a1ef8c74` (baseline deploy `#5`, ada di disk).
+
+**Perkakas baru `tools/deploy/pb-env-drift.sh`** (baca-saja; tanpa `set -x`; hanya nama key,
+panjang, dan sha256[:12] — tidak pernah `K=V`, sesuai H13). Dijalankan langsung ke produksi: `rc=0`,
+`hook_model=di-inline: models/gemini-flash-lite-latest:generateContent`. Diuji tiga arah di container
+buang (`pt-drift-probe`, sudah dihapus): M1 file==container -> `rc=0` "tidak ada drift"; M2 tiga key
+BEDA -> `rc=1` `HASIL: DRIFT — 3 key berbeda`; M3 hook tanpa `const MODEL` dan tanpa inline ->
+`hook_model=tidak_ada_const_MODEL`. Satu bug lahir dari mutasi M2: pesan DRIFT semula menulis
+`docker restart` **dengan backtick di dalam string ganda**, jadi shell benar-benar menjalankannya
+(`docker: 'docker restart' requires at least 1 argument`) — backtick dibuang, M2 diulang dan bersih.
+
+**Blast radius sesudah PR ini:** **5** file pemicu `deploy.yml` (empat yang lama +
+`tools/deploy/pb-env-drift.sh`, dihitung `git diff --name-only origin/main...origin/dev | grep -E -e
+'^(pb_hooks/|pb_migrations/|tools/deploy/)' -e '^\.github/workflows/deploy\.yml$'`). Ini hanya
+memicu, bukan mengubah isi yang dipasang: penerbit men-tar `pb_hooks` + `pb_migrations` + manifest
+saja (`publish-pb-deploy.sh:60,64-66`) dan agen menolak entri di luar itu
+(`pickertime-pb-agent.sh:193-200`), jadi arsip deploy identik dengan sebelum PR ini.
