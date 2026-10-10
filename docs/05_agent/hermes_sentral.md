@@ -1,16 +1,25 @@
 # Hermes sebagai sentral — topologi, guardrail, dan tahap persiapan
 
-Dihasilkan dari sesi 2026-10-08. **TAHAP 0 sudah diukur pada 2026-10-08** (F-75 tertutup, angka di §2);
-dokumen ini tetap berkas kerja karena keputusan pemilik masih menunggu di §0/§9 dan Fase 1 lanjutan
-masih terbuka. Register temuan + bukti lengkap pindah ke repo infra:
-`config-agentic/docs/12-fase-1-dasar.md` (angka + bukti) dan `config-agentic/docs/11-fase-hermes-sentral.md`
-(register CFG-01…CFG-27), branch `docs/fase-hermes-sentral`, commit `65d9395`.
+Dihasilkan dari sesi 2026-10-08. **TAHAP 0 SELESAI**: formasinya terukur 2026-10-08 (F-75), dan
+**2026-10-10** butir §2.3/§2.4 yang waktu itu belum punya angka ikut terukur (§2.5) — kedua syarat
+"selesai kalau" di §2 kini punya kutipan angka, jadi tidak ada lagi perubahan VM yang menunggu
+baseline. Dokumen ini tetap berkas kerja karena keputusan pemilik masih menunggu di §0/§9 dan Fase 1
+lanjutan masih terbuka; satu temuan baru lahir dari pengukuran 2026-10-10 itu (**F-82**).
+Register temuan + bukti lengkap pindah ke repo infra:
+`config-agentic/docs/12-fase-1-dasar.md` (angka + bukti) dan `docs/11` repo itu
+(register CFG-01…**CFG-34**), branch `docs/fase-hermes-sentral`, commit HEAD `1329010`
+(sebelumnya dokumen ini menyebut `65d9395` + "CFG-01…CFG-27" — dua-duanya sudah basi; terukur
+2026-10-10 register berhenti di CFG-33 sebelum F-82, dan `1329010` = commit tip branch itu).
 
 Terkait: `docs/04_audit/action_plan_2026-10-08.md`. Penomoran bersama (terukur 2026-10-09 di kedua
 repo): rencana audit itu berhenti di **F-74** dan menambahkan **F-79/F-80** pada gelombang kalender
 2026-10-09 (semula dicatat F-75/F-76, dinomori ulang karena sudah dipakai di bawah), sehingga
 **F-75/F-76/F-78** adalah nomor dokumen ini — F-75 = ukur VM (CFG-01), F-76 = gerbang indeks skill
 (CFG-16), F-78 = bentuk kontribusi otak ke aplikasi.
+**Koreksi penomoran 2026-10-10**: kalimat "berhenti di F-74" itu sudah tidak benar — **F-81** sudah
+terpakai untuk balap limiter 429 (`TODO.md:1159`, `action_plan:205`), dan nomor yang dipakai dari
+pengukuran TAHAP 0 hari ini adalah **F-82** (= `CFG-34` di register infra). Jadi milik dokumen ini:
+F-75, F-76, F-78, F-82.
 
 ---
 
@@ -53,9 +62,11 @@ jalur online aplikasi tidak boleh bergantung pada ketersediaan otak.** Lihat F-7
 
 ---
 
-## 2. TAHAP 0 — Pengukuran & baseline compat (hanya kamu yang bisa mengerjakan)
+## 2. TAHAP 0 — Pengukuran & baseline compat (SELESAI: F-75 2026-10-08 + §2.5 2026-10-10)
 
 Sampai tahap ini selesai, tidak ada satu pun perubahan di VM yang aman untuk dijadwalkan.
+Kondisi itu sekarang terbalik: jadwal sudah boleh disusun karena angkanya ada — tapi satu pengukuran
+(§2.5) melahirkan **F-82**, yang justru menahan klaim "sudah terisolasi" di Fase 1.1.
 
 ```bash
 # 2.1 Bentuk mesin
@@ -85,7 +96,8 @@ kosong, versi Hermes + letak `~/.hermes/`, daftar service yang jalan, dan apakah
 Hermes sekarang jalan sebagai root.** Poin terakhir itu yang menentukan sisa rencana ini.
 
 **Selesai kalau:** angka-angka itu tercatat di dokumen ini (atau `TODO.md`), dan
-`free -h` masih menyisakan ≥1 GB setelah semua yang ada sekarang jalan.
+`free -h` masih menyisakan ≥1 GB setelah semua yang ada sekarang jalan. → **terjawab**: §2.5 mencatat
+seluruh butir dan available `1812–1850 MB` pada 2026-10-10.
 
 ### F-75 TERTUTUP — terukur 2026-10-08 (`gcloud` + IAP SSH, semuanya read-only)
 
@@ -137,6 +149,175 @@ berubah adalah urutan realistis sekarang: **cabut CFG-20 → pasang batas memori
 model (F-69/K-5, `space-bunny-free` hari ini tidak bisa diaudit) → approvals → Telegram.** Semua aksi
 tulis di VM dan IAM masih menunggu persetujuanmu; yang saya kerjakan hari ini semuanya read-only.
 
+### F-82 — terukur 2026-10-10: isolasi host tidak ditegakkan di user login
+
+F-75 menutup pertanyaan "apakah Hermes jalan sebagai root" untuk **di dalam** kontainer (`uid=1000(hermes)`,
+tanpa grup docker, tanpa `docker.sock`). Pengulangan pengukuran 2026-10-10 membaca sisi **host**:
+
+```
+uid=1001(arkan) gid=1004(arkan) groups=1004(arkan),4(adm),30(dip),44(video),46(plugdev),
+                    1000(google-sudoers),1001(docker),1002(lxd)
+$ sudo -n -l
+User arkan may run the following commands on hermes-openclaw-vm:
+    (ALL : ALL) NOPASSWD: ALL
+```
+
+Dua fakta itu together berarti proses mana pun yang jalan sebagai `arkan` — sistem mirror `rsync`
+(CFG-14/CFG-26/T-17), berkas sumber healthcheck yang dia tulis (CFG-30), repo `~/openclaw-docker`
+yang terbukti dia tulis (CFG-06), dan agen apa pun yang memakai `sudo -n` karena tidak ada prompt
+password — adalah **root di box produksi** tanpa perlu menyentuh `docker.sock`. Implikasinya ke
+§2(c): kalimat "syarat isolate sebelum channel dibuka sudah terpenuhi di sisi proses, jadi TAHAP 1.1
+praktis selesai" **hanya benar untuk uid di dalam kontainer `hermes`**. Yang benar:
+
+- syarat §1.2 ("user `hermes` tidak bisa membaca env PocketBase / tidak bisa publish topic") tetap
+  terpenuhi di kontainer — itu tidak dikoreksi oleh pengukuran ini;
+- yang belum terpenuhi adalah **lapisan host**: selama user login memegang `NOPASSWD: ALL` + grup
+  `docker`, segala jalur "isolasi" yang dibangun di atas user tersebut bisa dinaikkan ke root oleh
+  satu baris perintah tanpa jejak interaktif.
+
+Perbaikan yang koheren dengan pola itu bukan memindahkan Hermes (sudah non-root), tapi **menutup
+sudo NOPASSWD untuk user login** dan mengeluarkan `arkan` dari grup `docker`, lalu membiarkan hanya
+unit root yang mengurus kontainer. Sisi "apa yang putus" sudah dipercuji lebih dulu, semuanya read-only:
+**tidak ada satu pun konsumen `sudo`** di jalur yang hidup — `grep -c sudo` = `0` pada
+`/opt/pickertime/pickertime-pb-agent.sh` dan `/opt/pickertime/pickertime-pb-backup.sh`,
+`sudo grep -l sudo /etc/systemd/system/*.service *.timer` = kosong, dan `0` pada kedua salinan wrapper
+mirror (`~/.local/bin/vm-repo-sync.sh` di laptop + `scripts/vm-repo-sync.sh` di repo — isinya
+`exec /home/arkan/google-cloud-sdk/bin/gcloud compute ssh …`). Jadi cabut NOPASSWD tidak memutus agen
+deploy, backup, maupun mirror. Satu nuansa yang justru menolong: `/home/arkan/.local/bin` di VM
+ternyata `root:root 755` (isinya hanya biner `agy` 224 MB milik `node`) → user login tidak bisa
+menulis PATH-nya sendiri di VM. Aksi tulis ini tetap keputusan + tangan pemilik.
+Nomornya di register infra: **CFG-34**.
+
+### 2.5 Angka yang tersisa — terukur 2026-10-10 lewat `gcloud` + IAP SSH (semua read-only)
+
+Bentuk mesin, dibaca ulang pada hari yang sama dengan F-82:
+
+| Aspek | 2026-10-08 | 2026-10-10 |
+|---|---|---|
+| Waktu hidup | start `2026-10-05 04:06` | `uptime -s = 2026-10-05 04:06:05`, `up 4 days, 20:57`, load `0.01 0.05 0.07`, `nproc = 2` |
+| RAM | total 3924 MB, available **1683 MB**, swap terpakai 106 MB | total 3924 MB, used 2073→2112 MB, available **1850 MB → 1812 MB** (dua sampel), swap terpakai **268 MB** |
+| Disk | 34 GB terpakai / **61 GB sisa (37%)** | 35 GB terpakai / **60 GB sisa (37%)**; `df -h /` dan `df -h /var/lib/docker` = perangkat yang sama (`/dev/sda1`, 99 G) |
+| OS | tidak dicatat | **Debian GNU/Linux 12 (bookworm)**, kernel `6.1.0-53-cloud-amd64` |
+
+Syarat "selesai kalau" yang kedua terjawab di baris RAM: **available masih ≥ 1 GB** dengan semua yang
+ada sekarang jalan (dua sampel: 1850 MB dan 1812 MB).
+
+**Versi = kunci compat** (§2.3, ini yang bikin rencana Fase 2 bisa dipesan lebih dulu):
+
+| Tempat | Terukur |
+|---|---|
+| Host | `hermes` → **command not found**, `node` → **command not found**, `cloudflared` → **command not found**; `git 2.39.5`, `rsync 3.2.7 (protocol 32)`, `python3 3.11.2` |
+| Kontainer `hermes` | **Hermes Agent v0.21.3 (2026.9.14) · upstream b1858f33**, install dir `/opt/hermes`, metode `docker`; node **v26.5.1**; gateway = pid 197 `exe=/usr/bin/python3.13`; layanan s6 aktif: `dashboard, gateway-default, main-hermes, s6-linux-init-shutdownd, s6rc-fdholder, s6rc-oneshot-runner` |
+| Kontainer `openclaw-gateway` / `webhook-proxy` | node **v25.9.0** (image `openclaw:local-node25`) |
+| Kontainer `pickertime-pocketbase` | **pocketbase version 0.40.4**, biner di **`/usr/local/bin/pocketbase`**; `user=` (root), `StartedAt 2026-10-07T13:28:35Z`, **`restarts=0`** → invarian M8.1 tidak tersentuh sejak 2026-10-07 |
+| Kontainer `cloudflared` + `pickertime-cloudflared` | **cloudflared 2026.9.1 (built 2026-09-11-13:48 UTC)** |
+| Kontainer `litellm-proxy` | litellm **1.103.0** (`pip` tidak ada di PATH; yang bicara `importlib.metadata`) |
+| Kontainer `openclaw-docs` | **nginx 1.31.6** |
+
+Digest image yang jalan hari ini — persis bahan yang dibutuhkan T-08 untuk memasang pin (CFG-25):
+`hermes:local 1353556275cc` · `openclaw:local-node25 713d689ae2f0` ·
+`muchobien/pocketbase:0.40.4 9390b7b63ce1` (sudah dipin) · `cloudflare/cloudflared:latest b269e8abd07a` ·
+`berriai/litellm:main-latest 52abe19ecef0` · `gemini-agent:latest a2f83e106473` ·
+`chromadb/chroma:latest 1e0b73a187a2` · `nginx:alpine df221db836e1`.
+
+Konsumsi per kontainer (`docker stats --no-stream`), dipakai untuk menagih CFG-23:
+`openclaw-gateway 744,7 MiB` · `hermes 357,8 MiB / 2 GiB` · `litellm-proxy 307 MiB` ·
+`cloudflared 56,7 MiB` · `pickertime-cloudflared 25,5 MiB` · `pickertime-pocketbase 31,6 MiB` ·
+`webhook-proxy 24,2 MiB` · `chromadb 11,2 MiB` · `openclaw-docs 3,8 MiB` · `gemini-agent 512 KiB`.
+Batasnya **masih 2 dari 10** (`hermes` 2 GiB / 1,5 CPU = 1500000000 nano, `gemini-agent` 1 GiB / 0,5 CPU),
+delapan sisanya `mem=0 nanocpu=0` — konfirmasi ketiga CFG-23, belum ada satu limit pun terpasang.
+
+Service dan timer (§2.3 "daftar service yang jalan"): **43** unit `active` di host, dan hanya tiga yang
+cocok kata kunci `pocketbase|hermes|cloudflared|backup|relay|openclaw|agent`, ketiganya milik Google/LSB:
+`exim4`, `google-guest-agent-manager`, `google-osconfig-agent`. Tidak ada service PocketBase/Hermes di
+host → penegasan CFG-28 (kotak PocketBase tidak dikelola unit apa pun). Yang benar-benar berdenyut di
+host adalah timer: `gog-watchdog.timer` (last `2026-10-10 01:04:56`, next `01:06:56` = **60 detik**),
+`pickertime-pb-agent.timer` (last `01:05:57`, next `01:06:57` = **60 detik**), `pickertime-pb-backup.timer`
+(last `Fri 2026-10-09 03:22:53`, next `Sat 2026-10-10 03:23:03` = harian).
+Unit **user** tidak terbaca dari sesi IAP: `systemctl --user list-units` → kosong, dan versi
+`sudo XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus systemctl --user …`
+→ **`Failed to connect to bus: Operation not permitted`** (userns/`RemoveIPC`). Jadi klaim tentang
+`repo-sync.service`/`.timer` (T-17) harus tetap diambil dari berkas unit + `logs/repo-sync.log`, bukan
+dari `systemctl --user` lewat SSH.
+
+Inbound/outbound (§2.4): `ss -tlnp` hari ini — `0.0.0.0:22`, `0.0.0.0:5355`, **`0.0.0.0:8888`**
+(dan `[::]:22`, `[::]:5355`, `[::]:8888`), loopback `127.0.0.1:{25,4000,8788,8789,18000,18789}`,
+`127.0.0.53%lo:53`, `127.0.0.54:53`. Dua telinga baru dibanding CFG-22 (`22` dan `5355`), dan
+**8888 masih `0.0.0.0`** pada 2026-10-10 — perbaikan `127.0.0.1:8888:80` memang benar belum pernah
+turun ke VM (CFG-33). `cloudflared tunnel list` (dari dalam kontainer `cloudflared`, yang memegang
+kredensial CF): **2 tunnel** — `arkan-server` `699603e0-…` dibuat `2026-03-01T04:26:28Z` dengan
+**0 koneksi**, dan `openclaw-webhook` `86eb0217-…` dibuat `2026-08-26T14:50:54Z` dengan
+`1xcgk01, 1xcgk07, 2xord11, 2xord15, 1xsin07, 1xsin15`. Yang pertama itu kandidat "nama tanpa isi"
+untuk Fase 3.
+
+Skill (§2.3): `/opt/data/skills` di kontainer `hermes` = **82** `SKILL.md` dalam **15** kategori —
+`apple, autonomous-ai-agents, creative, devops, email, github, media, mlops, note-taking, productivity,
+research, smart-home, social-media, software-development, web`. Host `~/.hermes` **tidak bisa dibaca
+user login**: `ls -A ~/.hermes` → `Permission denied` (mode/kepemilikan hasil CFG-06), dan
+`find ~/.hermes/skills -name SKILL.md | wc -l` = **0**. Artinya satu-satunya inventori skill yang bisa
+dijaring gerbang ada **di dalam kontainer**, sedangkan gerbang CFG-16/T-19 hanya memindai repo —
+celah yang sudah dicatat di T-19 kini punya angka pendukung.
+
+### 2.6 Bentuk perintah yang benar (koreksi daftar §2 supaya sesi berikutnya tidak mengulang gagalku)
+
+Daftar §2 di atas ditulis seolah semuanya perintah host; terukur hari ini sebagian bukan:
+
+| Butir §2 | Perintah yang benar di box ini |
+|---|---|
+| `hermes --version \|\| which hermes` | `docker exec hermes /opt/hermes/bin/hermes --version` (host: tidak ada biner; `sh -lc "hermes --version"` juga gagal karena PATH login shell kontainer tidak memuatnya) |
+| `node -v` | per kontainer: `docker exec hermes node -v` = v26.5.1, `docker exec openclaw-gateway node -v` = v25.9.0; host tidak punya node |
+| `ls -la ~/.hermes/` | `docker exec hermes ls -la /opt/data` (host menolak `arkan`) |
+| PocketBase version | `docker exec pickertime-pocketbase /usr/local/bin/pocketbase --version` — **bukan** `/pocketbase` (probe itu `stat /pocketbase: no such file`) |
+| `cloudflared --version; cloudflared tunnel list` | `docker exec cloudflared cloudflared …` (di host tidak ada biner; kredensial CF ada di dalam kontainer, bukan di host) |
+| `systemctl list-units … \| grep -Ei "pocketbase\|hermes…"` | tambah `--state=active` (bukan `running`) dan baca `systemctl list-timers --all`: beban nyata di host ada di timer 60 detik, bukan service |
+| `sudo -n -l` | jalan, dan jawabannya justru temuan F-82/CFG-34 |
+
+**Status TAHAP 0: SELESAI.** Kedua syarat §2 terukur — seluruh butir §2.1–§2.4 punya angka (F-75
+2026-10-08 + §2.5 2026-10-10), dan `free -m` menyisakan **1812–1850 MB available** (> 1 GB) dengan
+sepuluh kontainer yang ada sekarang jalan. Yang **tidak** selesai karena pengukuran ini, dan tetap
+butuh tangan/keputusan pemilik: `CFG-20` (Opsi A), `CFG-23` (8 kontainer tanpa limit), `CFG-30/31/32`
+→ T-29/T-28, `CFG-33` → T-30, `CFG-34`/F-82 (sudo NOPASSWD + grup docker), dan rotasi
+`GEMINI_API_KEY` yang bocor (`TODO.md` M21/M22).
+
+### 2.7 Dua hal yang muncul di luar daftar §2 (ikut terukur, dan yang kedua mengubah urgensi T-31)
+
+**(a) Mesin yang salah kucari.** Daftar §2 menulis perkakas mirror seolah bagian dari inventaris VM.
+Terukur hari ini di VM: `ls ~/.local/bin/vm-repo-sync.sh` → **No such file or directory**,
+`ls ~/.config/systemd/user` → **No such file or directory**, dan
+`sudo find /home/arkan -maxdepth 4 -name "vm-repo-sync*"` → **kosong**. Ketiganya ada di **laptop**:
+wrapper `~/.local/bin/vm-repo-sync.sh` **348 byte**, mtime `Oct 8 19:49`, isinya `set -euo pipefail` +
+`exec /home/arkan/google-cloud-sdk/bin/gcloud compute ssh … -- "$@"`; unit
+`~/.config/systemd/user/repo-sync.service` **162 byte** dan `.timer` **158 byte**, mtime `Sep 30 11:11`;
+`systemctl --user is-active repo-sync.timer` → **active**. Jadi jalur mirror hidup di sisi "tangan"
+(PC kerja), persis pemisahan otak/tangan §1 — dan angka CFG-26/T-04/T-18 selama ini adalah angka
+laptop. Catatan alat: ini menjelaskan kenapa `systemctl --user` lewat IAP kosong (§2.5) — unitnya memang
+tidak ada di VM, bukan bus yang menolak saja.
+
+**(b) Run 2026-10-10 01:10 WIB benar-benar terjadi, dan jaring penghapusnya tertagih.**
+`repo-sync.timer`: LAST `Sat 2026-10-10 01:10:00 WIB`, NEXT `Sun 2026-10-11 01:10:00 WIB`.
+Blok terakhir `logs/repo-sync.log` (laptop): `sent 355.577.714 bytes`, `received 299.601`,
+`total size is 9.309.980.498`. Di VM, `--backup-dir` hasil T-18 menangkap **503 berkas**:
+`find <dir> -type f -not -path "*/.git/*"` = **120**, sisanya **383** di dalam `.git/`; direktori
+terkirim `/home/arkan/backups/mirror/20261009T181000Z`. Rinciannya yang penting:
+**121 berkas di bawah `Sekawan_Media_Tasks/asw/research`** (43 di antaranya non-`.git`, contoh
+`sql/index_optimasi_trial_bahan_baku_new.sql`, `sql/cek_kode_halal_trial_bahan_baku_new.sql`) dan
+sejumlah direktori `website-porto2/` (`tools`, `nextjs-frontend`, `go-backend`, `.github`, `.git`).
+Kerusakan yang tersisa di VM terukur: `asw/research` HEAD `2868970` utuh, `git ls-files` = **15.772**,
+`git status --porcelain` = **37** entri `" D"` (tracked, hilang dari working tree, mis.
+`assets/global/plugins/jstree/dist/jstree.js`); `website-porto2` HEAD `c817d98` dengan **0** penghapusan
+tracked → yang terhapus di sana untracked/isi `.git`.
+
+Angka ini **mengoreksi prediksi T-18/T-31**: yang direncanakan dry-run adalah **80** penghapusan
+(63 di `.git/`, 15 berkas tracked `asw/research`) — kenyataannya **503** (383 `.git/`, 121 `asw/research`).
+Konsekuensinya bukan arsip: keputusan T-31 sudah dibayar sekali dan run berikutnya tinggal
+**±16 jam** (`2026-10-11 01:10 WIB`), sementara **retensi `backup-dir` belum ada** (T-14/CFG-29) — jaring
+yang menyelamatkan 503 berkas malam ini tidak dijamin ada malam berikutnya. Dua aksi yang tersedia,
+dua-duanya milik pemilik (timer di laptop + tulis ke VM), jadi aku catat dan tidak kerjakan:
+`systemctl --user stop repo-sync.timer` (reversibel; teks T-17 sendiri menilai "reviewer 02:00 baca pohon
+yang basi ≤1 hari" sebagai kondisi aman), lalu pulihkan 121 berkas `asw/research` dari
+`/home/arkan/backups/mirror/20261009T181000Z`.
+
+
 ---
 
 ## 3. TAHAP 1 — Akun, isolasi, kredensial
@@ -148,6 +329,7 @@ tulis di VM dan IAM masih menunggu persetujuanmu; yang saya kerjakan hari ini se
 | 1.3 | **Satu secret scope per konteks**: `~/.hermes/secrets/pickertime.env`, `life.env`, dsb. Tidak ada satu file global. Skill menunjuk nama scope, bukan nilai. | Pemisahan wewenang yang ditegakkan filesystem, bukan prompt. |
 | 1.4 | GitHub: buat **fine-grained PAT** per repo, read-only untuk metadata CI (`Actions: read`, `Checks: read`, `Pull requests: read`), + write hanya `contents`/`pull-requests` kalau kita buka jalur perbaikan (aksi ter tulis di §7). | PAT lama sudah punya sejarah (M5.4 masih BLOCKED: penghapusan via UI belum terjadi) — jangan gandakan. |
 | 1.5 | Pasang retensi media chat + batasi ukuran direktori sebelum channel apa pun dibuka. | Yang lebih dulu menghabiskan disk biasanya media/voice note, bukan sesi LLM. |
+| 1.6 | **(baru, dari F-82/CFG-34)** Tutup `NOPASSWD: ALL` untuk user login dan keluarkan `arkan` dari grup `docker`; biarkan hanya unit root yang mengurus kontainer. | Selama dua itu ada, "isolate sebelum channel dibuka" bisa dinaikkan ke root host oleh satu baris perintah — termasuk oleh skill yang lahir dari loop belajar (§6) yang jalan sebagai `arkan`. Pra-uji sudah dikerjakan (§2, F-82): nol konsumen `sudo` di jalur hidup, jadi cabutnya tidak memutus agen deploy/backup/mirror. |
 
 ---
 
