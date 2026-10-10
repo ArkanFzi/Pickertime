@@ -279,7 +279,7 @@ butuh tangan/keputusan pemilik: `CFG-20` (Opsi A), `CFG-23` (8 kontainer tanpa l
 → T-29/T-28, `CFG-33` → T-30, `CFG-34`/F-82 (sudo NOPASSWD + grup docker), dan rotasi
 `GEMINI_API_KEY` yang bocor (`TODO.md` M21/M22).
 
-### 2.7 Dua hal yang muncul di luar daftar §2 (ikut terukur, dan yang kedua mengubah urgensi T-31)
+### 2.7 Empat hal yang muncul di luar daftar §2 (terukur, satu dikoreksi sendiri, dan berakhir dengan timer ditahan)
 
 **(a) Mesin yang salah kucari.** Daftar §2 menulis perkakas mirror seolah bagian dari inventaris VM.
 Terukur hari ini di VM: `ls ~/.local/bin/vm-repo-sync.sh` → **No such file or directory**,
@@ -296,26 +296,70 @@ tidak ada di VM, bukan bus yang menolak saja.
 **(b) Run 2026-10-10 01:10 WIB benar-benar terjadi, dan jaring penghapusnya tertagih.**
 `repo-sync.timer`: LAST `Sat 2026-10-10 01:10:00 WIB`, NEXT `Sun 2026-10-11 01:10:00 WIB`.
 Blok terakhir `logs/repo-sync.log` (laptop): `sent 355.577.714 bytes`, `received 299.601`,
-`total size is 9.309.980.498`. Di VM, `--backup-dir` hasil T-18 menangkap **503 berkas**:
-`find <dir> -type f -not -path "*/.git/*"` = **120**, sisanya **383** di dalam `.git/`; direktori
-terkirim `/home/arkan/backups/mirror/20261009T181000Z`. Rinciannya yang penting:
-**121 berkas di bawah `Sekawan_Media_Tasks/asw/research`** (43 di antaranya non-`.git`, contoh
-`sql/index_optimasi_trial_bahan_baku_new.sql`, `sql/cek_kode_halal_trial_bahan_baku_new.sql`) dan
-sejumlah direktori `website-porto2/` (`tools`, `nextjs-frontend`, `go-backend`, `.github`, `.git`).
-Kerusakan yang tersisa di VM terukur: `asw/research` HEAD `2868970` utuh, `git ls-files` = **15.772**,
-`git status --porcelain` = **37** entri `" D"` (tracked, hilang dari working tree, mis.
-`assets/global/plugins/jstree/dist/jstree.js`); `website-porto2` HEAD `c817d98` dengan **0** penghapusan
-tracked → yang terhapus di sana untracked/isi `.git`.
+`total size is 9.309.980.498`. Di VM, `--backup` hasil T-18 memindahkan **503 berkas** ke
+`/home/arkan/backups/mirror/20261009T181000Z` (**140.179.961 byte**; `du -sh /home/arkan/backups/mirror`
+= **136M**): `find -type f -not -path "*/.git/*"` = **120**, sisanya **383** di dalam `.git/`;
+yang 120 itu **52** di bawah `Sekawan_Media_Tasks/asw` (43 di antaranya `asw/research`), **27**
+`Pickertime/`, **11** `Sekawan_Media_Tasks/inafood`, **19** `website-porto2/` + 11 sisanya tersebar.
 
-Angka ini **mengoreksi prediksi T-18/T-31**: yang direncanakan dry-run adalah **80** penghapusan
-(63 di `.git/`, 15 berkas tracked `asw/research`) — kenyataannya **503** (383 `.git/`, 121 `asw/research`).
-Konsekuensinya bukan arsip: keputusan T-31 sudah dibayar sekali dan run berikutnya tinggal
-**±16 jam** (`2026-10-11 01:10 WIB`), sementara **retensi `backup-dir` belum ada** (T-14/CFG-29) — jaring
-yang menyelamatkan 503 berkas malam ini tidak dijamin ada malam berikutnya. Dua aksi yang tersedia,
-dua-duanya milik pemilik (timer di laptop + tulis ke VM), jadi aku catat dan tidak kerjakan:
-`systemctl --user stop repo-sync.timer` (reversibel; teks T-17 sendiri menilai "reviewer 02:00 baca pohon
-yang basi ≤1 hari" sebagai kondisi aman), lalu pulihkan 121 berkas `asw/research` dari
-`/home/arkan/backups/mirror/20261009T181000Z`.
+**(c) Koreksi terhadap kalimatku sendiri di (b), dan ini yang penting.** `--backup-dir` menampung berkas
+yang **dihapus DAN yang ditimpa** — persis seperti ditulis di komentar skripnya — jadi 503 itu **bukan**
+jumlah penghapusan. Setelah dipilah per berkas (sambutan `ADA/TIADA` + `md5sum` di working tree vs
+backup-dir): dari **43** berkas non-`.git` `asw/research`, **28 masih ada dengan isi berbeda** (=
+ditimpa versi laptop; mis. `modules/rnd/views/mainview.php` working `b0004d52…` vs backup `e5b34f40…`)
+dan **15 benar-benar hilang** (mis. `sql/index_optimasi_trial_bahan_baku_new.sql` → TIADA). Artinya
+prediksi dry-run T-18 **"15 berkas `asw/research`" itu TEPAT**; yang salah adalah aku membaca 503 sebagai
+penghapusan (6,3× meleset) — kesalahan kelas H1, angkaku benar sumbernya tapi salah tafsir alatnya.
+Yang nyata rusak: **15 berkas hilang** (semuanya untracked di git VM, jadi tidak bisa dipulihkan dari
+repo) + **28 berkas kerja VM ditimpa versi laptop** + **383 berkas `.git/` bergerak** — dan itu
+bukti berjalan untuk **CFG-33/T-30**: mirror satu arah tiap malam mengembalikan drift dua arah.
+Pilahan menyeluruh atas 503 itu (read-only, `cmp` per berkas terhadap working tree VM, `PROCESSED=120`
+mencocokkan cacah `find`): di luar `.git/` = **99 ditimpa**, **16 terhapus** (15 `asw/research` +
+1 `Pickertime/components/__tests__/StyledText-test.js` — persis berkas jest yatim yang dihapus F-55 di
+laptop, jadi penghapusannya baru menyeberang malam itu; `components/ExternalLink.tsx` ikut tercatat di
+jaring sebagai **ditimpa**, bukan dihapus, mtime laptop `Oct 7 20:34`), **5 identik**; di dalam `.git/`
+= **136 ditimpa** + **247 tiada di tujuan** (objek repack yang memang
+dibuang, bukan kerja pengguna). Dari 43 `asw/research`: yang **28 ditimpa semuanya tracked**
+(`git ls-files --error-unmatch` → ada, jadi HEAD `2868970` bisa jadi pembanding), yang **15 terhapus
+semuanya untracked** → `git status` tidak pernah bisa melaporkan mereka, dan satu-satunya salinan yang
+tersisa ada di backup-dir.
+Sisa kerusakan terukur: `asw/research` HEAD `2868970` (2026-10-09 10:40 +0700) utuh,
+`git ls-files` = **15.772**, `git status --porcelain` = **37** entri `" D"` + **2** `"??"`,
+`staged deletion = 0`, `modules/rnd/views` masih **301** berkas; `website-porto2` HEAD `c817d98`
+dengan **0** penghapusan tracked. Ketiga puluh tujuh `" D"` itu **bukan** kerja run tadi malam, dan
+sekarang terukur kenapa: `/home/arkan/backups/mirror/` hanya punya **satu** stamp
+(`20261009T181000Z` = run 2026-10-10 01:10 WIB; jaring baru berdiri 2026-10-08), sementara
+`assets/jstree/dist/jstree.js`, `assets/global/plugins/jstree/dist/jstree.js`, dan
+`vendor/paragonie/random_compat/dist/random_compat.phar.pubkey` → **TIDAKDIJARING**, dan ketiganya juga
+**tidak ada di laptop** (`ls` → No such file). Artinya berkas vendored/hasil build yang cuma hidup di VM:
+sudah dibuang oleh run-run **sebelum** jaring terpasang, dan akan dibuang lagi tiap run sampai T-31
+memasang exclude. `git checkout -- <path>` memulihkannya, tapi itu tambal sementara, bukan penyelesaian.
+
+**(d) Aksi yang diambil (keputusan pemilik: "tahan timer, jangan sentuh VM").**
+`systemctl --user stop repo-sync.timer` → `rc=0`, `is-active=inactive`, `list-timers | grep -c repo-sync`
+= **0**. Lalu `disable` atas persetujuan pemilik karena dua hal terukur: `Persistent=true` +
+`OnCalendar=*-*-* 01:10:00` + `UnitFileState=enabled` artinya **boot/login berikutnya menyalakan run
+catch-up seketika** — penahanan yang tidak di-disable bisa lepas sendiri, dan "start lagi" setelah jam
+01:10 juga memicu run **langsung**. Terukur: `Removed …/timers.target.wants/repo-sync.timer`,
+`UnitFileState=disabled`. Re-arm yang sadar = `systemctl --user enable --now repo-sync.timer` **setelah**
+T-30/T-31 diputuskan. **Tidak ada satu pun tulis ke VM** yang kukerjakan. Yang menunggu pemilik,
+dengan tiga kelas berbeda: **15 berkas `asw/research` terhapus** — untracked di git VM, jadi satu-satunya
+salinan tersisa ada di `/home/arkan/backups/mirror/20261009T181000Z/Sekawan_Media_Tasks/asw/research/…`
+(salin kembali ke jalur aslinya); **28 berkas tracked yang isinya ditimpa versi laptop** — PUTUSAN, bukan
+pemulihan, karena HEAD `2868970` dan cadangan jaring adalah dua kandidat yang berbeda (versi VM ada di
+backup-dir, versi git pulih dengan `git checkout -- <path>`); dan **37 entri `" D"`** yang sudah
+terukur asalnya di (c) — berkas vendored yang hilang sebelum jaring ada, dipulihkan dengan
+`git checkout -- <path>` tapi akan dibuang lagi sampai T-31. Satu penghapusan **jangan** dipulihkan:
+`Pickertime/components/__tests__/StyledText-test.js` — itu memang
+kerja F-55/T-22 di laptop yang akhirnya menyeberang.
+
+Satu koreksi alat dari (a): `repo-sync.service` ExecStart = `/home/arkan/openclaw-docker/scripts/vm-repo-sync.sh`
+(tercatat di git `28ea24c`) yang memakai `-e /home/arkan/.local/bin/vm-repo-sync.sh` sebagai **transport
+SSH** — dua berkas, dua peran, dan `|| true` yang masih terbuka (CFG-26) ada di **skrip sync**, bukan di
+transport. Isinya terukur: `rsync -a --delete --backup --backup-dir=… --info=stats2 --partial` dengan
+`flock -n /tmp/vm-repo-sync.lock`, log ke `logs/repo-sync.log`, filter `--include` untuk
+`.env.example`/`.env.sample` sebelum `--exclude='.env*'` + `pb_data/`, dan `.git/` **sengaja tidak**
+di-exclude.
 
 
 ---
