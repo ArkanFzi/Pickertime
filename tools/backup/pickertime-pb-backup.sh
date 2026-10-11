@@ -55,6 +55,10 @@ fi
 
 SRC="$APP_DIR/pb_data/backups/$KEY"
 [ -f "$SRC" ] || { echo "file backup tidak ditemukan: $SRC" >&2; exit 1; }
+# zip + sidecar .attrs dibuat PocketBase di dalam kontainer (root, umask 0022) lewat
+# bind mount, jadi `umask 077` di baris 10 tidak pernah menyasar berkas ini.
+chmod 600 "$SRC"
+if [ -f "$SRC.attrs" ]; then chmod 600 "$SRC.attrs"; fi
 
 SIZE=$(stat -c %s "$SRC")
 MD5=$(python3 -c 'import hashlib,base64,sys;print(base64.b64encode(hashlib.md5(open(sys.argv[1],"rb").read()).digest()).decode())' "$SRC")
