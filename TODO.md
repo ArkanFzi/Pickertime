@@ -214,6 +214,13 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
   `activating` dan `is-active --quiet` membalas rc=3 untuk itu),
   `tools/deploy/publish-pb-deploy.sh` (penerbit + penunggu hasil),
   `tools/deploy/install-pb-agent.sh` (pasang lewat IAP), `.github/workflows/deploy.yml`.
+  Cabang perbaikan 2026-10-11 atas berkas-berkas itu ada di **PR #39** (`fix/pb-agent-yield-backup`
+  -> `dev`, 5 berkas `+107/-8`: `TODO.md` + `pickertime-pb-backup.{sh,service}` +
+  `pickertime-pb-agent.{sh,service}`; `agent.timer` tidak ikut karena memang tidak pernah berbeda) —
+  **`MERGED` 2026-10-11 09:38:13 UTC** atas keputusan pemilik sendiri, commit merge `135686d`, run CI
+  pada sha merge `38129078372` `completed success` (41 dtk). `Deploy backend PocketBase` **tidak**
+  menyala (run terakhir tetap `37628720967`, 2026-10-07) karena trigger `push`-nya `main`:
+  perbaikannya sah di staging dan belum ada di produksi.
   Uji nyata berurutan di produksi:
   · agen terpasang: `-rwxr-xr-x 1 root root 12183 /opt/pickertime/pickertime-pb-agent.sh`,
     timer `active` + `enabled`, tick pertama `agent: antrean kosong` (bukti token metadata +
@@ -682,8 +689,14 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
     penggantinya — `gcloud storage ls -r gs://pickertime-pb-backups/` = 16 objek, 0 pencocokan `20261006`.
     Bentuk terkecil: ledger append-only `KEY` untuk publish yang `200`, retensi men-skip yang tidak ada
     di ledger + baris `waspada` (jangan tanya ke bucket: VM ini cuma ber-scope `devstorage.read_only`).
+    Bentuknya sudah teruji di scratch 2026-10-11 (`/tmp/t36-scratch/run.sh`, nol tulis ke produksi): blok
+    sekarang terbukti membuang yatim; ledger menahan yatim dan tetap membuang yang terpublish; dan ledger
+    yang hilang membuat `LOCAL_KEEP` jadi no-op (6 zip pada kuota 2) — jadi perlu langit-langit keras
+    `LOCAL_MAX` supaya batas byte T-14 tetap tegak. Detail: `docs/12-fase-1-dasar.md` §1.38.
     Ditahan sampai api timer 2026-10-12 03:28:55 UTC lewat supaya bukti T-34 tetap satu variabel.
     Register + tabel: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62, baris T-36. Status: BLOCKED-user
+    (cabang `fix/pb-agent-yield-backup` sudah jadi bagian `dev` lewat #39, jadi T-36 punya tanah bersih
+    untuk bercabang — yang menahan tinggal keputusan menulis ke skrip produksi dan api timer natural)
 - [x] **P9** E1 ditutup nyata: `deploy.yml` tereksekusi otomatis di GitHub pada `main`
   dan agen membalas `applied`. Bukti dari log job run `37209210419` (event=push, run_number=4,
   `completed/success`, 14:25:31Z→14:26:49Z = 78 s):
