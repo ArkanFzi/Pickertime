@@ -205,7 +205,13 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
     (`//iam.googleapis.com/projects/.../providers/pickertime-provider`), bukan `sts.googleapis.com`.
     Karena itu `deploy.yml` WAJIB mengoper `audience:`; tanpa itu token GitHub ditolak STS.
   Kode yang masuk repo: `tools/deploy/pickertime-pb-agent.sh` (agen di VM),
-  `pickertime-pb-agent.{service,timer}` (cek antrean 60s, `Conflicts=pickertime-pb-backup.service`),
+  `pickertime-pb-agent.{service,timer}` (cek antrean 60s, dulu `Conflicts=pickertime-pb-backup.service`
+  — **dilepas 2026-10-11**: `Conflicts=` terbukti membunuh job backup pada level aktivasi, jauh sebelum
+  `ExecStart` mana pun, jadi mutual exclusion pindah ke satu arah di unit backup
+  (`ExecStartPre=-systemctl stop pickertime-pb-agent.timer` + `ExecStopPost=...start...timer`) plus
+  `backup_active()`/`yield_backup()` di agen dan `agent_active()`/`AGENT_WAIT=120` di skrip backup;
+  predikatnya wajib `systemctl is-active --value` karena oneshot yang sedang jalan berstatus
+  `activating` dan `is-active --quiet` membalas rc=3 untuk itu),
   `tools/deploy/publish-pb-deploy.sh` (penerbit + penunggu hasil),
   `tools/deploy/install-pb-agent.sh` (pasang lewat IAP), `.github/workflows/deploy.yml`.
   Uji nyata berurutan di produksi:
@@ -669,6 +675,15 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   Mitigasi: timer di-`restart` (re-arm, 2026-10-04 14:06Z), backup manual menyegarkan `LAST_OK`,
   dan gerbang umur-26-jam di alat deteksi otomatis kalau terulang Oct 5. Status: RUNNING
   (selesai = 8 baris HIJAU berurutan di p8.log, target 2026-10-12)
+  - [ ] Retensi lokal `pickertime-pb-backup.sh` (`LOCAL_KEEP=5`, baris 121-124) menyusun daftar buangan
+    dari `ls -1t` (mtime) saja dan tidak pernah tahu zip-nya sudah dipublish; yatim dari jalan yang
+    dipotong sebelum `:publish` ikut terbuang. Terukur 2026-10-11: `pb_backup_acme_20261006032628.zip`
+    (sisa jalan 6 Okt 03:26 yang dibunuh `status=15/TERM`) dibuang oleh retensi dan bucket tidak punya
+    penggantinya — `gcloud storage ls -r gs://pickertime-pb-backups/` = 16 objek, 0 pencocokan `20261006`.
+    Bentuk terkecil: ledger append-only `KEY` untuk publish yang `200`, retensi men-skip yang tidak ada
+    di ledger + baris `waspada` (jangan tanya ke bucket: VM ini cuma ber-scope `devstorage.read_only`).
+    Ditahan sampai api timer 2026-10-12 03:28:55 UTC lewat supaya bukti T-34 tetap satu variabel.
+    Register + tabel: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62, baris T-36. Status: BLOCKED-user
 - [x] **P9** E1 ditutup nyata: `deploy.yml` tereksekusi otomatis di GitHub pada `main`
   dan agen membalas `applied`. Bukti dari log job run `37209210419` (event=push, run_number=4,
   `completed/success`, 14:25:31Z→14:26:49Z = 78 s):
