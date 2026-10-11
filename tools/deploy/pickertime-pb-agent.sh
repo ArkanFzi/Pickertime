@@ -92,6 +92,28 @@ step() { echo "$LOG_PREFIX: ${ID:-?} langkah: $*"; }
 
 pb_ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER"; }
 
+BACKUP_UNIT="${BACKUP_UNIT:-pickertime-pb-backup.service}"
+
+backup_active() { # oneshot yang sedang jalan berstatus `activating`, dan is-active --quiet
+  # membalas FALSE untuk itu — jadi negara transitif ikut dihitung (terukur 2026-10-11).
+  local s
+  s=$(systemctl is-active --value "$BACKUP_UNIT" 2>/dev/null || true)
+  case "$s" in
+    active | activating | reloading | refreshing) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+yield_backup() { # yield_backup <maks_dtk> — 0 begitu backup tidak aktif, 1 kalau masih sibuk
+  local max=${1:-120} waited=0
+  while backup_active; do
+    [ "$waited" -lt "$max" ] || return 1
+    sleep 3
+    waited=$((waited + 3))
+  done
+  return 0
+}
+
 gate() { # gerbang lokal: health + anon harus 401 + superuser auth + baca koleksi
   local url="http://${1}:8090" code tok eml pw c path
   code=$(curl -s -o "$WORK/health.json" -w '%{http_code}' -m 15 "$url/api/health") || { echo "health curl gagal"; return 1; }
@@ -132,8 +154,10 @@ gate_wait() { # coba gerbang sampai container selesai boot; cetak pesan kegagala
   done
 }
 
-do_restart() {
-  local state
+do_restart() { # do_restart [maks_tunggu_backup] — default 120 dtk, jalur pemulihan pakai yang pendek
+  local state wait=${1:-${BACKUP_WAIT:-120}}
+  RESTART_BLOCKED=0
+  if ! yield_backup "$wait"; then RESTART_BLOCKED=1; return 1; fi
   docker restart "$CONTAINER" >/dev/null
   local deadline=$(( $(date +%s) + 60 ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -153,7 +177,7 @@ restore() { # restore <alasan> — ganti pasangan direktori dengan baseline, buk
   mv "$REMOTE_APP/pb_hooks" "$REMOTE_APP/pb_hooks.rolledback-$ID" 2>/dev/null || true
   mv "$REMOTE_APP/pb_migrations" "$REMOTE_APP/pb_migrations.rolledback-$ID" 2>/dev/null || true
   tar -xf "$snap/.deploy-baseline.tar" -C "$REMOTE_APP"
-  do_restart || true
+  do_restart 15 || true
   echo "$LOG_PREFIX: $ID restored ($why)"
 }
 
@@ -210,6 +234,11 @@ apply_deploy() {
   step "gerbang pra-pasang (VM belum diubah)"
   gate "$(pb_ip)" || die "gerbang merah SEBELUM ada perubahan, deploy dibatalkan"
 
+  # Belum ada yang berubah di VM pada titik ini, jadi mundur sekarang bersih total:
+  # snapshot baseline yang diambil setelah backup lewat tetap merekam keadaan asli.
+  step "tahan selama backup aktif"
+  yield_backup "${BACKUP_WAIT:-120}" || bail "backup masih aktif sebelum apply mulai, tidak ada yang diubah"
+
   step "snapshot baseline"
   mkdir -p "$RELEASES/$ID"
   tar -cf "$RELEASES/$ID/.deploy-baseline.tar" -C "$REMOTE_APP" pb_hooks pb_migrations
@@ -222,6 +251,9 @@ apply_deploy() {
 
   step "restart container"
   if ! do_restart; then
+    if [ "${RESTART_BLOCKED:-0}" = 1 ]; then
+      bail "backup masih aktif setelah ${BACKUP_WAIT:-120} dtk, restart ditunda (pesan tidak di-ack)"
+    fi
     if ! restore "container tidak kembali running"; then die "container mati dan baseline tidak ada"; fi
     die "restart gagal, state dikembalikan"
   fi
@@ -240,11 +272,17 @@ rollback_deploy() {
     '' | *[!A-Za-z0-9._-]*) die "snapshot tidak valid: '$target'" ;;
   esac
   [ -f "$RELEASES/$target/.deploy-baseline.tar" ] || die "snapshot tidak ada: $target"
+  yield_backup "${BACKUP_WAIT:-120}" || bail "backup masih aktif sebelum rollback mulai, tidak ada yang diubah"
   # ID sudah di-set dari pesan (rb-<snapshot>), jangan override
   mv "$REMOTE_APP/pb_hooks" "$REMOTE_APP/pb_hooks.rolledback-$ID" 2>/dev/null || true
   mv "$REMOTE_APP/pb_migrations" "$REMOTE_APP/pb_migrations.rolledback-$ID" 2>/dev/null || true
   tar -xf "$RELEASES/$target/.deploy-baseline.tar" -C "$REMOTE_APP"
-  do_restart || die "restart gagal setelah rollback"
+  if ! do_restart; then
+    if [ "${RESTART_BLOCKED:-0}" = 1 ]; then
+      bail "backup masih aktif setelah ${BACKUP_WAIT:-120} dtk, restart rollback ditunda"
+    fi
+    die "restart gagal setelah rollback"
+  fi
   gate_wait || die "gerbang merah setelah rollback"
   finish rolled_back "kembali ke snapshot $target"
 }
@@ -252,6 +290,15 @@ rollback_deploy() {
 mkdir -p "$STATE_DIR" "$RELEASES"
 TOKEN=$(curl -fsS -m 10 -H 'Metadata-Flavor: Google' \
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' | jq -r .access_token)
+
+# Konfleks dua arah (`Conflicts=pickertime-pb-backup.service` di unit) terbukti membunuh BACKUP
+# oleh tick 60 dtk — dan snapshot adalah pihak yang tidak bisa diulang, sedangkan tick idempoten
+# dan timer menarik lagi 60 dtk kemudian (CFG-58). Jadi tick yang mengalah lebih dulu, diukur
+# lewat `is-active --value` karena oneshot yang sedang jalan berstatus `activating`.
+if backup_active; then
+  echo "$LOG_PREFIX: backup aktif, tick dilewati sebelum pull"
+  exit 0
+fi
 
 RESP=$(api POST "${SUB}:pull" '{"maxMessages":1,"returnImmediately":true}') || bail "pull gagal"
 N=$(printf '%s' "$RESP" | jq -r 'if .receivedMessages then (.receivedMessages|length) else 0 end')

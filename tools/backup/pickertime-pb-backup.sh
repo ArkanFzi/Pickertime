@@ -16,6 +16,29 @@ TOPIC=projects/${PROJECT}/topics/pickertime-pb-backups
 LOCAL_KEEP=5
 STATE_FILE="$APP_DIR/backup-state.env"
 
+AGENT_UNIT="${AGENT_UNIT:-pickertime-pb-agent.service}"
+AGENT_WAIT="${AGENT_WAIT:-120}"
+
+agent_active() {
+  local s
+  s=$(systemctl is-active --value "$AGENT_UNIT" 2>/dev/null || true)
+  case "$s" in
+    active | activating | reloading | refreshing) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Tick agen yang sedang apply jangan dibunuh: apply setengah jalan berarti berkas baru sudah
+# terpasang tapi container belum restart. Timer agen sudah berhenti di ExecStartPre, jadi yang
+# tersisa tinggal tick yang terlanjur jalan — ditunggu, bukan distop.
+for _ in $(seq 1 "$AGENT_WAIT"); do
+  agent_active || break
+  sleep 1
+done
+if agent_active; then
+  echo "waspada: tick agen masih jalan setelah ${AGENT_WAIT} dtk, snapshot tetap dijalankan"
+fi
+
 envval() {
   awk -F= -v k="$1" '$1==k { print substr($0, index($0, "=") + 1) }' "$APP_DIR/.env" | head -1
 }
@@ -55,6 +78,10 @@ fi
 
 SRC="$APP_DIR/pb_data/backups/$KEY"
 [ -f "$SRC" ] || { echo "file backup tidak ditemukan: $SRC" >&2; exit 1; }
+# zip + sidecar .attrs dibuat PocketBase di dalam kontainer (root, umask 0022) lewat
+# bind mount, jadi `umask 077` di baris 10 tidak pernah menyasar berkas ini.
+chmod 600 "$SRC"
+if [ -f "$SRC.attrs" ]; then chmod 600 "$SRC.attrs"; fi
 
 SIZE=$(stat -c %s "$SRC")
 MD5=$(python3 -c 'import hashlib,base64,sys;print(base64.b64encode(hashlib.md5(open(sys.argv[1],"rb").read()).digest()).decode())' "$SRC")
