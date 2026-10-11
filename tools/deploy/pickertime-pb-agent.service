@@ -3,9 +3,11 @@ Description=Agen deploy pb_hooks/pb_migrations Pickertime (tarik dari Pub/Sub)
 Documentation=file:/opt/pickertime/pickertime-pb-agent.sh
 After=network-online.target docker.service
 Wants=network-online.target
-# Backup membuat snapshot lewat API lalu membaca pb_data; restart container di tengah
-# proses itu membuat backup gagal. Jangan berjalan bersamaan.
-Conflicts=pickertime-pb-backup.service
+# Conflicts=pickertime-pb-backup.service dipasang di sini dan bekerja DUA ARAH: start backup
+# membunuh tick (tidak apa-apa), tapi tick 60 dtk berikutnya membunuh BACKUP — dan itu yang
+# terbukur mematikan snapshot (CFG-58, 2026-10-11). Proteksi snapshot sekarang milik skripnya:
+# tick melewatkan diri kalau unit backup aktif, dan do_restart menunggu sampai unit itu idle.
+# Unit backup menahan timer agen selama snapshot berjalan, jadi tidak ada tick baru yang mulai.
 
 [Service]
 Type=oneshot

@@ -5,7 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Snapshot tidak boleh berbarengan dengan docker restart milik agen deploy. Ini versi satu arah
+# dari Conflicts= (yang terbukti membunuh backup oleh tick 60 dtk — CFG-58): timer agen dihentikan
+# supaya tidak ada tick baru, dan agen sendiri menahan restart selama unit ini aktif. Tick yang
+# terlanjur jalan TIDAK dihentikan di sini — menghentikan service di tengah apply meninggalkan
+# berkas baru tanpa restart; skrip backup yang menunggu sampai tick idle. Prefiks `-` = kalau
+# stop timer gagal, backup tetap jalan; yang melindungi datanya tetap guard di dalam skrip.
+ExecStartPre=-/usr/bin/systemctl stop pickertime-pb-agent.timer
 ExecStart=/opt/pickertime/pickertime-pb-backup.sh
+ExecStopPost=/usr/bin/systemctl start pickertime-pb-agent.timer
 TimeoutStartSec=600
 Nice=10
 IOSchedulingClass=best-effort

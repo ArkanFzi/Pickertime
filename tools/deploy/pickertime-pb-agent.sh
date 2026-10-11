@@ -94,7 +94,15 @@ pb_ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{
 
 BACKUP_UNIT="${BACKUP_UNIT:-pickertime-pb-backup.service}"
 
-backup_active() { systemctl is-active --quiet "$BACKUP_UNIT"; }
+backup_active() { # oneshot yang sedang jalan berstatus `activating`, dan is-active --quiet
+  # membalas FALSE untuk itu — jadi negara transitif ikut dihitung (terukur 2026-10-11).
+  local s
+  s=$(systemctl is-active --value "$BACKUP_UNIT" 2>/dev/null || true)
+  case "$s" in
+    active | activating | reloading | refreshing) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 yield_backup() { # yield_backup <maks_dtk> — 0 begitu backup tidak aktif, 1 kalau masih sibuk
   local max=${1:-120} waited=0
@@ -283,9 +291,10 @@ mkdir -p "$STATE_DIR" "$RELEASES"
 TOKEN=$(curl -fsS -m 10 -H 'Metadata-Flavor: Google' \
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' | jq -r .access_token)
 
-# Conflicts=pickertime-pb-backup.service di unit ini bekerja DUA ARAH: kalau backup start sambil
-# tick berjalan, systemd membunuh BACKUP — dan snapshot adalah pihak yang tidak bisa diulang,
-# sedangkan tick idempoten dan timer menarik lagi 60 dtk kemudian. Jadi tick mengalah lebih dulu.
+# Konfleks dua arah (`Conflicts=pickertime-pb-backup.service` di unit) terbukti membunuh BACKUP
+# oleh tick 60 dtk — dan snapshot adalah pihak yang tidak bisa diulang, sedangkan tick idempoten
+# dan timer menarik lagi 60 dtk kemudian (CFG-58). Jadi tick yang mengalah lebih dulu, diukur
+# lewat `is-active --value` karena oneshot yang sedang jalan berstatus `activating`.
 if backup_active; then
   echo "$LOG_PREFIX: backup aktif, tick dilewati sebelum pull"
   exit 0

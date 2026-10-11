@@ -16,6 +16,29 @@ TOPIC=projects/${PROJECT}/topics/pickertime-pb-backups
 LOCAL_KEEP=5
 STATE_FILE="$APP_DIR/backup-state.env"
 
+AGENT_UNIT="${AGENT_UNIT:-pickertime-pb-agent.service}"
+AGENT_WAIT="${AGENT_WAIT:-120}"
+
+agent_active() {
+  local s
+  s=$(systemctl is-active --value "$AGENT_UNIT" 2>/dev/null || true)
+  case "$s" in
+    active | activating | reloading | refreshing) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Tick agen yang sedang apply jangan dibunuh: apply setengah jalan berarti berkas baru sudah
+# terpasang tapi container belum restart. Timer agen sudah berhenti di ExecStartPre, jadi yang
+# tersisa tinggal tick yang terlanjur jalan — ditunggu, bukan distop.
+for _ in $(seq 1 "$AGENT_WAIT"); do
+  agent_active || break
+  sleep 1
+done
+if agent_active; then
+  echo "waspada: tick agen masih jalan setelah ${AGENT_WAIT} dtk, snapshot tetap dijalankan"
+fi
+
 envval() {
   awk -F= -v k="$1" '$1==k { print substr($0, index($0, "=") + 1) }' "$APP_DIR/.env" | head -1
 }
