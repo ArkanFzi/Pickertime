@@ -705,8 +705,9 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
     `LOCAL_MAX=3` → dua pembuangan, keduanya tercatat yatim; **F** di bawah kuota → **nol** penghapusan;
     **G** ledger tidak pernah ditulis ulang oleh retensi dan langit-langit memilih yang terpublish lebih
     dulu. `bash -n` bersih di kedua berkas dan guard H4 (nol `set -x`) tetap 0 hit; harness ikut ke repo
-    karena `/tmp/t36-scratch` **terhapus reaper** sebelum sempat kupakai hari ini, dan karena ia kini
-    terjaring job CI "Lint perkakas shell".
+    karena `/tmp/t36-scratch` **terhapus reaper** sebelum sempat kupakai hari ini. **Ia juga dijalankan CI**,
+    bukan cuma di-lint: langkah baru `Regresi retensi lokal backup (T-36, nol tulis ke produksi)` di job
+    "Lint perkakas shell" `.github/workflows/ci.yml` — 22 assertion itu tidak lagi cuma angka di laptopku.
     **Belum dipasang di VM, dan itu pilihan sadar:** api timer natural 2026-10-12 03:28:55 UTC masih
     satu-satunya bukti satu-variabel untuk `Conflicts=` yang dilepas (T-34), jadi menukar skrip sebelum
     api itu lewat akan mencampur dua variabel. Yang perlu dibaca sebelum pasang: VM belum punya ledger,
