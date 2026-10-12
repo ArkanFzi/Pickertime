@@ -715,9 +715,13 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
     yang akan memangkas kalau jumlahnya lewat, artinya arah salahnya menyimpan terlalu banyak, bukan
     terlalu sedikit. Backfill ledger dari bucket sengaja TIDAK dibuat: menanyakan bucket sudah ditolak di
     desain (VM ini cuma ber-scope `devstorage.read_only`) dan catatan scratch `docs/12` §1.38.
-    Register: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62, baris T-36. Status: **PR TERBUKA,
-    install menunggu** (cabang `fix/pb-agent-yield-backup` sudah jadi bagian `dev` lewat #39, jadi tanah
-    bercabangnya bersih — yang menahan tinggal merge pemilik + jendela pasang)
+    Register: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62, baris T-36. Status: **TERGABUNG ke `dev`,
+    install VM menunggu** — PR #40 di-merge atas perintah pemilik (`gh pr merge 40 --merge`) jadi commit merge
+    `04a4d85` pada 2026-10-12T02:39:05Z (orang tua `da5dfe9` + `bff1aef`, cabang head dipertahankan), CI `push` ke
+    `dev` run `38196618244` `completed success` tujuh job dan langkah regresi itu mencetak `LULUS=22 GAGAL=0`
+    di runner, bukan cuma di laptopku; `deploy.yml` tetap diam (run terakhir masih `37628720967`) karena trigger
+    `push`-nya `main`. Yang menahan sekarang cuma satu hal: jendela pasang di VM, dan itu tetap menunggu
+    api timer natural 2026-10-12 03:28:55 UTC lewat dulu supaya bukti T-34 tetap satu variabel.
 - [x] **P9** E1 ditutup nyata: `deploy.yml` tereksekusi otomatis di GitHub pada `main`
   dan agen membalas `applied`. Bukti dari log job run `37209210419` (event=push, run_number=4,
   `completed/success`, 14:25:31Z→14:26:49Z = 78 s):
