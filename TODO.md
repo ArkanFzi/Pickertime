@@ -675,7 +675,8 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   - [ ] Keputusan M5.4 (delete fine-grained PAT) — butuh keputusan pemilik. Status: BLOCKED-user
 - [ ] **P8** Bukti 8 hari bersih (T-14). Alat: `tools/deploy/pb-stability-check.sh`
   (ukur `backup_umur_jam` < 26, `hasil_terendap` = 0, `health_http` = 200; append harian ke
-  `~/.local/state/pickertime-stability/p8.log`). Cron laptop `5 8 * * *` aktif 2026-10-04.
+  `~/.local/state/pickertime-stability/p8.log`). Cron laptop `5 8 * * *` aktif 2026-10-04,
+  **diganti timer user systemd 2026-10-12** (lihat "dua kegagalan terpisah" di bawah).
   **Buta tujuh hari, dan ini terukur 2026-10-12:** `p8.log` berisi dua baris HIJAU manual pada Day-0
   (`2026-10-04T14:08:35Z`, `14:32:05Z`) lalu **tujuh baris `ERROR: LAST_OK tidak terbaca ('kosong')`**
   berturut-turut 5,6,7,8,9,10,11 Oktober — dan hari ini (target hari ke-8) tidak punya baris sama sekali
@@ -690,12 +691,46 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   di satu mesin tidak punya jalur update). Konsekuensi yang harus dibaca jujur: **P8 belum 8 hari bersih** —
   yang hilang bukan hanya tujuh baris log, tapi tujuh hari deteksi, dan itu persis kelas CFG-55 (jaring yang
   tidak berbunyi saat jalurnya salah). Hitungan hari mulai ulang dari 2026-10-12.
+  **Dua kegagalan terpisah, dan yang kedua baru ketahuan hari ini:** kesalahan PATH di atas bukan satu-satunya.
+  Slot 08:05 lokal pada 12 Oktober **tidak menghasilkan baris apa pun** — bukan ERROR, tapi diam — karena
+  mesinnya mati: `last -x` membalas `shutdown … Mon Oct 12 01:15 - 09:09 (07:54)` lalu `reboot … Mon Oct 12 09:09`,
+  `cron.service` baru `active (running) since Mon 2026-10-12 09:36:11 WIB`, dan
+  `journalctl -b --since "2026-10-12 07:40" --until "2026-10-12 08:30"` = `-- No entries --`. Cron biasa tidak
+  mengejar, sementara `anacron` yang terpasang hanya menagih `/etc/cron.daily` (baris `1 5 cron.daily` di
+  `/etc/anacrontab`), bukan crontab user. Akibatnya "hari tanpa baris" dan "penjaga mati" menghasilkan bentuk
+  log yang tidak bisa dibedakan — dan pelajaran `Persistent=true` sudah ditulis lebih dulu di unit backup laptop
+  (`openclaw-docker/scripts/ops/systemd/laptop/agentic-laptop-backup.timer`: "sehari yang terlewat tidak hilang
+  diam-diam seperti pada cron biasa") sementara alatku sendiri masih cron. Perbaikannya
+  `tools/deploy/systemd/laptop/pickertime-p8-check.{service,timer}` (`OnCalendar=*-*-* 08:05:00`,
+  `Persistent=true`, `Environment=P8_PEMICU=timer`), dipasang lewat `systemctl --user enable --now` di atas
+  `Linger=yes` yang memang sudah aktif; terukur `is-active=active`, `is-enabled=enabled`,
+  `NEXT Tue 2026-10-13 08:05:00 WIB`, dan satu jalan lewat unit:
+  `systemctl --user start pickertime-p8-check.service` rc=0 →
+  `P8 2026-10-12T05:23:58Z pemicu=timer backup_umur_jam=1 hasil_terendap=0 health_http=200 STATUS=HIJAU`,
+  journal `Starting` → `Finished` dalam 7 detik. Baris crontab-nya dilepas dengan cadangan
+  `~/.local/state/pickertime-stability/crontab-backup-20261012T0524Z.txt` dan `diff` yang cuma menunjuk dua baris
+  itu (14 → 12 baris, `grep -c pb-stability-check` = 0).
+  **Kenapa ada field `pemicu=`:** log bukti ini tidak bisa membedakan run manual dari hari bersih, dan ketiganya
+  berbaris rapi — `05:11:29Z`, `05:11:47Z`, `05:12:27Z` pada 12 Oktober semuanya jalanku sendiri; tanpa field itu
+  aku sedang menghitung tiga hari dari satu jariku. Sekarang kedua cabang keluaran membawa `pemicu=`, dan cabang
+  ERROR ikut dibetulkan supaya menunjuk alat yang mati:
+  `env -i PATH=/usr/bin:/bin HOME=/tmp/p8-uji-negatif /bin/bash tools/deploy/pb-stability-check.sh` →
+  `P8 2026-10-12 ERROR pemicu=manual: LAST_OK tidak terbaca ('kosong') -- sebab: gcloud tidak ada di PATH
+  (/tmp/p8-uji-negatif/.local/bin:/usr/bin:/bin)`, rc=1; sebelumnya pesan ini identik untuk dua sebab yang berbeda.
+  `systemd-analyze verify --user` untuk kedua unit: rc=0 (keluhan yang tercetak semuanya dari
+  `hermes-local-gateway.service` milik orang lain, bukan dari berkas baru).
+  **Batas yang harus dibaca jujur:** `Persistent=true` menggabungkan beberapa hari terlewat menjadi SATU run
+  tanggap, dan yang membuktikan kalender menendang adalah `LAST` pada `systemctl --user list-timers` / journal —
+  bukan p8.log. Jadi "8 baris HIJAU berurutan" berarti 8 run berturut-turut, bukan 8 hari kalender. Kerapuhan
+  lama tetap ada: unit memanggil **worktree** di `/home/arkan/Documents/Coding/Pickertime`, jadi selama PR #42
+  belum ter-merge dan laptop pindah branch, fix PATH dan field `pemicu=` hilang dari jalur harian.
   Day-0 (2026-10-04T14:08Z): `backup_umur_jam=0 hasil_terendap=0 health_http=200 STATUS=HIJAU`.
   **Temuan di Day-0**: timer backup men-elapse Oct 4 03:25:45 UTC tanpa pernah men-start service
   (nol jejak journal; satu-satunya perubahan sebelumnya = manual `systemctl start` Oct 3 14:56).
   Mitigasi: timer di-`restart` (re-arm, 2026-10-04 14:06Z), backup manual menyegarkan `LAST_OK`,
   dan gerbang umur-26-jam di alat deteksi otomatis kalau terulang Oct 5. Status: RUNNING
-  (selesai = 8 baris HIJAU berurutan di p8.log, target 2026-10-12)
+  (selesai = 8 baris HIJAU berurutan di p8.log, mulai ulang 2026-10-12 → target 2026-10-19;
+  target lama 2026-10-12 dinyatakan gugur karena deteksinya buta 5-11 Oktober dan diam pada 12 Oktober)
   - [ ] Retensi lokal `pickertime-pb-backup.sh` (`LOCAL_KEEP=5`, dahulu baris 121-124) menyusun daftar buangan
     dari `ls -1t` (mtime) saja dan tidak pernah tahu zip-nya sudah dipublish; yatim dari jalan yang
     dipotong sebelum `:publish` ikut terbuang. Terukur 2026-10-11: `pb_backup_acme_20261006032628.zip`

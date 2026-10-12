@@ -8,6 +8,9 @@
 #
 # Keluaran: satu baris `P8 <tanggal> ... STATUS=HIJAU|MERAH` di stdout,
 # plus append ke $LOG_FILE supaya bisa dibaca ulang tanpa histories session.
+# `pemicu=` membedakan baris yang dihasilkan scheduler (Environment=P8_PEMICU=timer
+# di unit systemd) dari baris yang kungetik sendiri; tanpa itu log bukti tidak bisa
+# memisahkan hari bersih dari run manual.
 # Tidak pernah menyentuh state VM — semuanya baca-saja.
 set -euo pipefail
 
@@ -17,6 +20,7 @@ set -euo pipefail
 # "jalur backup mati". PATH diisi ulang di sini supaya alatnya benar di scheduler mana pun,
 # bukan di baris crontab yang tidak ikut ke repo.
 PATH="$HOME/.local/bin:$PATH"
+PEMICU="${P8_PEMICU:-manual}"
 
 PROJECT="${PROJECT:-config-agentic-ubuntu}"
 VM="${VM:-hermes-openclaw-vm}"
@@ -39,7 +43,16 @@ LAST_OK=${pair%% *}
 STALE_FAILED=${pair##* }
 
 if [ -z "$LAST_OK" ] || ! date -d "$LAST_OK" >/dev/null 2>&1; then
-  echo "P8 $(date -u +%F) ERROR: LAST_OK tidak terbaca ('${LAST_OK:-kosong}')" | tee -a "$LOG_FILE"
+  # Pesan harus menunjuk alat yang mati, bukan data. Dulu kedua sebab (gcloud tidak
+  # ketemu di PATH, dan ssh memang mengembalikan kosong) dicetak identik, jadi tujuh
+  # hari kebutaan PATH terbaca seperti masalah state VM.
+  SEBAB="ssh/read_last_ok mengembalikan kosong"
+  if ! command -v gcloud >/dev/null 2>&1; then
+    SEBAB="gcloud tidak ada di PATH ($PATH)"
+  elif [ ! -d "$HOME/.config/gcloud" ]; then
+    SEBAB="kredensial gcloud tidak ada (~/.config/gcloud kosong)"
+  fi
+  echo "P8 $(date -u +%F) ERROR pemicu=$PEMICU: LAST_OK tidak terbaca ('${LAST_OK:-kosong}') -- sebab: $SEBAB" | tee -a "$LOG_FILE"
   exit 1
 fi
 
@@ -54,6 +67,6 @@ STATUS=HIJAU
 [ "${STALE_FAILED:-1}" = "0" ] || STATUS=MERAH
 [ "$HEALTH" = "200" ] || STATUS=MERAH
 
-line="P8 $(date -u +%FT%TZ) backup_umur_jam=$AGE_H hasil_terendap=${STALE_FAILED:-?} health_http=$HEALTH STATUS=$STATUS"
+line="P8 $(date -u +%FT%TZ) pemicu=$PEMICU backup_umur_jam=$AGE_H hasil_terendap=${STALE_FAILED:-?} health_http=$HEALTH STATUS=$STATUS"
 printf '%s\n' "$line" | tee -a "$LOG_FILE"
 [ "$STATUS" = "HIJAU" ]

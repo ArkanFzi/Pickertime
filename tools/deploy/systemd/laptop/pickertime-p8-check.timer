@@ -1,0 +1,14 @@
+[Unit]
+Description=Ukuran harian P8 Pickertime pukul 08:05, dengan penagihan hari yang terlewat
+
+[Timer]
+OnCalendar=*-*-* 08:05:00
+# Pengganti baris crontab `5 8 * * *` (dipasang 2026-10-04). Bedanya satu tapi menentukan:
+# cron tidak mengejar. Terukur 2026-10-12: mesin mati 01:15-09:09 lokal sehingga slot 08:05
+# terlewat dan log berisi nol baris untuk hari itu -- tidak bisa dibedakan dari penjaga yang
+# mati. Persistent=true menjalankan sekali tanggap begitu sesi user aktif lagi.
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
