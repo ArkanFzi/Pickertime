@@ -682,21 +682,42 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   Mitigasi: timer di-`restart` (re-arm, 2026-10-04 14:06Z), backup manual menyegarkan `LAST_OK`,
   dan gerbang umur-26-jam di alat deteksi otomatis kalau terulang Oct 5. Status: RUNNING
   (selesai = 8 baris HIJAU berurutan di p8.log, target 2026-10-12)
-  - [ ] Retensi lokal `pickertime-pb-backup.sh` (`LOCAL_KEEP=5`, baris 121-124) menyusun daftar buangan
+  - [ ] Retensi lokal `pickertime-pb-backup.sh` (`LOCAL_KEEP=5`, dahulu baris 121-124) menyusun daftar buangan
     dari `ls -1t` (mtime) saja dan tidak pernah tahu zip-nya sudah dipublish; yatim dari jalan yang
     dipotong sebelum `:publish` ikut terbuang. Terukur 2026-10-11: `pb_backup_acme_20261006032628.zip`
     (sisa jalan 6 Okt 03:26 yang dibunuh `status=15/TERM`) dibuang oleh retensi dan bucket tidak punya
     penggantinya — `gcloud storage ls -r gs://pickertime-pb-backups/` = 16 objek, 0 pencocokan `20261006`.
-    Bentuk terkecil: ledger append-only `KEY` untuk publish yang `200`, retensi men-skip yang tidak ada
-    di ledger + baris `waspada` (jangan tanya ke bucket: VM ini cuma ber-scope `devstorage.read_only`).
-    Bentuknya sudah teruji di scratch 2026-10-11 (`/tmp/t36-scratch/run.sh`, nol tulis ke produksi): blok
-    sekarang terbukti membuang yatim; ledger menahan yatim dan tetap membuang yang terpublish; dan ledger
-    yang hilang membuat `LOCAL_KEEP` jadi no-op (6 zip pada kuota 2) — jadi perlu langit-langit keras
-    `LOCAL_MAX` supaya batas byte T-14 tetap tegak. Detail: `docs/12-fase-1-dasar.md` §1.38.
-    Ditahan sampai api timer 2026-10-12 03:28:55 UTC lewat supaya bukti T-34 tetap satu variabel.
-    Register + tabel: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62, baris T-36. Status: BLOCKED-user
-    (cabang `fix/pb-agent-yield-backup` sudah jadi bagian `dev` lewat #39, jadi T-36 punya tanah bersih
-    untuk bercabang — yang menahan tinggal keputusan menulis ke skrip produksi dan api timer natural)
+    **DIPERBAIKI 2026-10-11** (cabang `fix/retensi-lokal-ledger`, PR ke `dev`): publish yang membalas
+    `200` kini menambahkan satu baris `KEY` ke ledger append-only `backup-published.log` **sebelum** retensi
+    berjalan, `apply_retention()` men-skip zip yang tidak ada di ledger (tiap skip mencetak `waspada`,
+    kuota `LOCAL_KEEP=5` tidak lagi buta status offload), lalu `LOCAL_MAX=10` jadi langit-langit keras
+    yang membuang dari tertua dan **mendahului yang terpublish** — yatim hanya tersentuh kalau tidak ada
+    lagi yang terpublish, dan itu pun dengan baris waspada yang menamainya. `LOCAL_KEEP`/`LOCAL_MAX`/
+    `LEDGER_FILE`/`BACKUP_DIR` kini bisa dioverride env (pola `AGENT_UNIT`/`AGENT_WAIT` yang sudah ada),
+    dan blok retensi dibungkus fungsi supaya perkakas uji bisa menjalankan byte yang sama.
+    **Uji nyata: `tools/backup/test-pb-retention-ledger.sh` → `LULUS=22 GAGAL=0`, `rc=0`.** Harness itu
+    mengekstrak `apply_retention` dari skrip produksi lewat `awk` (bukan salinan yang ditulis ulang) dan
+    menjalankan tujuh kasus: **A** kontrol negatif — guard ledger dibuang lewat `sed` dan yatim terbuang
+    lagi, jadi regresi ini terbukti punya gigi; **B** yatim hidup, tepat dua zip terpublish terbuang,
+    tidak ada `.attrs` yatim tertinggal; **C** pengecualian dibalik oleh **satu baris ledger** tanpa
+    mengubah kode; **D** ledger hilang sama sekali → kuota menahan tiga yatim **tetapi `LOCAL_MAX` tetap
+    menegakkan batas** (no-op yang kuterukur di scratch kemarin tertutup di sini); **E** ledger kosong +
+    `LOCAL_MAX=3` → dua pembuangan, keduanya tercatat yatim; **F** di bawah kuota → **nol** penghapusan;
+    **G** ledger tidak pernah ditulis ulang oleh retensi dan langit-langit memilih yang terpublish lebih
+    dulu. `bash -n` bersih di kedua berkas dan guard H4 (nol `set -x`) tetap 0 hit; harness ikut ke repo
+    karena `/tmp/t36-scratch` **terhapus reaper** sebelum sempat kupakai hari ini. **Ia juga dijalankan CI**,
+    bukan cuma di-lint: langkah baru `Regresi retensi lokal backup (T-36, nol tulis ke produksi)` di job
+    "Lint perkakas shell" `.github/workflows/ci.yml` — 22 assertion itu tidak lagi cuma angka di laptopku.
+    **Belum dipasang di VM, dan itu pilihan sadar:** api timer natural 2026-10-12 03:28:55 UTC masih
+    satu-satunya bukti satu-variabel untuk `Conflicts=` yang dilepas (T-34), jadi menukar skrip sebelum
+    api itu lewat akan mencampur dua variabel. Yang perlu dibaca sebelum pasang: VM belum punya ledger,
+    jadi pada jalan pertama semua zip yang ada dianggap "tidak tercatat" dan ditahan kuota — `LOCAL_MAX`
+    yang akan memangkas kalau jumlahnya lewat, artinya arah salahnya menyimpan terlalu banyak, bukan
+    terlalu sedikit. Backfill ledger dari bucket sengaja TIDAK dibuat: menanyakan bucket sudah ditolak di
+    desain (VM ini cuma ber-scope `devstorage.read_only`) dan catatan scratch `docs/12` §1.38.
+    Register: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62, baris T-36. Status: **PR TERBUKA,
+    install menunggu** (cabang `fix/pb-agent-yield-backup` sudah jadi bagian `dev` lewat #39, jadi tanah
+    bercabangnya bersih — yang menahan tinggal merge pemilik + jendela pasang)
 - [x] **P9** E1 ditutup nyata: `deploy.yml` tereksekusi otomatis di GitHub pada `main`
   dan agen membalas `applied`. Bukti dari log job run `37209210419` (event=push, run_number=4,
   `completed/success`, 14:25:31Z→14:26:49Z = 78 s):

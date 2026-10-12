@@ -13,7 +13,10 @@ APP_DIR=/opt/pickertime
 CONTAINER=pickertime-pocketbase
 PROJECT=config-agentic-ubuntu
 TOPIC=projects/${PROJECT}/topics/pickertime-pb-backups
-LOCAL_KEEP=5
+BACKUP_DIR="${BACKUP_DIR:-$APP_DIR/pb_data/backups}"
+LOCAL_KEEP="${LOCAL_KEEP:-5}"
+LOCAL_MAX="${LOCAL_MAX:-10}"
+LEDGER_FILE="${LEDGER_FILE:-$APP_DIR/backup-published.log}"
 STATE_FILE="$APP_DIR/backup-state.env"
 
 AGENT_UNIT="${AGENT_UNIT:-pickertime-pb-agent.service}"
@@ -41,6 +44,57 @@ fi
 
 envval() {
   awk -F= -v k="$1" '$1==k { print substr($0, index($0, "=") + 1) }' "$APP_DIR/.env" | head -1
+}
+
+ledger_has() { grep -qxF "$(basename "$1")" "$LEDGER_FILE" 2>/dev/null; }
+
+# Retensi dibungkus fungsi supaya harness scratch menjalankan byte yang sama dengan yang
+# terpasang di produksi; lubang CFG-62 lahir justru dari blok yang tidak bisa diuji terpisah.
+apply_retention() {
+  local f b victim note n n2
+  local -a stale
+  if [ ! -f "$LEDGER_FILE" ]; then
+    echo "waspada: ledger offload tidak ada di $LEDGER_FILE, kuota tidak bisa membedakan yatim"
+  fi
+
+  # Kuota harian: yang tidak tercatat membalas 200 saat publish ditahan, bukan dibuang.
+  mapfile -t stale < <(ls -1t "$BACKUP_DIR"/*.zip 2>/dev/null | tail -n +$((LOCAL_KEEP + 1)))
+  for f in "${stale[@]}"; do
+    [ -f "$f" ] || continue
+    b=$(basename "$f")
+    if ledger_has "$f"; then
+      rm -f "$f" "${f}.attrs" && echo "buang backup lokal $b (terpublish, kuota $LOCAL_KEEP)"
+    else
+      echo "waspada: $b tidak tercatat terpublish, ditahan dari kuota $LOCAL_KEEP"
+    fi
+  done
+
+  # Langit-langit keras. Tanpa ini ledger yang hilang membuat retensi jadi no-op dan disk
+  # tumbuh tanpa batas; yatim hanya tersentuh kalau tidak ada lagi yang terpublikasi.
+  while :; do
+    n=$(ls -1 "$BACKUP_DIR"/*.zip 2>/dev/null | wc -l)
+    [ "$n" -le "$LOCAL_MAX" ] && break
+    victim=$(ls -1tr "$BACKUP_DIR"/*.zip 2>/dev/null | while IFS= read -r f; do
+      ledger_has "$f" && echo "$f"
+    done | head -n1)
+    note="terpublish"
+    if [ -z "$victim" ]; then
+      victim=$(ls -1tr "$BACKUP_DIR"/*.zip 2>/dev/null | head -n1)
+      [ -n "$victim" ] || break
+      note="yatim"
+    fi
+    b=$(basename "$victim")
+    rm -f "$victim" "${victim}.attrs"
+    n2=$(ls -1 "$BACKUP_DIR"/*.zip 2>/dev/null | wc -l)
+    if [ "$n2" -ge "$n" ]; then
+      echo "waspada: langit-langit $LOCAL_MAX gagal ditegakkan, $b tidak benar-benar terhapus"
+      break
+    fi
+    if [ "$note" = "yatim" ]; then
+      echo "waspada: langit-langit $LOCAL_MAX memaksa yatim tertua $b dibuang padahal offload-nya tidak tercatat"
+    fi
+    echo "buang backup lokal $b ($note, langit-langit $LOCAL_MAX)"
+  done
 }
 
 PB_EMAIL="$(envval PB_ADMIN_EMAIL)"
@@ -76,7 +130,7 @@ if [ -z "$KEY" ]; then
   exit 1
 fi
 
-SRC="$APP_DIR/pb_data/backups/$KEY"
+SRC="$BACKUP_DIR/$KEY"
 [ -f "$SRC" ] || { echo "file backup tidak ditemukan: $SRC" >&2; exit 1; }
 # zip + sidecar .attrs dibuat PocketBase di dalam kontainer (root, umask 0022) lewat
 # bind mount, jadi `umask 077` di baris 10 tidak pernah menyasar berkas ini.
@@ -117,10 +171,12 @@ fi
 printf 'LAST_OK=%s\nLAST_KEY=%s\nLAST_SIZE=%s\nLAST_MD5=%s\nLAST_MESSAGE_ID=%s\n' \
   "$(date -u +%FT%TZ)" "$KEY" "$SIZE" "$MD5" "$MSG_ID" > "$STATE_FILE"
 
+# Ledger append-only: satu baris per KEY yang publish-nya benar-benar membalas 200.
+# state.env ditimpa tiap jalan jadi tidak bisa dipakai sebagai riwayat; tanpa berkas ini
+# retensi tidak bisa membedakan "sudah di relay" dan "mati sebelum publish" (CFG-62).
+printf '%s\n' "$KEY" >> "$LEDGER_FILE"
+
 # Retensi lokal: cadangan di disk VM, terpisah dari retensi 30 hari di bucket GCS.
-mapfile -t stale < <(ls -1t "$APP_DIR"/pb_data/backups/*.zip 2>/dev/null | tail -n +$((LOCAL_KEEP + 1)))
-for f in "${stale[@]}"; do
-  [ -f "$f" ] && rm -f "$f" "${f}.attrs" && echo "buang backup lokal $(basename "$f")"
-done
+apply_retention
 
 echo "OK $KEY ($SIZE byte, md5 $MD5) -> message $MSG_ID"
