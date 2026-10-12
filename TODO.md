@@ -687,6 +687,16 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
     dipotong sebelum `:publish` ikut terbuang. Terukur 2026-10-11: `pb_backup_acme_20261006032628.zip`
     (sisa jalan 6 Okt 03:26 yang dibunuh `status=15/TERM`) dibuang oleh retensi dan bucket tidak punya
     penggantinya — `gcloud storage ls -r gs://pickertime-pb-backups/` = 16 objek, 0 pencocokan `20261006`.
+    Alat baru 2026-10-12 untuk bagian "repo versus yang terpasang" dari baris ini:
+    `tools/backup/pickertime-tools-drift.sh` — sembilan pasangan berkas di dua VM
+    (`hermes-openclaw-vm` enam: `pickertime-pb-backup.{sh,service,timer}` + `pickertime-pb-agent.{sh,service,timer}`;
+    `agentic-watchdog-vm` tiga: `pickertime-pb-relay.{sh,service,timer}`), sha256 sisi repo dari `git show`
+    dan sisi VM lewat satu ssh per host dengan perintah base64 di stdin (nol isi berkas, nol kredensial di
+    argv), keluaran cuma nama + 16 karakter depan hash, `exit 1` saat drift. Terukur dua arah:
+    `REF=origin/dev` → `periksa=9 drift=0`; `REF=da5dfe9` → satu `BEDA repo=22844a75a9107324 vm=95790ab884d2b484`
+    dengan `drift=1 rc=1`, yaitu merah pada selisih yang benar, bukan diam-diam hijau. Ia sengaja TIDAK masuk
+    `ci.yml` (runner tidak punya IAM) dan belum jadi langkah tetap jendela pasang — panggilan manual sebelum
+    setiap install masih prosedur resminya.
     **DIPERBAIKI 2026-10-11** (cabang `fix/retensi-lokal-ledger`, PR ke `dev`): publish yang membalas
     `200` kini menambahkan satu baris `KEY` ke ledger append-only `backup-published.log` **sebelum** retensi
     berjalan, `apply_retention()` men-skip zip yang tidak ada di ledger (tiap skip mencetak `waspada`,
@@ -708,20 +718,19 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
     karena `/tmp/t36-scratch` **terhapus reaper** sebelum sempat kupakai hari ini. **Ia juga dijalankan CI**,
     bukan cuma di-lint: langkah baru `Regresi retensi lokal backup (T-36, nol tulis ke produksi)` di job
     "Lint perkakas shell" `.github/workflows/ci.yml` — 22 assertion itu tidak lagi cuma angka di laptopku.
-    **Belum dipasang di VM, dan itu pilihan sadar:** api timer natural 2026-10-12 03:28:55 UTC masih
-    satu-satunya bukti satu-variabel untuk `Conflicts=` yang dilepas (T-34), jadi menukar skrip sebelum
-    api itu lewat akan mencampur dua variabel. Yang perlu dibaca sebelum pasang: VM belum punya ledger,
-    jadi pada jalan pertama semua zip yang ada dianggap "tidak tercatat" dan ditahan kuota — `LOCAL_MAX`
-    yang akan memangkas kalau jumlahnya lewat, artinya arah salahnya menyimpan terlalu banyak, bukan
-    terlalu sedikit. Backfill ledger dari bucket sengaja TIDAK dibuat: menanyakan bucket sudah ditolak di
-    desain (VM ini cuma ber-scope `devstorage.read_only`) dan catatan scratch `docs/12` §1.38.
-    Register: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62, baris T-36. Status: **TERGABUNG ke `dev`,
-    install VM menunggu** — PR #40 di-merge atas perintah pemilik (`gh pr merge 40 --merge`) jadi commit merge
+    **Sempat tidak dipasang di VM (pilihan sadar), kini TERPASANG 2026-10-12 04:15 UTC.** Alasan menahannya waktu itu: api timer natural 2026-10-12 03:28:55 UTC adalah satu-satunya bukti satu-variabel untuk `Conflicts=` yang dilepas (T-34), dan menukar skrip sebelum api itu lewat akan mencampur dua variabel. Api itu lewat dan terukur `Result=success` pada 03:28:56→03:29:01 UTC, jadi jendela pasang dibuka sesudahnya dengan keadaan awal yang dikukuri lebih dulu: sha256[0:16] `/opt/pickertime/pickertime-pb-backup.sh` = `22844a75a9107324` (identik versi `dev` sebelum T-36), `mtime 2026-10-11 06:00:19 UTC`, `grep -c LOCAL_MAX` = 0, lima zip + lima `.attrs`; salinan lama disimpan di `pickertime-pb-backup.sh.bak-20261012T0415Z`; bahan dipasang dari `git show origin/dev:tools/backup/pickertime-pb-backup.sh` → `95790ab884d2b484`, `755 root:root`, transfer lewat stdin; ledger `backup-published.log` dibuat. **Prediksi aritmetika di bawah ini terbukti di jalan produksi 04:18:09 UTC** (`systemctl start` manual, terukur bukan api timer — journal unit timer 04:10–04:25 kosong): pada 6 zip dengan `LOCAL_KEEP=5` skrip mencetak `waspada: pb_backup_acme_20261011060054.zip tidak tercatat terpublish, ditahan dari kuota 5` dan berakhir `zip=6 attrs=6` — **nol pembuangan, padahal logika lama pasti membuang berkas itu**. Catatan jujur: zip yang ditahan sudah ada di bucket, jadi yang teruji hari ini adalah "ledger kosong → tahan, arah salahnya menyimpan berlebih", bukan penangkapan yatim sungguhan (kelas itu dipegang kasus B/D harness). Backfill ledger dari bucket sengaja TIDAK dibuat: menanyakan bucket sudah ditolak di desain (VM ini cuma ber-scope `devstorage.read_only`).
+    Register: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62, baris T-36; bukti install + jalan produksi
+    tercatat di `openclaw-docker/docs/12-fase-1-dasar.md` §1.51. Status: **TERGABUNG ke `dev` DAN TERPASANG di VM**
+    — PR #40 di-merge atas perintah pemilik (`gh pr merge 40 --merge`) jadi commit merge
     `04a4d85` pada 2026-10-12T02:39:05Z (orang tua `da5dfe9` + `bff1aef`, cabang head dipertahankan), CI `push` ke
     `dev` run `38196618244` `completed success` tujuh job dan langkah regresi itu mencetak `LULUS=22 GAGAL=0`
     di runner, bukan cuma di laptopku; `deploy.yml` tetap diam (run terakhir masih `37628720967`) karena trigger
-    `push`-nya `main`. Yang menahan sekarang cuma satu hal: jendela pasang di VM, dan itu tetap menunggu
-    api timer natural 2026-10-12 03:28:55 UTC lewat dulu supaya bukti T-34 tetap satu variabel.
+    `push`-nya `main`. Yang menahan waktu itu cuma satu hal — jendela pasang di VM, sesudah api timer natural
+    2026-10-12 03:28:55 UTC lewat sebagai bukti satu-variabel T-34 — dan hal itu sudah tidak ada: dipasang
+    04:15 UTC, teruji 04:18 UTC. Sisa yang benar-benar tinggal: api natural pertama **sesudah** pasang jatuh
+    2026-10-13 03:22:51 UTC (ledger baru berisi satu baris, jadi jalan itulah yang pertama kali menggabungkan
+    "buang yang terpublish" dan "tahan yang tidak" di produksi), dan `LOCAL_MAX=10` baru akan memotong kalau
+    direktorinya tumbuh lewat sepuluh berkas.
 - [x] **P9** E1 ditutup nyata: `deploy.yml` tereksekusi otomatis di GitHub pada `main`
   dan agen membalas `applied`. Bukti dari log job run `37209210419` (event=push, run_number=4,
   `completed/success`, 14:25:31Z→14:26:49Z = 78 s):
