@@ -676,6 +676,20 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
 - [ ] **P8** Bukti 8 hari bersih (T-14). Alat: `tools/deploy/pb-stability-check.sh`
   (ukur `backup_umur_jam` < 26, `hasil_terendap` = 0, `health_http` = 200; append harian ke
   `~/.local/state/pickertime-stability/p8.log`). Cron laptop `5 8 * * *` aktif 2026-10-04.
+  **Buta tujuh hari, dan ini terukur 2026-10-12:** `p8.log` berisi dua baris HIJAU manual pada Day-0
+  (`2026-10-04T14:08:35Z`, `14:32:05Z`) lalu **tujuh baris `ERROR: LAST_OK tidak terbaca ('kosong')`**
+  berturut-turut 5,6,7,8,9,10,11 Oktober — dan hari ini (target hari ke-8) tidak punya baris sama sekali
+  sampai jam 05:11 UTC. Penyebabnya bukan backup: cron memanggil `/bin/bash tools/deploy/pb-stability-check.sh`
+  dengan PATH minimal (`/usr/bin:/bin`) sementara `gcloud` tinggal di `~/.local/bin`, jadi `gcloud compute ssh`
+  gagal, `read_last_ok` mengembalikan string kosong, dan skrip menafsirnya sebagai "LAST_OK tidak terbaca".
+  Terukur dua arah: `env -i PATH=/usr/bin:/bin` tanpa fix → alat tidak bisa menemukan `gcloud`
+  (`TIDAK_ADA_DI_PATH_CRON`); dengan `PATH="$HOME/.local/bin:$PATH"` di dalam skrip → `env -i PATH=/usr/bin:/bin
+  HOME=$HOME /bin/bash tools/deploy/pb-stability-check.sh` membalas
+  `P8 2026-10-12T05:12:27Z backup_umur_jam=0 hasil_terendap=0 health_http=200 STATUS=HIJAU`, rc=0.
+  Perbaikannya di skrip, bukan di baris crontab, supaya ikut ke repo (pelajaran CFG-30: state yang cuma hidup
+  di satu mesin tidak punya jalur update). Konsekuensi yang harus dibaca jujur: **P8 belum 8 hari bersih** —
+  yang hilang bukan hanya tujuh baris log, tapi tujuh hari deteksi, dan itu persis kelas CFG-55 (jaring yang
+  tidak berbunyi saat jalurnya salah). Hitungan hari mulai ulang dari 2026-10-12.
   Day-0 (2026-10-04T14:08Z): `backup_umur_jam=0 hasil_terendap=0 health_http=200 STATUS=HIJAU`.
   **Temuan di Day-0**: timer backup men-elapse Oct 4 03:25:45 UTC tanpa pernah men-start service
   (nol jejak journal; satu-satunya perubahan sebelumnya = manual `systemctl start` Oct 3 14:56).

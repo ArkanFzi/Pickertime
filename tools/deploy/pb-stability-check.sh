@@ -11,6 +11,13 @@
 # Tidak pernah menyentuh state VM — semuanya baca-saja.
 set -euo pipefail
 
+# Cron memanggil skrip ini dengan PATH minimal (/usr/bin:/bin), sementara gcloud hidup di
+# ~/.local/bin -- selama tujuh hari (5-11 Okt) itu membuat `gcloud compute ssh` gagal diam-diam,
+# read_last_ok mengembalikan string kosong, dan log mencatat ERROR "LAST_OK tidak terbaca" bukan
+# "jalur backup mati". PATH diisi ulang di sini supaya alatnya benar di scheduler mana pun,
+# bukan di baris crontab yang tidak ikut ke repo.
+PATH="$HOME/.local/bin:$PATH"
+
 PROJECT="${PROJECT:-config-agentic-ubuntu}"
 VM="${VM:-hermes-openclaw-vm}"
 ZONE="${ZONE:-us-central1-a}"
