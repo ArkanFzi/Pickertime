@@ -8,6 +8,15 @@
 # backup di VM ber-sha256[0:16] sama dengan versi `dev` SEBELUM T-36, jadi selisihnya persis
 # blok retensi -- bukan misteri, tapi juga bukan sesuatu yang bisa dilihat tanpa diukur.
 #
+# Dua pasangan terakhir bukan berkas Pickertime: ia berkas repo `ArkanFzi/config-agentic` di
+# checkout VM, dan ia masuk karena CFG-70 -- `/opt/healthcheck/hermes_healthcheck.py` adalah
+# bahan yang dipakai Docker Healthcheck untuk memutuskan merestart kontainer otak, dan
+# tidak satu pun penjaga menyentuhnya. Sengaja pakai sumber sha per-pasangan (`|cfg`), bukan
+# satu REPO global: kalau tidak, `git -C Pickertime show origin/dev:docker-compose.yml`
+# membalas REPO_TIDAK_ADA dan dua pasangan baru itu merah permanen tanpa pernah mengukur apa
+# pun -- kelas kegagalan yang sama dengan CFG-66 (penjaga yang merah karena dirinya sendiri
+# cacat, bukan karena drift).
+#
 # Keluaran HANYA nama berkas + 16 karakter depan sha256 (aturan H13): cukup untuk memutuskan
 # SAMA / BEDA / HILANG, tanpa pernah mencetak isi berkas. Tidak ada `set -x` (H4). Perintah
 # jarak jauh dikirim lewat stdin yang di-base64, jadi tidak ada isi berkas atau kredensial
@@ -16,35 +25,47 @@ set -euo pipefail
 
 REPO="${REPO:-$HOME/Documents/Coding/Pickertime}"
 REF="${REF:-origin/dev}"
+CFG_REPO="${CFG_REPO:-$HOME/openclaw-docker}"
+CFG_REF="${CFG_REF:-origin/master}"
 ZONE="${ZONE:-us-central1-a}"
 PROJECT="${PROJECT:-config-agentic-ubuntu}"
 
-# vm|jalur-di-VM|jalur-di-repo
+# vm|jalur-di-VM|jalur-di-repo|sumber  (sumber: pt = REPO/REF, cfg = CFG_REPO/CFG_REF; kosong = pt)
 PAIRS=(
-  "hermes-openclaw-vm|/opt/pickertime/pickertime-pb-backup.sh|tools/backup/pickertime-pb-backup.sh"
-  "hermes-openclaw-vm|/etc/systemd/system/pickertime-pb-backup.service|tools/backup/pickertime-pb-backup.service"
-  "hermes-openclaw-vm|/etc/systemd/system/pickertime-pb-backup.timer|tools/backup/pickertime-pb-backup.timer"
-  "hermes-openclaw-vm|/opt/pickertime/pickertime-pb-agent.sh|tools/deploy/pickertime-pb-agent.sh"
-  "hermes-openclaw-vm|/etc/systemd/system/pickertime-pb-agent.service|tools/deploy/pickertime-pb-agent.service"
-  "hermes-openclaw-vm|/etc/systemd/system/pickertime-pb-agent.timer|tools/deploy/pickertime-pb-agent.timer"
-  "agentic-watchdog-vm|/opt/pickertime-backups/pickertime-pb-relay.sh|tools/backup/pickertime-pb-relay.sh"
-  "agentic-watchdog-vm|/etc/systemd/system/pickertime-pb-relay.service|tools/backup/pickertime-pb-relay.service"
-  "agentic-watchdog-vm|/etc/systemd/system/pickertime-pb-relay.timer|tools/backup/pickertime-pb-relay.timer"
+  "hermes-openclaw-vm|/opt/pickertime/pickertime-pb-backup.sh|tools/backup/pickertime-pb-backup.sh|pt"
+  "hermes-openclaw-vm|/etc/systemd/system/pickertime-pb-backup.service|tools/backup/pickertime-pb-backup.service|pt"
+  "hermes-openclaw-vm|/etc/systemd/system/pickertime-pb-backup.timer|tools/backup/pickertime-pb-backup.timer|pt"
+  "hermes-openclaw-vm|/opt/pickertime/pickertime-pb-agent.sh|tools/deploy/pickertime-pb-agent.sh|pt"
+  "hermes-openclaw-vm|/etc/systemd/system/pickertime-pb-agent.service|tools/deploy/pickertime-pb-agent.service|pt"
+  "hermes-openclaw-vm|/etc/systemd/system/pickertime-pb-agent.timer|tools/deploy/pickertime-pb-agent.timer|pt"
+  "agentic-watchdog-vm|/opt/pickertime-backups/pickertime-pb-relay.sh|tools/backup/pickertime-pb-relay.sh|pt"
+  "agentic-watchdog-vm|/etc/systemd/system/pickertime-pb-relay.service|tools/backup/pickertime-pb-relay.service|pt"
+  "agentic-watchdog-vm|/etc/systemd/system/pickertime-pb-relay.timer|tools/backup/pickertime-pb-relay.timer|pt"
+  "hermes-openclaw-vm|/home/arkan/openclaw-docker/scripts/hermes_healthcheck.py|scripts/hermes_healthcheck.py|cfg"
+  "hermes-openclaw-vm|/home/arkan/openclaw-docker/docker-compose.yml|docker-compose.yml|cfg"
 )
+
+sumber_dir() { case "$1" in cfg) printf '%s' "$CFG_REPO" ;; *) printf '%s' "$REPO" ;; esac; }
+sumber_ref() { case "$1" in cfg) printf '%s' "$CFG_REF" ;; *) printf '%s' "$REF" ;; esac; }
 
 # sha256 versi repo, dibaca dari git (worktree tidak dipakai supaya hasil tidak bergantung
 # pada keadaan branch yang sedang checked out). Catatan penting: hash HARUS diambil dari pipa
 # `git show | sha256sum`, bukan dari `content=$(git show ...)` -- command substitution
 # menggarong baris kosong akhir, jadi sisi repo dapat sha yang berbeda untuk berkas yang sama
 # dan semua baris keluar BEDA palsu (terukur 2026-10-12: 9/9 BEDA padahal VM identik `dev`).
+# Kunci kamus memuat nama sumber (`pt|...`, `cfg|...`) supaya berkas yang namanya sama di dua
+# repo tidak saling menimpa.
 declare -A REPO_SHA=()
 for entry in "${PAIRS[@]}"; do
-  repo_path="${entry##*|}"
-  if [ -z "${REPO_SHA[$repo_path]+x}" ]; then
-    if git -C "$REPO" cat-file -e "$REF:$repo_path" 2>/dev/null; then
-      REPO_SHA[$repo_path]=$(git -C "$REPO" show "$REF:$repo_path" | sha256sum | cut -c1-16)
+  IFS='|' read -r _ _ repo_path src <<<"$entry"
+  src="${src:-pt}"
+  key="$src|$repo_path"
+  if [ -z "${REPO_SHA[$key]+x}" ]; then
+    dir=$(sumber_dir "$src"); ref=$(sumber_ref "$src")
+    if git -C "$dir" cat-file -e "$ref:$repo_path" 2>/dev/null; then
+      REPO_SHA[$key]=$(git -C "$dir" show "$ref:$repo_path" | sha256sum | cut -c1-16)
     else
-      REPO_SHA[$repo_path]="REPO_TIDAK_ADA"
+      REPO_SHA[$key]="REPO_TIDAK_ADA"
     fi
   fi
 done
@@ -80,18 +101,17 @@ done
 drift=0
 checked=0
 for entry in "${PAIRS[@]}"; do
-  vm="${entry%%|*}"
-  rest="${entry#*|}"
-  vm_path="${rest%%|*}"
-  repo_path="${rest##*|}"
+  IFS='|' read -r vm vm_path repo_path src <<<"$entry"
+  src="${src:-pt}"
   checked=$((checked + 1))
-  r="${REPO_SHA[$repo_path]}"
+  key="$src|$repo_path"
+  r="${REPO_SHA[$key]-TIDAK_DIUKUR}"
   v="${VM_SHA[$vm_path]-TIDAK_DIUKUR}"
   if [ "$r" = "$v" ]; then
     printf 'SAMA   %-28s %s\n' "$vm" "$repo_path"
   else
     drift=$((drift + 1))
-    printf 'BEDA   %-28s %s repo=%s vm=%s\n' "$vm" "$repo_path" "$r" "$v"
+    printf 'BEDA   %-28s %s:%s repo=%s vm=%s\n' "$vm" "$src" "$repo_path" "$r" "$v"
   fi
 done
 

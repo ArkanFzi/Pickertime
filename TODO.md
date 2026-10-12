@@ -746,6 +746,30 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
     dengan `drift=1 rc=1`, yaitu merah pada selisih yang benar, bukan diam-diam hijau. Ia sengaja TIDAK masuk
     `ci.yml` (runner tidak punya IAM) dan belum jadi langkah tetap jendela pasang — panggilan manual sebelum
     setiap install masih prosedur resminya.
+    **DIPERLUAS 2026-10-12 jadi sebelas pasangan (T-38, penutup CFG-70 di `openclaw-docker`)**: dua pasangan
+    baru bukan berkas Pickertime melainkan checkout config-agentic di `hermes-openclaw-vm` —
+    `/home/arkan/openclaw-docker/scripts/hermes_healthcheck.py` (yang dieksekusi Docker Healthcheck tiap 60 dtk
+    untuk memutuskan merestart kontainer otak) dan `/home/arkan/openclaw-docker/docker-compose.yml` (memuat
+    definisi healthcheck gateway `node -e net.connect 127.0.0.1:18789`). Karena itu tiap entri `PAIRS` kini
+    berlapkan sumber (`|pt` = `REPO`/`REF`, `|cfg` = `CFG_REPO`/`CFG_REF`) dengan kunci kamus `sumber|jalur`,
+    dan `CFG_REF` default `origin/master`. Bentuk itu bukan hiasan: dengan satu `REPO` global, `git show
+    origin/dev:docker-compose.yml` membalas `REPO_TIDAK_ADA` dan dua baris itu merah permanen tanpa pernah
+    mengukur apa pun — kelas kegagalan CFG-66 (penjaga merah karena dirinya cacat). Terukur dua arah lagi:
+    keadaan nyata `periksa=11 drift=0 rc=0` (17,6 dtk, dua ssh), dan harness baru
+    `tools/backup/test-tools-drift-pairs.sh` **LULUS=12 GAGAL=0** yang menjalankan penjaga sungguhan lewat
+    shim `gcloud` tiruan (`PATH` + `REPO`/`CFG_REPO` diarahkan ke pohon tempelan, nol jaringan, nol tulis ke
+    repo nyata): hijau saat nol drift, lalu `rc=1` pada empat mutasi yang kusuntik sendiri — satu byte berubah
+    di healthcheck (`drift=1`, BEDA menunjuk `cfg:scripts/hermes_healthcheck.py`), sisi repo dihapus
+    (`repo=REPO_TIDAK_ADA`, inilah bentuk asli CFG-70: berkas yang cuma hasil tulis keluar-jalur), sisi VM
+    dihapus (`vm=TIDAK_KEBACA`), dan transport ssh mati (`11/11 vm=SSH_GAGAL`, supaya penjaga tidak bisa
+    lulus karena diam). Dua bug ditemukan harness ini sebelum sempat dipercaya: `sed`-nya sendiri serakah
+    (`\(.*\); do` menyita sampai `; done` di ujung sehingga jalur terakhir kehilangan `;` dan jadi
+    `TIDAK_DIUKUR` palsu), dan `pipefail` di harness membuat `fungsi | grep -q` mengembalikan 141 walau
+    cocok — keduanya diarah ke nol sebelum angka di atas ditulis. Harnessnya sendiri masuk `ci.yml` sebagai
+    langkah "Regresi pasangan penjaga drift (T-38, nol tulis ke produksi)". Batas yang tinggal dan tidak
+    boleh dibaca sebagai "terjaga penuh": penjaga ini **tidak** `git fetch`, jadi hijau berarti "sama dengan
+    ref lokal", dan ref lokal yang basi bisa menutup drift satu langkah; `pickertime-tools-drift.sh` juga
+    belum ditahapkan pada timer mana pun (panggilan manual sebelum install tetap prosedurnya).
     **DIPERBAIKI 2026-10-11** (cabang `fix/retensi-lokal-ledger`, PR ke `dev`): publish yang membalas
     `200` kini menambahkan satu baris `KEY` ke ledger append-only `backup-published.log` **sebelum** retensi
     berjalan, `apply_retention()` men-skip zip yang tidak ada di ledger (tiap skip mencetak `waspada`,
