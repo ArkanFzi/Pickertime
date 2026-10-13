@@ -90,6 +90,12 @@ jobs:
       - name: Regresi pasangan penjaga drift (T-38, nol tulis ke produksi)
         run: bash tools/backup/test-tools-drift-pairs.sh
 
+      # gcloud dan curl dipalsukan di PATH dan nol kasus menyentuh jaringan keluar; sembilan
+      # kasus menuntut rc=1 dan kasus L memutasikan loop retry sampai nol percobaan supaya
+      # gerbang ini terbukti bisa merah (kelas CFG-64: penjaga yang salah bicara).
+      - name: Regresi jalur ukur P8 (retry + sebab yang menunjuk alat, nol tulis ke produksi)
+        run: bash tools/deploy/test-pb-stability-check.sh
+
       - name: Gerbang H4 - tidak ada xtrace yang bisa mencetak kredensial
         run: |
           files=$(git ls-files '*.sh' | xargs -r grep -lE \

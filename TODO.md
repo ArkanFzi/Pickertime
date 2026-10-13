@@ -724,13 +724,51 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   bukan p8.log. Jadi "8 baris HIJAU berurutan" berarti 8 run berturut-turut, bukan 8 hari kalender. Kerapuhan
   lama tetap ada: unit memanggil **worktree** di `/home/arkan/Documents/Coding/Pickertime`, jadi selama PR #42
   belum ter-merge dan laptop pindah branch, fix PATH dan field `pemicu=` hilang dari jalur harian.
+  **Kegagalan ketiga terukur 2026-10-13, dan sebabnya kali ini jam mesinnya sendiri — bukan alat, bukan data:**
+  boot `08:38:02` (`uptime -s`), `Persistent=true` menagih slot 08:05 pada `08:38:07` (`LAST` di
+  `list-timers` = lima detik sesudah boot), service start `08:38:08` → exit `08:38:09` dengan
+  `Main process exited, code=exited, status=1/FAILURE` + `Failed with result 'exit-code'` (`journalctl --user`),
+  sementara NetworkManager baru **mengelola device** pada `08:38:07` dan lease IPv4 `192.168.1.8` baru lahir
+  `08:38:10`. Jadi `gcloud compute ssh` membalas kosong dan barisnya masih berbunyi
+  `P8 2026-10-13 ERROR pemicu=timer: LAST_OK tidak terbaca ('kosong') -- sebab: ssh/read_last_ok mengembalikan kosong`
+  — penjaga ini menang balapan dengan jaringan dan kalah, lalu melaporkan kekalahannya sebagai masalah state VM.
+  Perbaikan di akar, bukan di pesan: loop retry `P8_COBA=6` × `P8_JEDA=30` dtk dengan `timeout P8_KISARAN=45` dtk
+  per percobaan dan `P8_BATAS=240` dtk total — sengaja di bawah `TimeoutStartSec=5min` pada unit supaya artefak
+  terburuknya **satu baris ERROR yang menjelaskan diri, bukan nol baris karena `SIGTERM`**; `sudo` di snippet
+  remote jadi `sudo -n` (NOPASSWD terukur di VM; `-n` membalas rc sendiri daripada menggantung pada prompt yang
+  tidak ada yang menjawab di unit headless); stderr gcloud ditangkap ke berkas sementara, baris tak-kosong
+  pertamanya diredam (`ya29.*` dan deretan ≥25 karakter → `REDACTED`, maks 200 B) lalu ditempel sebagai
+  `-- stderr:`; dan rantai `SEBAB` dinamai enam keadaan (PATH, kredensial, rc=124 kena batas per percobaan,
+  endpoint `https://oauth2.googleapis.com/` tidak terjangkau, keluaran ada tapi bukan tanggal → dilaporkan
+  sebagai **panjang** keluaran sesuai H13, sisanya `rc=<n> setelah <k> percobaan`). Harness hermetic
+  `tools/deploy/test-pb-stability-check.sh` → `LULUS=45 GAGAL=0` (`gcloud`/`curl` palsu di PATH, nol jaringan
+  keluar, nol tulis ke VM, `HOME`/`LOG_DIR` direktori sementara; dua belas kasus A–L, termasuk kasus `L` yang
+  memutasikan syarat loop lewat `sed` sampai **nol** percobaan dan menuntut rc=1 — jadi hijaunya kasus sehat
+  terbukti bisa merah). Dipasang sebagai langkah CI `Regresi jalur ukur P8 (retry + sebab yang menunjuk alat,
+  nol tulis ke produksi)` di job `Lint perkakas shell`. Verifikasi nyata sesudah tambal:
+  `systemctl --user start` → start `09:28:53`, exit `09:29:03`, `ExecMainStatus=0`, baris
+  `P8 2026-10-13T02:29:03Z pemicu=timer backup_umur_jam=22 hasil_terendap=0 health_http=200 STATUS=HIJAU`
+  (`22` konsisten dengan `LAST_OK = 2026-10-12T04:18:09Z`).
+  **Koreksi atas maknaku sendiri, dan ini mengubah hitungan P8:** `Environment=P8_PEMICU=timer` melekat pada
+  **unit**, bukan pada **pemicunya**, jadi `systemctl --user start` juga mencetak `pemicu=timer`. Baris `02:29:03Z`
+  di atas persis itu adanya — jalanku sendiri lewat unit, **bukan** api kalender, dan tidak dihitung sebagai hari
+  bersih. Komentar di `.service` sudah ditulis ulang untuk mengatakan ini (terukur `08:38:07` = api kalender
+  pertama yang benar dan hasilnya MERAH; `02:29:03Z` = manual lewat unit). Otoritas kalender tetap `LAST` pada
+  `list-timers` + journal. Api kalender *pertama sesudah tambal* jatuh `2026-10-14 08:05:00 WIB` dan itu yang
+  mulai dihitung. Satu ketidaksesuaian yang tidak kukonsiliasi: invocation `systemctl --user show` pada `09:16`
+  membalas `Result=success` sementara journal run `08:38` mencatat `exit-code` + `ExecMainStatus=1`; aku tidak
+  bisa mengulangnya (butuh membuat unit gagal lagi), jadi bukti merah 13 Oktober kupegang pada journal +
+  `ExecMainStatus`, bukan pada `Result=`.
   Day-0 (2026-10-04T14:08Z): `backup_umur_jam=0 hasil_terendap=0 health_http=200 STATUS=HIJAU`.
   **Temuan di Day-0**: timer backup men-elapse Oct 4 03:25:45 UTC tanpa pernah men-start service
   (nol jejak journal; satu-satunya perubahan sebelumnya = manual `systemctl start` Oct 3 14:56).
   Mitigasi: timer di-`restart` (re-arm, 2026-10-04 14:06Z), backup manual menyegarkan `LAST_OK`,
   dan gerbang umur-26-jam di alat deteksi otomatis kalau terulang Oct 5. Status: RUNNING
   (selesai = 8 baris HIJAU berurutan di p8.log, mulai ulang 2026-10-12 → target 2026-10-19;
-  target lama 2026-10-12 dinyatakan gugur karena deteksinya buta 5-11 Oktober dan diam pada 12 Oktober)
+  target lama 2026-10-12 dinyatakan gugur karena deteksinya buta 5-11 Oktober dan diam pada 12 Oktober;
+  **bergeser lagi 2026-10-13**: run 08:38 WIB adalah api kalender pertama dan MERAH karena jaringan belum naik,
+  dan baris HIJAU 02:29:03Z ternyata manual-lewat-unit (`pemicu=timer` tidak membuktikan kalender), jadi
+  hitungan baru mulai dari api kalender pertama sesudah tambal = `2026-10-14 08:05 WIB` → target 2026-10-21)
   - [ ] Retensi lokal `pickertime-pb-backup.sh` (`LOCAL_KEEP=5`, dahulu baris 121-124) menyusun daftar buangan
     dari `ls -1t` (mtime) saja dan tidak pernah tahu zip-nya sudah dipublish; yatim dari jalan yang
     dipotong sebelum `:publish` ikut terbuang. Terukur 2026-10-11: `pb_backup_acme_20261006032628.zip`

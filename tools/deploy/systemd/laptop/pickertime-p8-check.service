@@ -9,6 +9,12 @@ Type=oneshot
 ExecStart=/bin/bash /home/arkan/Documents/Coding/Pickertime/tools/deploy/pb-stability-check.sh
 # Penanda asal baris: tanpa ini run manual di terminal terlihat identik dengan hari bersih
 # di p8.log, dan bukti "8 hari" bisa dipalsukan tanpa niat oleh jariku sendiri.
+# BATAS yang terukur 2026-10-13: nilai ini melekat pada UNIT, bukan pada PEMICU. `systemctl --user
+# start pickertime-p8-check.service` juga mencetak `pemicu=timer` -- baris HIJAU `02:29:03Z` hari ini
+# persis itu adanya, jadi ia bukan bukti hari kalender dan tidak dihitung sebagai hari bersih. Yang
+# membuktikan kalender menendang tetap `LAST` pada `systemctl --user list-timers` + journal. Jalan
+# manual yang ingin jujur lewat kode yang sama: panggil skripnya langsung (default `pemicu=manual`)
+# atau `systemd-run --user -p Environment=P8_PEMICU=uji-pemilik`.
 Environment=P8_PEMICU=timer
 # Skrip sudah meng-append barisnya ke ~/.local/state/pickertime-stability/p8.log, jadi stdout
 # cukup masuk journal; redirect kedua akan membuat dua sumber kebenaran untuk angka yang sama.
