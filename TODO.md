@@ -675,18 +675,150 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   - [ ] Keputusan M5.4 (delete fine-grained PAT) — butuh keputusan pemilik. Status: BLOCKED-user
 - [ ] **P8** Bukti 8 hari bersih (T-14). Alat: `tools/deploy/pb-stability-check.sh`
   (ukur `backup_umur_jam` < 26, `hasil_terendap` = 0, `health_http` = 200; append harian ke
-  `~/.local/state/pickertime-stability/p8.log`). Cron laptop `5 8 * * *` aktif 2026-10-04.
+  `~/.local/state/pickertime-stability/p8.log`). Cron laptop `5 8 * * *` aktif 2026-10-04,
+  **diganti timer user systemd 2026-10-12** (lihat "dua kegagalan terpisah" di bawah).
+  **Buta tujuh hari, dan ini terukur 2026-10-12:** `p8.log` berisi dua baris HIJAU manual pada Day-0
+  (`2026-10-04T14:08:35Z`, `14:32:05Z`) lalu **tujuh baris `ERROR: LAST_OK tidak terbaca ('kosong')`**
+  berturut-turut 5,6,7,8,9,10,11 Oktober — dan hari ini (target hari ke-8) tidak punya baris sama sekali
+  sampai jam 05:11 UTC. Penyebabnya bukan backup: cron memanggil `/bin/bash tools/deploy/pb-stability-check.sh`
+  dengan PATH minimal (`/usr/bin:/bin`) sementara `gcloud` tinggal di `~/.local/bin`, jadi `gcloud compute ssh`
+  gagal, `read_last_ok` mengembalikan string kosong, dan skrip menafsirnya sebagai "LAST_OK tidak terbaca".
+  Terukur dua arah: `env -i PATH=/usr/bin:/bin` tanpa fix → alat tidak bisa menemukan `gcloud`
+  (`TIDAK_ADA_DI_PATH_CRON`); dengan `PATH="$HOME/.local/bin:$PATH"` di dalam skrip → `env -i PATH=/usr/bin:/bin
+  HOME=$HOME /bin/bash tools/deploy/pb-stability-check.sh` membalas
+  `P8 2026-10-12T05:12:27Z backup_umur_jam=0 hasil_terendap=0 health_http=200 STATUS=HIJAU`, rc=0.
+  Perbaikannya di skrip, bukan di baris crontab, supaya ikut ke repo (pelajaran CFG-30: state yang cuma hidup
+  di satu mesin tidak punya jalur update). Konsekuensi yang harus dibaca jujur: **P8 belum 8 hari bersih** —
+  yang hilang bukan hanya tujuh baris log, tapi tujuh hari deteksi, dan itu persis kelas CFG-55 (jaring yang
+  tidak berbunyi saat jalurnya salah). Hitungan hari mulai ulang dari 2026-10-12.
+  **Dua kegagalan terpisah, dan yang kedua baru ketahuan hari ini:** kesalahan PATH di atas bukan satu-satunya.
+  Slot 08:05 lokal pada 12 Oktober **tidak menghasilkan baris apa pun** — bukan ERROR, tapi diam — karena
+  mesinnya mati: `last -x` membalas `shutdown … Mon Oct 12 01:15 - 09:09 (07:54)` lalu `reboot … Mon Oct 12 09:09`,
+  `cron.service` baru `active (running) since Mon 2026-10-12 09:36:11 WIB`, dan
+  `journalctl -b --since "2026-10-12 07:40" --until "2026-10-12 08:30"` = `-- No entries --`. Cron biasa tidak
+  mengejar, sementara `anacron` yang terpasang hanya menagih `/etc/cron.daily` (baris `1 5 cron.daily` di
+  `/etc/anacrontab`), bukan crontab user. Akibatnya "hari tanpa baris" dan "penjaga mati" menghasilkan bentuk
+  log yang tidak bisa dibedakan — dan pelajaran `Persistent=true` sudah ditulis lebih dulu di unit backup laptop
+  (`openclaw-docker/scripts/ops/systemd/laptop/agentic-laptop-backup.timer`: "sehari yang terlewat tidak hilang
+  diam-diam seperti pada cron biasa") sementara alatku sendiri masih cron. Perbaikannya
+  `tools/deploy/systemd/laptop/pickertime-p8-check.{service,timer}` (`OnCalendar=*-*-* 08:05:00`,
+  `Persistent=true`, `Environment=P8_PEMICU=timer`), dipasang lewat `systemctl --user enable --now` di atas
+  `Linger=yes` yang memang sudah aktif; terukur `is-active=active`, `is-enabled=enabled`,
+  `NEXT Tue 2026-10-13 08:05:00 WIB`, dan satu jalan lewat unit:
+  `systemctl --user start pickertime-p8-check.service` rc=0 →
+  `P8 2026-10-12T05:23:58Z pemicu=timer backup_umur_jam=1 hasil_terendap=0 health_http=200 STATUS=HIJAU`,
+  journal `Starting` → `Finished` dalam 7 detik. Baris crontab-nya dilepas dengan cadangan
+  `~/.local/state/pickertime-stability/crontab-backup-20261012T0524Z.txt` dan `diff` yang cuma menunjuk dua baris
+  itu (14 → 12 baris, `grep -c pb-stability-check` = 0).
+  **Kenapa ada field `pemicu=`:** log bukti ini tidak bisa membedakan run manual dari hari bersih, dan ketiganya
+  berbaris rapi — `05:11:29Z`, `05:11:47Z`, `05:12:27Z` pada 12 Oktober semuanya jalanku sendiri; tanpa field itu
+  aku sedang menghitung tiga hari dari satu jariku. Sekarang kedua cabang keluaran membawa `pemicu=`, dan cabang
+  ERROR ikut dibetulkan supaya menunjuk alat yang mati:
+  `env -i PATH=/usr/bin:/bin HOME=/tmp/p8-uji-negatif /bin/bash tools/deploy/pb-stability-check.sh` →
+  `P8 2026-10-12 ERROR pemicu=manual: LAST_OK tidak terbaca ('kosong') -- sebab: gcloud tidak ada di PATH
+  (/tmp/p8-uji-negatif/.local/bin:/usr/bin:/bin)`, rc=1; sebelumnya pesan ini identik untuk dua sebab yang berbeda.
+  `systemd-analyze verify --user` untuk kedua unit: rc=0 (keluhan yang tercetak semuanya dari
+  `hermes-local-gateway.service` milik orang lain, bukan dari berkas baru).
+  **Batas yang harus dibaca jujur:** `Persistent=true` menggabungkan beberapa hari terlewat menjadi SATU run
+  tanggap, dan yang membuktikan kalender menendang adalah `LAST` pada `systemctl --user list-timers` / journal —
+  bukan p8.log. Jadi "8 baris HIJAU berurutan" berarti 8 run berturut-turut, bukan 8 hari kalender. Kerapuhan
+  lama tetap ada: unit memanggil **worktree** di `/home/arkan/Documents/Coding/Pickertime`, jadi selama PR #42
+  belum ter-merge dan laptop pindah branch, fix PATH dan field `pemicu=` hilang dari jalur harian.
+  **Kegagalan ketiga terukur 2026-10-13, dan sebabnya kali ini jam mesinnya sendiri — bukan alat, bukan data:**
+  boot `08:38:02` (`uptime -s`), `Persistent=true` menagih slot 08:05 pada `08:38:07` (`LAST` di
+  `list-timers` = lima detik sesudah boot), service start `08:38:08` → exit `08:38:09` dengan
+  `Main process exited, code=exited, status=1/FAILURE` + `Failed with result 'exit-code'` (`journalctl --user`),
+  sementara NetworkManager baru **mengelola device** pada `08:38:07` dan lease IPv4 `192.168.1.8` baru lahir
+  `08:38:10`. Jadi `gcloud compute ssh` membalas kosong dan barisnya masih berbunyi
+  `P8 2026-10-13 ERROR pemicu=timer: LAST_OK tidak terbaca ('kosong') -- sebab: ssh/read_last_ok mengembalikan kosong`
+  — penjaga ini menang balapan dengan jaringan dan kalah, lalu melaporkan kekalahannya sebagai masalah state VM.
+  Perbaikan di akar, bukan di pesan: loop retry `P8_COBA=6` × `P8_JEDA=30` dtk dengan `timeout P8_KISARAN=45` dtk
+  per percobaan dan `P8_BATAS=240` dtk total — sengaja di bawah `TimeoutStartSec=5min` pada unit supaya artefak
+  terburuknya **satu baris ERROR yang menjelaskan diri, bukan nol baris karena `SIGTERM`**; `sudo` di snippet
+  remote jadi `sudo -n` (NOPASSWD terukur di VM; `-n` membalas rc sendiri daripada menggantung pada prompt yang
+  tidak ada yang menjawab di unit headless); stderr gcloud ditangkap ke berkas sementara, baris tak-kosong
+  pertamanya diredam (`ya29.*` dan deretan ≥25 karakter → `REDACTED`, maks 200 B) lalu ditempel sebagai
+  `-- stderr:`; dan rantai `SEBAB` dinamai enam keadaan (PATH, kredensial, rc=124 kena batas per percobaan,
+  endpoint `https://oauth2.googleapis.com/` tidak terjangkau, keluaran ada tapi bukan tanggal → dilaporkan
+  sebagai **panjang** keluaran sesuai H13, sisanya `rc=<n> setelah <k> percobaan`). Harness hermetic
+  `tools/deploy/test-pb-stability-check.sh` → `LULUS=45 GAGAL=0` **di laptop**, dan run CI pertamanya
+  (`38339951308`, 03:04:37Z) **MERAH pada satu kasus**: `GAGAL G menunjuk PATH`. Penyebabnya bukan skrip yang
+  diujinya: kasus G memakai `PATH=/usr/bin:/bin` dengan premis "di situ tidak ada `gcloud`" — benar di mesin ini
+  (gcloud tinggal di `~/.local/bin`) dan salah di runner `ubuntu-latest` yang memang memasang gcloud di
+  `/usr/bin`, sehingga `command -v gcloud` berhasil dan cabang `SEBAB` jatuh ke kredensial, bukan ke PATH.
+  Yang buta di sini adalah harness-nya sendiri, dengan bentuk yang sama persis dengan CFG-64: hijau di rumah,
+  merah di lingkungan lain, dan premisnya tidak pernah ikut diuji. Perbaikannya 03:12Z: PATH uji dibangun
+  hermetis (`$TOOLS` = symlink ke alat yang benar-benar dipakai skrip, tanpa gcloud; `$BIN_NOGC` = hanya curl
+  mock; `$DECOY` = gcloud palsu peniru runner), premis kasus G kini diuji (`command -v gcloud` di PATH itu
+  harus kosong **dan** PATH itu harus tidak kosong), satu kasus baru `M` menaruh decoy di PATH untuk membuktikan
+  yang menjawab adalah mock dan bukan decoy → `LULUS=53 GAGAL=0`, tiga belas kasus A–M. Angka yang sama terukur
+  **di dua mesin**: laptop `LULUS=53 GAGAL=0`, dan runner `38340537288` (`completed success`) yang log job
+  `115110284890` -nya kubaca sampai baris angkanya, bukan berhenti di warna hijau — `LULUS=53 GAGAL=0`
+  dengan tiga belas kepala kasus tercetak semua. Di run yang sama dua harness lain ikut hijau:
+  `LULUS=22 GAGAL=0` (retensi ledger) dan `LULUS=12 GAGAL=0` (pasangan penjaga drift). Dipasang sebagai langkah CI `Regresi jalur ukur P8 (retry + sebab yang menunjuk alat,
+  nol tulis ke produksi)` di job `Lint perkakas shell`. Verifikasi nyata sesudah tambal:
+  `systemctl --user start` → start `09:28:53`, exit `09:29:03`, `ExecMainStatus=0`, baris
+  `P8 2026-10-13T02:29:03Z pemicu=timer backup_umur_jam=22 hasil_terendap=0 health_http=200 STATUS=HIJAU`
+  (`22` konsisten dengan `LAST_OK = 2026-10-12T04:18:09Z`).
+  **Koreksi atas maknaku sendiri, dan ini mengubah hitungan P8:** `Environment=P8_PEMICU=timer` melekat pada
+  **unit**, bukan pada **pemicunya**, jadi `systemctl --user start` juga mencetak `pemicu=timer`. Baris `02:29:03Z`
+  di atas persis itu adanya — jalanku sendiri lewat unit, **bukan** api kalender, dan tidak dihitung sebagai hari
+  bersih. Komentar di `.service` sudah ditulis ulang untuk mengatakan ini (terukur `08:38:07` = api kalender
+  pertama yang benar dan hasilnya MERAH; `02:29:03Z` = manual lewat unit). Otoritas kalender tetap `LAST` pada
+  `list-timers` + journal. Api kalender *pertama sesudah tambal* jatuh `2026-10-14 08:05:00 WIB` dan itu yang
+  mulai dihitung. Satu ketidaksesuaian yang tidak kukonsiliasi: invocation `systemctl --user show` pada `09:16`
+  membalas `Result=success` sementara journal run `08:38` mencatat `exit-code` + `ExecMainStatus=1`; aku tidak
+  bisa mengulangnya (butuh membuat unit gagal lagi), jadi bukti merah 13 Oktober kupegang pada journal +
+  `ExecMainStatus`, bukan pada `Result=`.
   Day-0 (2026-10-04T14:08Z): `backup_umur_jam=0 hasil_terendap=0 health_http=200 STATUS=HIJAU`.
   **Temuan di Day-0**: timer backup men-elapse Oct 4 03:25:45 UTC tanpa pernah men-start service
   (nol jejak journal; satu-satunya perubahan sebelumnya = manual `systemctl start` Oct 3 14:56).
   Mitigasi: timer di-`restart` (re-arm, 2026-10-04 14:06Z), backup manual menyegarkan `LAST_OK`,
   dan gerbang umur-26-jam di alat deteksi otomatis kalau terulang Oct 5. Status: RUNNING
-  (selesai = 8 baris HIJAU berurutan di p8.log, target 2026-10-12)
+  (selesai = 8 baris HIJAU berurutan di p8.log, mulai ulang 2026-10-12 → target 2026-10-19;
+  target lama 2026-10-12 dinyatakan gugur karena deteksinya buta 5-11 Oktober dan diam pada 12 Oktober;
+  **bergeser lagi 2026-10-13**: run 08:38 WIB adalah api kalender pertama dan MERAH karena jaringan belum naik,
+  dan baris HIJAU 02:29:03Z ternyata manual-lewat-unit (`pemicu=timer` tidak membuktikan kalender), jadi
+  hitungan baru mulai dari api kalender pertama sesudah tambal = `2026-10-14 08:05 WIB` → target 2026-10-21)
   - [ ] Retensi lokal `pickertime-pb-backup.sh` (`LOCAL_KEEP=5`, dahulu baris 121-124) menyusun daftar buangan
     dari `ls -1t` (mtime) saja dan tidak pernah tahu zip-nya sudah dipublish; yatim dari jalan yang
     dipotong sebelum `:publish` ikut terbuang. Terukur 2026-10-11: `pb_backup_acme_20261006032628.zip`
     (sisa jalan 6 Okt 03:26 yang dibunuh `status=15/TERM`) dibuang oleh retensi dan bucket tidak punya
     penggantinya — `gcloud storage ls -r gs://pickertime-pb-backups/` = 16 objek, 0 pencocokan `20261006`.
+    Alat baru 2026-10-12 untuk bagian "repo versus yang terpasang" dari baris ini:
+    `tools/backup/pickertime-tools-drift.sh` — sembilan pasangan berkas di dua VM
+    (`hermes-openclaw-vm` enam: `pickertime-pb-backup.{sh,service,timer}` + `pickertime-pb-agent.{sh,service,timer}`;
+    `agentic-watchdog-vm` tiga: `pickertime-pb-relay.{sh,service,timer}`), sha256 sisi repo dari `git show`
+    dan sisi VM lewat satu ssh per host dengan perintah base64 di stdin (nol isi berkas, nol kredensial di
+    argv), keluaran cuma nama + 16 karakter depan hash, `exit 1` saat drift. Terukur dua arah:
+    `REF=origin/dev` → `periksa=9 drift=0`; `REF=da5dfe9` → satu `BEDA repo=22844a75a9107324 vm=95790ab884d2b484`
+    dengan `drift=1 rc=1`, yaitu merah pada selisih yang benar, bukan diam-diam hijau. Ia sengaja TIDAK masuk
+    `ci.yml` (runner tidak punya IAM) dan belum jadi langkah tetap jendela pasang — panggilan manual sebelum
+    setiap install masih prosedur resminya.
+    **DIPERLUAS 2026-10-12 jadi sebelas pasangan (T-38, penutup CFG-70 di `openclaw-docker`)**: dua pasangan
+    baru bukan berkas Pickertime melainkan checkout config-agentic di `hermes-openclaw-vm` —
+    `/home/arkan/openclaw-docker/scripts/hermes_healthcheck.py` (yang dieksekusi Docker Healthcheck tiap 60 dtk
+    untuk memutuskan merestart kontainer otak) dan `/home/arkan/openclaw-docker/docker-compose.yml` (memuat
+    definisi healthcheck gateway `node -e net.connect 127.0.0.1:18789`). Karena itu tiap entri `PAIRS` kini
+    berlapkan sumber (`|pt` = `REPO`/`REF`, `|cfg` = `CFG_REPO`/`CFG_REF`) dengan kunci kamus `sumber|jalur`,
+    dan `CFG_REF` default `origin/master`. Bentuk itu bukan hiasan: dengan satu `REPO` global, `git show
+    origin/dev:docker-compose.yml` membalas `REPO_TIDAK_ADA` dan dua baris itu merah permanen tanpa pernah
+    mengukur apa pun — kelas kegagalan CFG-66 (penjaga merah karena dirinya cacat). Terukur dua arah lagi:
+    keadaan nyata `periksa=11 drift=0 rc=0` (17,6 dtk, dua ssh), dan harness baru
+    `tools/backup/test-tools-drift-pairs.sh` **LULUS=12 GAGAL=0** yang menjalankan penjaga sungguhan lewat
+    shim `gcloud` tiruan (`PATH` + `REPO`/`CFG_REPO` diarahkan ke pohon tempelan, nol jaringan, nol tulis ke
+    repo nyata): hijau saat nol drift, lalu `rc=1` pada empat mutasi yang kusuntik sendiri — satu byte berubah
+    di healthcheck (`drift=1`, BEDA menunjuk `cfg:scripts/hermes_healthcheck.py`), sisi repo dihapus
+    (`repo=REPO_TIDAK_ADA`, inilah bentuk asli CFG-70: berkas yang cuma hasil tulis keluar-jalur), sisi VM
+    dihapus (`vm=TIDAK_KEBACA`), dan transport ssh mati (`11/11 vm=SSH_GAGAL`, supaya penjaga tidak bisa
+    lulus karena diam). Dua bug ditemukan harness ini sebelum sempat dipercaya: `sed`-nya sendiri serakah
+    (`\(.*\); do` menyita sampai `; done` di ujung sehingga jalur terakhir kehilangan `;` dan jadi
+    `TIDAK_DIUKUR` palsu), dan `pipefail` di harness membuat `fungsi | grep -q` mengembalikan 141 walau
+    cocok — keduanya diarah ke nol sebelum angka di atas ditulis. Harnessnya sendiri masuk `ci.yml` sebagai
+    langkah "Regresi pasangan penjaga drift (T-38, nol tulis ke produksi)". Batas yang tinggal dan tidak
+    boleh dibaca sebagai "terjaga penuh": penjaga ini **tidak** `git fetch`, jadi hijau berarti "sama dengan
+    ref lokal", dan ref lokal yang basi bisa menutup drift satu langkah; `pickertime-tools-drift.sh` juga
+    belum ditahapkan pada timer mana pun (panggilan manual sebelum install tetap prosedurnya).
     **DIPERBAIKI 2026-10-11** (cabang `fix/retensi-lokal-ledger`, PR ke `dev`): publish yang membalas
     `200` kini menambahkan satu baris `KEY` ke ledger append-only `backup-published.log` **sebelum** retensi
     berjalan, `apply_retention()` men-skip zip yang tidak ada di ledger (tiap skip mencetak `waspada`,
@@ -708,20 +840,38 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
     karena `/tmp/t36-scratch` **terhapus reaper** sebelum sempat kupakai hari ini. **Ia juga dijalankan CI**,
     bukan cuma di-lint: langkah baru `Regresi retensi lokal backup (T-36, nol tulis ke produksi)` di job
     "Lint perkakas shell" `.github/workflows/ci.yml` — 22 assertion itu tidak lagi cuma angka di laptopku.
-    **Belum dipasang di VM, dan itu pilihan sadar:** api timer natural 2026-10-12 03:28:55 UTC masih
-    satu-satunya bukti satu-variabel untuk `Conflicts=` yang dilepas (T-34), jadi menukar skrip sebelum
-    api itu lewat akan mencampur dua variabel. Yang perlu dibaca sebelum pasang: VM belum punya ledger,
-    jadi pada jalan pertama semua zip yang ada dianggap "tidak tercatat" dan ditahan kuota — `LOCAL_MAX`
-    yang akan memangkas kalau jumlahnya lewat, artinya arah salahnya menyimpan terlalu banyak, bukan
-    terlalu sedikit. Backfill ledger dari bucket sengaja TIDAK dibuat: menanyakan bucket sudah ditolak di
-    desain (VM ini cuma ber-scope `devstorage.read_only`) dan catatan scratch `docs/12` §1.38.
-    Register: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62, baris T-36. Status: **TERGABUNG ke `dev`,
-    install VM menunggu** — PR #40 di-merge atas perintah pemilik (`gh pr merge 40 --merge`) jadi commit merge
+    **Sempat tidak dipasang di VM (pilihan sadar), kini TERPASANG 2026-10-12 04:15 UTC.** Alasan menahannya waktu itu: api timer natural 2026-10-12 03:28:55 UTC adalah satu-satunya bukti satu-variabel untuk `Conflicts=` yang dilepas (T-34), dan menukar skrip sebelum api itu lewat akan mencampur dua variabel. Api itu lewat dan terukur `Result=success` pada 03:28:56→03:29:01 UTC, jadi jendela pasang dibuka sesudahnya dengan keadaan awal yang dikukuri lebih dulu: sha256[0:16] `/opt/pickertime/pickertime-pb-backup.sh` = `22844a75a9107324` (identik versi `dev` sebelum T-36), `mtime 2026-10-11 06:00:19 UTC`, `grep -c LOCAL_MAX` = 0, lima zip + lima `.attrs`; salinan lama disimpan di `pickertime-pb-backup.sh.bak-20261012T0415Z`; bahan dipasang dari `git show origin/dev:tools/backup/pickertime-pb-backup.sh` → `95790ab884d2b484`, `755 root:root`, transfer lewat stdin; ledger `backup-published.log` dibuat. **Prediksi aritmetika di bawah ini terbukti di jalan produksi 04:18:09 UTC** (`systemctl start` manual, terukur bukan api timer — journal unit timer 04:10–04:25 kosong): pada 6 zip dengan `LOCAL_KEEP=5` skrip mencetak `waspada: pb_backup_acme_20261011060054.zip tidak tercatat terpublish, ditahan dari kuota 5` dan berakhir `zip=6 attrs=6` — **nol pembuangan, padahal logika lama pasti membuang berkas itu**. Catatan jujur: zip yang ditahan sudah ada di bucket, jadi yang teruji hari ini adalah "ledger kosong → tahan, arah salahnya menyimpan berlebih", bukan penangkapan yatim sungguhan (kelas itu dipegang kasus B/D harness). Backfill ledger dari bucket sengaja TIDAK dibuat: menanyakan bucket sudah ditolak di desain (VM ini cuma ber-scope `devstorage.read_only`). **Koreksi bertanggal 2026-10-13:** yang ditolak desain adalah *tool produksi* yang menanyakan bucket, bukan satu append manual dari laptop — lima key hasil ukur bucket ditulis ke ledger atas izin pemilik (D-18) pada 2026-10-13 02:20 UTC, dan itu yang membuat api natural di bawah bisa membuang tanpa `waspada`.
+    Register: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62, baris T-36; bukti install + jalan produksi
+    tercatat di `openclaw-docker/docs/12-fase-1-dasar.md` §1.51. Status: **TERGABUNG ke `dev` DAN TERPASANG di VM**
+    — PR #40 di-merge atas perintah pemilik (`gh pr merge 40 --merge`) jadi commit merge
     `04a4d85` pada 2026-10-12T02:39:05Z (orang tua `da5dfe9` + `bff1aef`, cabang head dipertahankan), CI `push` ke
     `dev` run `38196618244` `completed success` tujuh job dan langkah regresi itu mencetak `LULUS=22 GAGAL=0`
     di runner, bukan cuma di laptopku; `deploy.yml` tetap diam (run terakhir masih `37628720967`) karena trigger
-    `push`-nya `main`. Yang menahan sekarang cuma satu hal: jendela pasang di VM, dan itu tetap menunggu
-    api timer natural 2026-10-12 03:28:55 UTC lewat dulu supaya bukti T-34 tetap satu variabel.
+    `push`-nya `main`. Yang menahan waktu itu cuma satu hal — jendela pasang di VM, sesudah api timer natural
+    2026-10-12 03:28:55 UTC lewat sebagai bukti satu-variabel T-34 — dan hal itu sudah tidak ada: dipasang
+    04:15 UTC, teruji 04:18 UTC. Sisa yang benar-benar tinggal: api natural pertama **sesudah** pasang jatuh
+    2026-10-13 03:22:51 UTC (ledger baru berisi satu baris, jadi jalan itulah yang pertama kali menggabungkan
+    "buang yang terpublish" dan "tahan yang tidak" di produksi), dan `LOCAL_MAX=10` baru akan memotong kalau
+    direktorinya tumbuh lewat sepuluh berkas.
+    **Api natural itu TERJADI dan terukur 2026-10-13 03:23:01 -> 03:23:04 UTC** (`ExecMainStatus=0`,
+    `Result=success`, `NRestarts=0`; slot yang dijanjikan `03:22:51`, terukur `12s left` pada 03:22:38 —
+    selisih 10 dtk adalah antrean systemd, bukan jam yang meleset). Empat sisi tergabung dalam satu putaran:
+    publish `message 22009544631172869` untuk `pb_backup_acme_20261013032302.zip` (289309 byte, md5
+    `kbMccphLbM4r98DriREewg==`), ledger `6 -> 7` dengan kunci hari ini di baris terakhir, retensi membuang
+    **dua** berkas yang sama-sama berbunyi `(terpublish, kuota 5)` (`...20261011060316.zip` dan
+    `...20261011060054.zip`) sehingga zip lokal `6 -> 5` = tepat kuota, dan `waspada` pada journal hari ini
+    **nol**. Yang membalik proteksi kemarin adalah backfill D-18: `...20261011060054.zip`, yang ditahan pada
+    jalan 04:18, kini tercatat dan dibuang secara sah — dan dia terukur memang ada di bucket, jadi tidak ada
+    satu byte pun yang hilang pada jalan ini. Sisi offload butuh satu tick relay: `03:15:26` menarik nol
+    (publish belum terjadi), `03:30:36` mencetak `ditarik 1 pesan` + `relay selesai: uploaded=1 failed=0`
+    dan bucket naik `18 -> 19` objek `.zip`. Batas yang sekarang tertulis eksplisit dan belum ada
+    penutupnya: ledger menandai `KEY` saat Pub/Sub membalas 200, artinya *pesan diterima topic* — **bukan**
+    *objek sudah ada di bucket*; jarak dua keadaan itu terukur 7 menit 40 detik, dan selama itu yang menahan
+    adalah `messageRetentionDuration=604800s` plus ack relay hanya sesudah objek terverifikasi. Kalau relay
+    mati lebih dari tujuh hari, ledger menyatakan terpublish sementara bucket kosong dan retensi lokal boleh
+    membuang salinan terakhir — lubang CFG-62 satu lapis lebih dalam. `LOCAL_MAX=10` tetap belum tersentuh.
+    Register dan tabel: `openclaw-docker/docs/11-fase-hermes-sentral.md` CFG-62 + baris T-36, dan
+    `openclaw-docker/docs/12-fase-1-dasar.md` **§1.69**.
 - [x] **P9** E1 ditutup nyata: `deploy.yml` tereksekusi otomatis di GitHub pada `main`
   dan agen membalas `applied`. Bukti dari log job run `37209210419` (event=push, run_number=4,
   `completed/success`, 14:25:31Z→14:26:49Z = 78 s):
