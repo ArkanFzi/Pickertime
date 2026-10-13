@@ -741,10 +741,17 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
   `-- stderr:`; dan rantai `SEBAB` dinamai enam keadaan (PATH, kredensial, rc=124 kena batas per percobaan,
   endpoint `https://oauth2.googleapis.com/` tidak terjangkau, keluaran ada tapi bukan tanggal → dilaporkan
   sebagai **panjang** keluaran sesuai H13, sisanya `rc=<n> setelah <k> percobaan`). Harness hermetic
-  `tools/deploy/test-pb-stability-check.sh` → `LULUS=45 GAGAL=0` (`gcloud`/`curl` palsu di PATH, nol jaringan
-  keluar, nol tulis ke VM, `HOME`/`LOG_DIR` direktori sementara; dua belas kasus A–L, termasuk kasus `L` yang
-  memutasikan syarat loop lewat `sed` sampai **nol** percobaan dan menuntut rc=1 — jadi hijaunya kasus sehat
-  terbukti bisa merah). Dipasang sebagai langkah CI `Regresi jalur ukur P8 (retry + sebab yang menunjuk alat,
+  `tools/deploy/test-pb-stability-check.sh` → `LULUS=45 GAGAL=0` **di laptop**, dan run CI pertamanya
+  (`38339951308`, 03:04:37Z) **MERAH pada satu kasus**: `GAGAL G menunjuk PATH`. Penyebabnya bukan skrip yang
+  diujinya: kasus G memakai `PATH=/usr/bin:/bin` dengan premis "di situ tidak ada `gcloud`" — benar di mesin ini
+  (gcloud tinggal di `~/.local/bin`) dan salah di runner `ubuntu-latest` yang memang memasang gcloud di
+  `/usr/bin`, sehingga `command -v gcloud` berhasil dan cabang `SEBAB` jatuh ke kredensial, bukan ke PATH.
+  Yang buta di sini adalah harness-nya sendiri, dengan bentuk yang sama persis dengan CFG-64: hijau di rumah,
+  merah di lingkungan lain, dan premisnya tidak pernah ikut diuji. Perbaikannya 03:12Z: PATH uji dibangun
+  hermetis (`$TOOLS` = symlink ke alat yang benar-benar dipakai skrip, tanpa gcloud; `$BIN_NOGC` = hanya curl
+  mock; `$DECOY` = gcloud palsu peniru runner), premis kasus G kini diuji (`command -v gcloud` di PATH itu
+  harus kosong **dan** PATH itu harus tidak kosong), satu kasus baru `M` menaruh decoy di PATH untuk membuktikan
+  yang menjawab adalah mock dan bukan decoy → `LULUS=53 GAGAL=0`, tiga belas kasus A–M. Dipasang sebagai langkah CI `Regresi jalur ukur P8 (retry + sebab yang menunjuk alat,
   nol tulis ke produksi)` di job `Lint perkakas shell`. Verifikasi nyata sesudah tambal:
   `systemctl --user start` → start `09:28:53`, exit `09:29:03`, `ExecMainStatus=0`, baris
   `P8 2026-10-13T02:29:03Z pemicu=timer backup_umur_jam=22 hasil_terendap=0 health_http=200 STATUS=HIJAU`

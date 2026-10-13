@@ -77,6 +77,31 @@ FAKE
 
 chmod +x "$BIN/gcloud" "$BIN/curl"
 
+# PATH-nya dibuat hermetis, bukan "PATH aslinya dikurangi gcloud". Alasan terukur 2026-10-13:
+# kasus G dulu memakai PATH=/usr/bin:/bin dengan premis "gcloud tidak ada di situ". Di laptop
+# premis itu benar (gcloud tinggal di ~/.local/bin), di runner GitHub ubuntu-latest salah karena
+# image-nya memasang gcloud di /usr/bin -- harness pun hijau di rumah dan merah di CI, dan yang
+# merah adalah premisnya, bukan skrip yang diujinya. Jadi dipakai $TOOLS: direktori berisi symlink
+# ke alat yang memang dibutuhkan skrip, tanpa gcloud, dan tanpa /usr/bin.
+TOOLS="$WORK/tools"
+BIN_NOGC="$WORK/bin-nogcloud"
+DECOY="$WORK/decoy"
+mkdir -p "$TOOLS" "$BIN_NOGC" "$DECOY"
+for t in bash sed grep cut head tail wc date tee mktemp rm mkdir sleep timeout cat tr; do
+  p=$(command -v "$t") || { echo "ALAT UJI GAGAL: '$t' tidak ada di PATH pembuat harness"; exit 2; }
+  ln -s "$p" "$TOOLS/$t"
+done
+ln -s "$BIN/curl" "$BIN_NOGC/curl"
+
+# Decoy = gcloud "milik host" yang meniru keadaan runner: kalau dia pernah yang menjawab,
+# angka di bawah ini bukan lagi angka dari mock.
+cat > "$DECOY/gcloud" <<'FAKE'
+#!/usr/bin/env bash
+echo "DECOY_SENGETIDAK_SEPAKAM"
+exit 0
+FAKE
+chmod +x "$DECOY/gcloud"
+
 # panggilan <nama> <mode> [env-tambahan...]
 # Flag UJI_HOME_LAIN / UJI_TANPA_GCLOUD dipakai fungsi ini sendiri (bukan diteruskan ke
 # env), sisanya jadi penimpa P8_* lewat env.
@@ -85,13 +110,14 @@ panggilan() {
   shift 2
   local out="$WORK/out.$nama"
   local home="$HOME_UJI"
-  local jalur="$BIN:/usr/bin:/bin"
+  local jalur="$BIN:$TOOLS"
   local a
   local -a extra=()
   for a in "$@"; do
     case "$a" in
       UJI_HOME_LAIN=*) home="$WORK/noconfig/home" ;;
-      UJI_TANPA_GCLOUD=*) jalur="/usr/bin:/bin" ;;
+      UJI_TANPA_GCLOUD=*) jalur="$BIN_NOGC:$TOOLS" ;;
+      UJI_DECOY=*) jalur="$BIN:$DECOY:$TOOLS" ;;
       *) extra+=("$a") ;;
     esac
   done
@@ -171,6 +197,11 @@ echo "== G. gcloud hilang dari PATH (regresi CFG-64 yang lama) =="
 o=$(panggilan g sehat UJI_TANPA_GCLOUD=1)
 cek "G rc=1" test "$(rc_dari "$o")" = 1
 cek "G menunjuk PATH" ada "$o" "gcloud tidak ada di PATH"
+# Premis kasus ini yang jatuh di CI 2026-10-13 (runner punya /usr/bin/gcloud, laptop tidak),
+# jadi premisnya ikut diuji, bukan cuma disimpulkan dari bentuk PATH.
+cek "G sandbox memang tidak punya gcloud" test -z "$(env -i PATH="$BIN_NOGC:$TOOLS" "$TOOLS/bash" -c 'command -v gcloud' 2>/dev/null)"
+cek "G sandbox tidak kosong (timeout tetap ada)" test -n "$(env -i PATH="$BIN_NOGC:$TOOLS" "$TOOLS/bash" -c 'command -v timeout' 2>/dev/null)"
+cek "G PATH di pesan memang sandbox" ada "$o" "$BIN_NOGC"
 
 echo "== H. ~/.config/gcloud hilang: sebabnya kredensial, bukan data (keluaran kosong) =="
 o=$(panggilan h kosong_rc0 UJI_HOME_LAIN=1)
@@ -203,7 +234,7 @@ sed 's/\[ "$coba" -lt "$P8_COBA" \]/[ "$coba" -lt 0 ]/' "$SCRIPT" > "$WORK/mutas
 cek "L mutasi benar-benar mengubah byte loop" grep -qF '[ "$coba" -lt 0 ]' "$WORK/mutasi.sh"
 out_m="$WORK/out.l"
 rm -f "$STATE/panggilan"
-env -i PATH="$BIN:/usr/bin:/bin" HOME="$HOME_UJI" STATE="$STATE" \
+env -i PATH="$BIN:$TOOLS" HOME="$HOME_UJI" STATE="$STATE" \
   LOG_DIR="$WORK/log.l" UJI_MODE=sehat UJI_OK="$OK_STAMP" \
   P8_PEMICU=manual P8_COBA=3 P8_JEDA=1 P8_KISARAN=5 P8_BATAS=30 \
   bash "$WORK/mutasi.sh" >"$out_m" 2>&1
@@ -211,6 +242,17 @@ rc_m=$?
 cek "L skrip termutasi gagal pada keadaan sehat" test "$rc_m" -eq 1
 cek "L skrip termutasi mencetak satu baris ERROR" test "$(grep -c 'ERROR' "$out_m")" -eq 1
 cek "L skrip termutasi tidak pernah memanggil gcloud" test "$(cat "$STATE/panggilan" 2>/dev/null || echo 0)" = 0
+
+echo "== M. decoy gcloud di PATH (meniru runner): mock yang menjawab, bukan yang host =="
+# Kasus ini lahir dari kegagalan CI 2026-10-13: image ubuntu-latest memasang gcloud di /usr/bin,
+# jadi "PATH tanpa gcloud" yang dulu dipakai kasus G ternyata masih memuat gcloud sungguhan.
+# Kalau suatu hari PATH harness diisi ulang dengan direktori host, M yang berteriak lebih dulu.
+o=$(panggilan m sehat UJI_DECOY=1)
+cek "M rc=0" test "$(rc_dari "$o")" = 0
+cek "M HIJAU" ada "$o" "STATUS=HIJAU"
+cek "M decoy tidak pernah menjawab" tak_ada "$o" "DECOY_SENGETIDAK_SEPAKAM"
+cek "M mock yang dipanggil" panggilan_sudah 1
+cek "M decoy memang ada dan bisa dieksekusi" test -x "$DECOY/gcloud"
 
 echo
 echo "LULUS=$LULUS GAGAL=$BAD"
