@@ -17,8 +17,8 @@
 # pun -- kelas kegagalan yang sama dengan CFG-66 (penjaga yang merah karena dirinya sendiri
 # cacat, bukan karena drift).
 #
-# Keluaran HANYA nama berkas + 16 karakter depan sha256 (aturan H13): cukup untuk memutuskan
-# SAMA / BEDA / HILANG, tanpa pernah mencetak isi berkas. Tidak ada `set -x` (H4). Perintah
+# Keluaran HANYA nama berkas + 16 karakter depan sha256 + sha ref pendek (aturan H13): cukup
+# untuk memutuskan SAMA / BEDA / HILANG, tanpa pernah mencetak isi berkas. Tidak ada `set -x` (H4). Perintah
 # jarak jauh dikirim lewat stdin yang di-base64, jadi tidak ada isi berkas atau kredensial
 # yang masuk ke argv proses.
 set -euo pipefail
@@ -47,6 +47,52 @@ PAIRS=(
 
 sumber_dir() { case "$1" in cfg) printf '%s' "$CFG_REPO" ;; *) printf '%s' "$REPO" ;; esac; }
 sumber_ref() { case "$1" in cfg) printf '%s' "$CFG_REF" ;; *) printf '%s' "$REF" ;; esac; }
+
+# REF yang dibandingkan adalah remote-tracking ref (`origin/dev`, `origin/master`), jadi tanpa
+# fetch hijau cuma berarti "sama dengan ref LOKAL" — dan ref lokal yang basi bisa menutup drift
+# satu langkah. Itu batas yang kutulis sendiri waktu baris ini dibuka, jadi fetch sekarang jadi
+# bagian pengukuran, bukan asumsi. Retry berbatas dan sebab yang menunjuk alat ditiru dari P8:
+# penjaga yang buta harus bilang ia buta, bukan diam-diam lulus. `FETCH=0` (dipakai harness,
+# nol jaringan) mencetak `DIMATIKAN` supaya klaim yang keluar terbaca lebih lemah, bukan sama.
+FETCH="${FETCH:-1}"
+FETCH_RETRY="${FETCH_RETRY:-2}"
+FETCH_DELAY="${FETCH_DELAY:-3}"
+declare -A FETCH_LINE=()
+fetch_batal=0
+
+for src in pt cfg; do
+  dir=$(sumber_dir "$src"); ref=$(sumber_ref "$src")
+  if [ ! -d "$dir" ]; then
+    FETCH_LINE[$src]="$src=GAGAL DIREKSI_TIDAK_ADA"
+    fetch_batal=$((fetch_batal + 1))
+    continue
+  fi
+  if [ "$FETCH" != "1" ]; then
+    FETCH_LINE[$src]="$src=DIMATIKAN $ref=$(git -C "$dir" rev-parse --short "$ref" 2>/dev/null || echo TANPA_REF)"
+    continue
+  fi
+  branch="${ref#*/}"
+  before=$(git -C "$dir" rev-parse --short "$ref" 2>/dev/null || echo TANPA_REF)
+  attempt=1; rc_fetch=0
+  while :; do
+    rc_fetch=0
+    git -C "$dir" fetch -q origin "$branch" 2>/dev/null || rc_fetch=$?
+    [ "$rc_fetch" -eq 0 ] && break
+    [ "$attempt" -lt "$FETCH_RETRY" ] || break
+    sleep "$FETCH_DELAY"
+    attempt=$((attempt + 1))
+  done
+  after=$(git -C "$dir" rev-parse --short "$ref" 2>/dev/null || echo TANPA_REF)
+  if [ "$rc_fetch" -ne 0 ]; then
+    FETCH_LINE[$src]="$src=GAGAL(rc=$rc_fetch coba=$attempt) $ref=$after LOKAL_BASI"
+    fetch_batal=$((fetch_batal + 1))
+  elif [ "$before" != "$after" ]; then
+    FETCH_LINE[$src]="$src=OK $ref: $before -> $after"
+  else
+    FETCH_LINE[$src]="$src=OK $ref=$after"
+  fi
+done
+for src in pt cfg; do printf 'FETCH %s\n' "${FETCH_LINE[$src]-TIDAK_DIUKUR}"; done
 
 # sha256 versi repo, dibaca dari git (worktree tidak dipakai supaya hasil tidak bergantung
 # pada keadaan branch yang sedang checked out). Catatan penting: hash HARUS diambil dari pipa
@@ -116,4 +162,8 @@ for entry in "${PAIRS[@]}"; do
 done
 
 printf 'periksa=%s drift=%s\n' "$checked" "$drift"
+if [ "$fetch_batal" -ne 0 ]; then
+  printf 'fetch_batal=%s nol_sumber_terverifikasi_terhadap_origin(hijau_di_atas_bukan_bukti)\n' "$fetch_batal"
+  exit 1
+fi
 [ "$drift" -eq 0 ] || exit 1
