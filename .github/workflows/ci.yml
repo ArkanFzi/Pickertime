@@ -85,8 +85,10 @@ jobs:
       - name: Regresi retensi lokal backup (T-36, nol tulis ke produksi)
         run: bash tools/backup/test-pb-retention-ledger.sh
 
-      # Daftar pasangan penjaga drift diekstrak dari skripnya sendiri, dan empat kasus
-      # menuntut rc=1 (satu byte berubah, sisi repo hilang, sisi VM hilang, ssh mati).
+      # Daftar pasangan penjaga drift diekstrak dari skripnya sendiri, dan enam kasus menuntut
+      # rc=1 (satu byte berubah, sisi repo hilang, sisi VM hilang, ssh mati, fetch mati walau
+      # drift=0, direktori sumber hilang). Upstream-nya `file://` di direktori temporer: nol
+      # jaringan keluar, tapi `git fetch` yang dijalaninya betulan.
       - name: Regresi pasangan penjaga drift (T-38, nol tulis ke produksi)
         run: bash tools/backup/test-tools-drift-pairs.sh
 

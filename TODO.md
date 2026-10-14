@@ -819,6 +819,42 @@ Kalau ada satu saja yang belum punya artefak angka, jawabannya **bukan** "stabil
     boleh dibaca sebagai "terjaga penuh": penjaga ini **tidak** `git fetch`, jadi hijau berarti "sama dengan
     ref lokal", dan ref lokal yang basi bisa menutup drift satu langkah; `pickertime-tools-drift.sh` juga
     belum ditahapkan pada timer mana pun (panggilan manual sebelum install tetap prosedurnya).
+    **TAMBAL 2026-10-14 — dua kalimat batas di atas kini diganti ukur, dan yang tersisa bukan lagi
+    sesuatu yang bisa kututup sendiri:** (1) penjaga memanggil `git fetch` di kedua sumber SEBELUM
+    menghitung, dengan retry berbatas (`FETCH_RETRY`, `FETCH_DELAY`), dan fetch yang mati membuat
+    `rc=1` walau `periksa=11 drift=0` (sebabnya dicetak sebagai `fetch_batal=`) — jadi hijau sekarang
+    berarti "sama dengan ORIGIN", dan `FETCH=0` (dipakai harness, nol jaringan) mencetak `DIMATIKAN`
+    supaya klaimnya tetap terbaca lebih lemah, tidak pernah diam-diam. Terukur hari ini:
+    `FETCH pt=OK origin/dev=d68c209`, `FETCH cfg=OK origin/master=41e56e5`, `periksa=11 drift=0 rc=0`
+    (16,1 dtk). (2) Ia jadi langkah tetap jendela pasang di satu-satunya installer yang jalan dari
+    laptop: `tools/deploy/install-pb-agent.sh` menjalankannya **pra** dan **post** — pra menolak drift
+    di luar berkas yang di-install (`DILUAR_SCOPE` + `DITOLAK`) tapi membolehkan drift pada berkasnya
+    sendiri karena itulah yang mau dipasang, post menuntut `drift=0` atas kesebelas pasangan, dan
+    merah tanpa baris `BEDA` (fetch/ssh mati) ikut menolak karena hijau tidak bisa diklaim;
+    `DRIFT_GUARD=off` ada untuk keadaan darurat dan tetap mencetak barisnya sendiri. Empat arah
+    diverifikasi dengan penjaga tiruan: drift di luar scope -> `rc=1`, drift hanya pada bahan -> jalan,
+    merah tanpa BEDA -> `rc=1`, `off` -> tercetak. Harness naik `LULUS=12` -> **LULUS=18 GAGAL=0**
+    lewat upstream `file://` (nol jaringan): keadaan "origin bergerak, ref lokal diam, VM ikut yang
+    lama" direproduksi **hijau-buta** saat `FETCH=0` lalu **merah `drift=1`** saat `FETCH=1` — inilah
+    bukti kasus yang tadinya cuma kutuliskan sebagai batas. Bug yang ketiban di alatku sendiri waktu
+    memasang ini: `out=$(...); rc=$?` di bawah `set -e` membunuh installer SEBELUM `rc` terbaca, tanpa
+    pesan dan tanpa jejak — kelas CFG-75 yang kunulis kemarin di repo sebelah — dan bentuk yang benar
+    `rc=0; out=$(...) || rc=$?`.
+    **Yang TIDAK tertutup (bukan kelalaian, dan butuh keputusan pemilik):** check-out
+    `~/openclaw-docker` di `hermes-openclaw-vm` ternyata bukan check-out basi biasa. HEAD-nya
+    `e5d2813` **tidak ada di repo laptop maupun di `origin`** (riwayat lain, 2 komit), direktorinya
+    tidak punya `remote` sama sekali (`origin/master_lokal=TIDAK_ADA`), `staged=0`, 4 berkas modified,
+    540 untracked. Memajukannya ke `origin/master` = men yatim-kan riwayat yang cuma ada di VM (kelas
+    CFG-33, yang sudah terbukti menimpa 28 berkas tracked), dan clone yang benar dari origin butuh
+    kredensial GitHub di dalam VM (sekelas keputusan CFG-21). Tiga opsi yang tersedia: (a) nyatakan
+    check-out itu bukan sumber pasang dan biarkan isinya dipegang penjaga per-berkas seperti sekarang
+    — yang terpasang sudah terukur `SAMA` terhadap `origin/master`; (b) pindahkan riwayat lewat
+    `git bundle` dari laptop (tanpa kredensial di VM, transfer stdin base64 seperti jalur pasang T-36)
+    lalu clone ke direktori BARU, check-out lama tidak disentuh; (c) kredensial GitHub baca-saja di VM.
+    [Catatan jujur satu kejadian: satu dari enam jalan beruntun `test-pb-stability-check.sh` membalas
+    `GAGAL=1` dan lima sisanya `LULUS=53 GAGAL=0`; kasus mana yang jatuh tidak sempat kukutip karena
+    keluarannya kupotong `tail -2`, dan sampai sekarang tidak kureproduksi. Baris ini ditulis supaya
+    flip itu tercatat, bukan dianggap hilang.]
     **DIPERBAIKI 2026-10-11** (cabang `fix/retensi-lokal-ledger`, PR ke `dev`): publish yang membalas
     `200` kini menambahkan satu baris `KEY` ke ledger append-only `backup-published.log` **sebelum** retensi
     berjalan, `apply_retention()` men-skip zip yang tidak ada di ledger (tiap skip mencetak `waspada`,

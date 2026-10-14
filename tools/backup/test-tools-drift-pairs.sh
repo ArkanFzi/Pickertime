@@ -10,8 +10,10 @@
 #
 # Daftar pasangan DIEKSTRAK dari penjaga itu sendiri (`awk` pada blok PAIRS), bukan disalin:
 # pasangan baru ikut terjaga tanpa harness ini perlu disunting.
-# Nol tulisan ke repo nyata, nol jaringan: `gcloud` diganti shim yang membaca pohon VM
-# tiruan di $WORK, dan kedua "repo" adalah repo git tempelan yang dibuat di sini.
+# Nol tulisan ke repo nyata, nol jaringan keluar: `gcloud` diganti shim yang membaca pohon VM
+# tiruan di $WORK, dan kedua "repo" adalah repo git tempelan yang dibuat di sini. Kasus 8-11
+# memberi repo tempelan itu upstream `file://` supaya `git fetch` yang baru benar-benar dijalankan
+# dan bisa dibuktikan dua arah: buta saat FETCH=0, merah saat FETCH=1 pada selisih yang SAMA.
 #
 # Sengaja TANPA `pipefail`: beberapa assertion di sini adalah `fungsi | grep -q`, dan `grep -q`
 # berhenti membaca begitu cocok. Dengan pipefail, status fungsi di sebelah kiri (atau SIGPIPE
@@ -95,7 +97,9 @@ chmod +x "$WORK/bin/gcloud"
 
 jalankan() {
   env PATH="$WORK/bin:$PATH" VMROOT="$VMROOT" SHIM_MODE="${1:-ok}" \
-      REPO="$PT" REF=main CFG_REPO="$CFG" CFG_REF=main ZONE=fake PROJECT=fake \
+      REPO="$PT" REF="${D_REF:-main}" CFG_REPO="$CFG" CFG_REF="${D_CFG_REF:-main}" \
+      FETCH="${D_FETCH:-0}" FETCH_RETRY="${D_FETCH_RETRY:-1}" FETCH_DELAY=0 \
+      ZONE=fake PROJECT=fake \
       bash "$GUARD" 2>&1
 }
 
@@ -226,6 +230,93 @@ if [ "$rc" = "0" ] && printf '%s\n' "$out" | grep -qx "periksa=$N drift=0"; then
   ok "keadaan bersih -> rc=0 lagi setelah semua mutasi dipulangkan"
 else
   no "keadaan bersih tidak pulih (rc=$rc): $(printf '%s\n' "$out" | tail -2 | tr '\n' ' ')"; rc=1
+fi
+
+# --- 8: dunia dengan remote sungguhan (file://, nol jaringan keluar) ---
+# Tiga kasus di bawah menguji klaim yang baru: "hijau = sama dengan ORIGIN", bukan "sama dengan
+# ref lokal". Upstream-nya bare repo di $WORK, jadi `git fetch` benar-benar jalan dan benar-benar
+# memajukan refs/remotes/origin/* tanpa menyentuh jaringan.
+BU_PT="$WORK/pt-upstream"; BU_CFG="$WORK/cfg-upstream"
+git clone -q --bare "$PT" "$BU_PT" 2>/dev/null
+git clone -q --bare "$CFG" "$BU_CFG" 2>/dev/null
+git -C "$PT" remote add origin "$BU_PT" 2>/dev/null
+git -C "$CFG" remote add origin "$BU_CFG" 2>/dev/null
+git -C "$PT" fetch -q origin main 2>/dev/null
+git -C "$CFG" fetch -q origin main 2>/dev/null
+if git -C "$PT" rev-parse -q --verify origin/main >/dev/null && \
+   git -C "$CFG" rev-parse -q --verify origin/main >/dev/null; then
+  ok "upstream tiruan terpasang, refs/remotes/origin/main ada di kedua sumber"
+else
+  no "upstream tiruan gagal dibuat (kasus 9-11 tidak bisa menguji fetch)"; rc=1
+fi
+
+# Situasi yang membuat batas CFG-29 nyata: ORIGIN bergerak, ref lokal diam, VM ikut yang lama
+PUSH="$WORK/push-pt"
+git clone -q "$BU_PT" "$PUSH" 2>/dev/null
+{
+  printf '# bahan uji tools/backup/pickertime-pb-backup.sh\n'
+  printf 'PATH_DI_VM=/opt/pickertime/pickertime-pb-backup.sh\n'
+  printf '%s=tools/backup/pickertime-pb-backup.sh\n' "$MARKER"
+  printf 'ORIGIN_SUDAH_GERAK\n'
+} > "$PUSH/tools/backup/pickertime-pb-backup.sh"
+git -C "$PUSH" "${gc[@]}" commit -qam "origin bergerak sendiri" 2>/dev/null
+git -C "$PUSH" push -q origin HEAD:main 2>/dev/null
+
+# 8a: tanpa fetch -> Hijau BUTA atas selisih yang sungguh ada di origin (inilah kelas yang
+#     ditutup kasus ini; kalau kasus ini merah palsu, fetch-nya yang cacat, bukan penjaganya)
+out=$(D_REF=origin/main D_CFG_REF=origin/main D_FETCH=0 jalankan ok); rc8=$?
+if [ "$rc8" = "0" ] && printf '%s\n' "$out" | grep -qx "periksa=$N drift=0" \
+   && printf '%s\n' "$out" | grep -q '^FETCH pt=DIMATIKAN'; then
+  ok "ref lokal basi + FETCH=0 -> tetap drift=0, tapi barisnya menyebut DIMATIKAN (buta yang jujur)"
+else
+  no "FETCH=0 tidak mereproduksi kebutaan ref basi (rc=$rc8): $(printf '%s\n' "$out" | tail -1)"; rc=1
+fi
+
+# 8b: fetch menyala -> selisih yang sama jadi MERAH, dan baris FETCH memperlihatkan ref bergerak
+out=$(D_REF=origin/main D_CFG_REF=origin/main D_FETCH=1 jalankan ok); rc8b=$?
+gerak=$(printf '%s\n' "$out" | grep -c '^FETCH pt=OK .* -> ')
+beda8=$(printf '%s\n' "$out" | grep '^BEDA' | grep -c 'pt:tools/backup/pickertime-pb-backup\.sh')
+if [ "$rc8b" = "1" ] && [ "$gerak" = "1" ] && [ "$beda8" = "1" ] \
+   && printf '%s\n' "$out" | grep -qx "periksa=$N drift=1"; then
+  ok "FETCH=1 di ref basi -> origin bergerak terlihat (FETCH pt=OK .. -> ..), drift=1 rc=1"
+else
+  no "FETCH=1 tidak menangkap selisih yang FETCH=0 buta padanya (rc=$rc8b gerak=$gerak beda=$beda8)"; rc=1
+fi
+# VM disamakan dengan isi origin yang BARU supaya keadaan nol drift kembali; `pulihkan()` salin
+# dari working tree `$PT` yang justru versi lama, jadi memakai itu kasus 9 mewarisi drift=1.
+cp "$PUSH/tools/backup/pickertime-pb-backup.sh" \
+   "$VMROOT/hermes-openclaw-vm/opt/pickertime/pickertime-pb-backup.sh"
+
+# --- 9: fetch mati -> hijau tidak boleh diklaim walau nol drift ---
+# `remote set-url` ke path mati, BUKAN `remote remove`: yang diuji adalah "transport fetch mati
+# sementara ref masih terbaca". Menghapus remote ikut menghapus refs/remotes/origin/*, sisi repo
+# jadi REPO_TIDAK_ADA dan merahnya datang dari drift, bukan dari fetch.
+git -C "$PT" remote set-url origin "$WORK/upstream-dihapus"
+out=$(D_REF=origin/main D_CFG_REF=origin/main D_FETCH=1 jalankan ok); rc9=$?
+if [ "$rc9" = "1" ] && printf '%s\n' "$out" | grep -q '^FETCH pt=GAGAL' \
+   && printf '%s\n' "$out" | grep -qx "periksa=$N drift=0" \
+   && printf '%s\n' "$out" | grep -q '^fetch_batal='; then
+  ok "fetch mati -> rc=1 walau periksa=$N drift=0 (merahnya sebab fetch, bukan drift)"
+else
+  no "fetch mati lolos tanpa merah (rc=$rc9): $(printf '%s\n' "$out" | grep -E '^(FETCH|periksa)' | head -2 | tr '\n' ' ')"; rc=1
+fi
+
+# --- 10: retry berbatas dan tercetak (pelajaran P8: jangan diam, jangan juga tak berujung) ---
+out=$(D_REF=origin/main D_CFG_REF=main D_FETCH=1 D_FETCH_RETRY=3 jalankan ok); rc10=$?
+if [ "$rc10" = "1" ] && printf '%s\n' "$out" | grep -q '^FETCH pt=GAGAL.*coba=3'; then
+  ok "FETCH_RETRY=3 tanpa remote -> tepat 3 percobaan tercetak di sebab (coba=3)"
+else
+  no "retry fetch tidak berbatas/ tidak terlihat (rc=$rc10): $(printf '%s\n' "$out" | grep '^FETCH' | head -2 | tr '\n' ' ')"; rc=1
+fi
+
+# --- 11: sumber yang direksinya hilang -> sebab menunjuk direksi, bukan TIDAK_DIUKUR diam-diam ---
+out=$(env REPO="$WORK/tiada" D_REF=origin/main D_CFG_REF=main D_FETCH=1 \
+       PATH="$WORK/bin:$PATH" VMROOT="$VMROOT" SHIM_MODE=ok CFG_REPO="$CFG" \
+       FETCH_RETRY=1 FETCH_DELAY=0 ZONE=fake PROJECT=fake bash "$GUARD" 2>&1); rc11=$?
+if [ "$rc11" = "1" ] && printf '%s\n' "$out" | grep -q '^FETCH pt=GAGAL DIREKSI_TIDAK_ADA'; then
+  ok "direktori sumber hilang -> rc=1 dengan sebab DIREKSI_TIDAK_ADA"
+else
+  no "direktori sumber hilang tidak tertangkap (rc=$rc11): $(printf '%s\n' "$out" | head -2 | tr '\n' ' ')"; rc=1
 fi
 
 printf 'LULUS=%s GAGAL=%s\n' "$lulus" "$gagal"
