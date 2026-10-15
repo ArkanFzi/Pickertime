@@ -98,6 +98,14 @@ jobs:
       - name: Regresi jalur ukur P8 (retry + sebab yang menunjuk alat, nol tulis ke produksi)
         run: bash tools/deploy/test-pb-stability-check.sh
 
+      # Blok SUMBER TOKEN diekstrak dari ketiga skrip produksi lewat index() (bukan regex:
+      # marker `[BEGIN]` di regex adalah kelas karakter, dan ekstraksi buta sempat mencetak
+      # nol baris sementara kasus "blok identik" tetap hijau — kini ada kasus U yang menuntut
+      # blok non-kosong). curl dipalsukan di PATH, kunci RSA dibuat sementara, nol jaringan
+      # keluar; S dan T adalah kontrol negatif untuk asserti argv-butanya.
+      - name: Regresi sumber token metadata|key (argv buta + kebutaan berksebab, nol tulis ke produksi)
+        run: bash tools/deploy/test-pb-token-source.sh
+
       - name: Gerbang H4 - tidak ada xtrace yang bisa mencetak kredensial
         run: |
           files=$(git ls-files '*.sh' | xargs -r grep -lE \

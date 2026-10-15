@@ -11,6 +11,13 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Identitas sempit satu-arah (T-10 / CFG-20 Opsi A) menggantikan identitas VM yang dual-sided:
+# kunci SA root:root 600 tidak terbaca uid 1000, dan roll back cukup satu baris (metadata).
+Environment=TOKEN_SOURCE=key
+Environment=SA_KEY_FILE=/opt/pickertime/sa-deploy-agent.json
+# Satu token dipakai dua API — pull Pub/Sub dan unduh artefak lewat REST GCS — jadi kedua scope
+# harus ikut diminta; devstorage.read_only tidak muncul sendiri dari scope pubsub.
+Environment=TOKEN_SCOPE="https://www.googleapis.com/auth/pubsub https://www.googleapis.com/auth/devstorage.read_only"
 ExecStart=/opt/pickertime/pickertime-pb-agent.sh
 # Unduh artefak + docker restart + gerbang (retry sampai 60s) masih di bawah 10 menit.
 TimeoutStartSec=600
