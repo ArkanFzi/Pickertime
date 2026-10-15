@@ -12,6 +12,10 @@ Type=oneshot
 # berkas baru tanpa restart; skrip backup yang menunggu sampai tick idle. Prefiks `-` = kalau
 # stop timer gagal, backup tetap jalan; yang melindungi datanya tetap guard di dalam skrip.
 ExecStartPre=-/usr/bin/systemctl stop pickertime-pb-agent.timer
+# Publisher saja, ke satu topic (pickertime-pb-backups). Tidak ada subscriber, tidak ada
+# bucket — identitas VM yang dual-sided berhenti dipakai di sini. Roll back = metadata.
+Environment=TOKEN_SOURCE=key
+Environment=SA_KEY_FILE=/opt/pickertime/sa-backup-publisher.json
 ExecStart=/opt/pickertime/pickertime-pb-backup.sh
 ExecStopPost=/usr/bin/systemctl start pickertime-pb-agent.timer
 TimeoutStartSec=600
