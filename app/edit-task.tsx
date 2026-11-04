@@ -166,21 +166,21 @@ export default function EditTaskScreen() {
         setActiveTask(updatedTask);
         router.push('/focus');
       } else {
-        Alert.alert('✅ Diperbarui', 'Tugas berhasil diperbarui.');
+        Alert.alert('✅ Task Updated', 'Task successfully updated.');
         router.back();
       }
     } catch (error: any) {
-      Alert.alert('Gagal Memperbarui', error.message || 'Tidak dapat memperbarui tugas. Periksa koneksi internet.');
+      Alert.alert('Update Failed', error.message || 'Could not update task. Check your connection.');
     } finally {
       setLoading(false);
     }
   }
 
   function handleDelete() {
-    Alert.alert('Hapus Tugas', 'Apakah Anda yakin ingin menghapus tugas ini?', [
-      { text: 'Batal', style: 'cancel' },
+    Alert.alert('Delete Task', 'Are you sure you want to delete this task?', [
+      { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Hapus',
+        text: 'Delete',
         style: 'destructive',
         onPress: async () => {
           if (!id) return;
@@ -189,7 +189,7 @@ export default function EditTaskScreen() {
             await syncDeleteTask(id as string);
             router.back();
           } catch (error: any) {
-            Alert.alert('Gagal Menghapus', error.message);
+            Alert.alert('Delete Failed', error.message || 'Could not delete task.');
           } finally {
             setLoading(false);
           }

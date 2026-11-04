@@ -110,7 +110,12 @@ export default function ScheduleScreen() {
 
   const [startTime, setStartTime] = useState(() => {
     const d = new Date();
-    d.setMinutes(Math.round(d.getMinutes() / 15) * 15, 0, 0);
+    // Bulatkan ke perempat jam berikutnya dengan jeda aman minimal 15 menit
+    // agar waktu persiapan dan alarm default (10 menit sebelum) selalu valid (F-33).
+    const currentMinutes = d.getMinutes();
+    const remainder = 15 - (currentMinutes % 15);
+    const addMinutes = remainder < 10 ? remainder + 15 : remainder;
+    d.setMinutes(currentMinutes + addMinutes, 0, 0);
     return d;
   });
 
@@ -181,6 +186,20 @@ export default function ScheduleScreen() {
     const startDt = startTime;
     const endDt = new Date(startDt.getTime() + duration * 60000);
 
+    // Hitung safe alarm lead time (F-33):
+    // Jika startDt - now < 10 menit, alarm 10m sebelum akan jatuh di masa lalu
+    // sehingga ditolak OS (triggerDate <= now).
+    const diffMinutes = Math.floor((startDt.getTime() - Date.now()) / 60000);
+    let safeAlarmMinutes = 10;
+    let hasAlarm = true;
+
+    if (diffMinutes <= 0) {
+      hasAlarm = false;
+      safeAlarmMinutes = 0;
+    } else if (diffMinutes < 10) {
+      safeAlarmMinutes = diffMinutes >= 3 ? 2 : 0;
+    }
+
     try {
       // ✅ syncAddTask menangani: PocketBase create + addTask state + scheduleNotification
       const newTask = await syncAddTask({
@@ -192,20 +211,20 @@ export default function ScheduleScreen() {
         start_time: startDt.toISOString(),
         end_time: endDt.toISOString(),
         is_completed: false,
-        has_alarm: true,
-        alarm_minutes_before: 10,
+        has_alarm: hasAlarm,
+        alarm_minutes_before: safeAlarmMinutes,
       });
 
       if (startNow) {
         setActiveTask(newTask);
         router.push('/focus');
       } else {
-        Alert.alert('✅ Tersimpan', 'Tugas ditambahkan ke timeline Anda.');
+        Alert.alert('✅ Task Saved', 'Task added to your timeline.');
         setTitle('');
         router.push('/(tabs)/timeline');
       }
     } catch (error: any) {
-      Alert.alert('Gagal Menyimpan', error.message || 'Tidak dapat menyimpan tugas. Periksa koneksi internet.');
+      Alert.alert('Failed to Save', error.message || 'Could not save task. Check your connection.');
     } finally {
       setLoading(false);
     }
