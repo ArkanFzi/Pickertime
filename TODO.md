@@ -1942,6 +1942,88 @@ Gerbang di HEAD: perubahan hanya dokumen, `npm run test:docs` `rc=0`, `npx tsc -
 Register infra (`config-agentic`) ditambal terpisah; `TODO.md` repo itu sedang memegang kerja belum
 di-commit dari sesi lain, jadi baris T-31/T-18 tidak kusentuh di sana.
 
+## M24 — Uji menyeluruh tiga surface: 19 temuan baru F-83…F-101 (2026-11-05, branch `fix/polish-app-device-testing`)
+
+Permintaan pemilik: uji aplikasi secara menyeluruh di laptop + HP + VM, lalu daftar kekurangannya.
+Tidak ada satu baris kode yang diubah di sesi ini — semuanya pengukuran. Nomor temuan melanjutkan
+ledger (`F-82` adalah yang tertinggi sebelum ini, di M23), dan **19 issue GitHub dibuat** sebagai
+rumah masing-masing temuan (`ArkanFzi/Pickertime` #45–#63) dengan label `P0`/`P1`/`P2` + area
+`app`/`backend`/`web`/`tooling`/`release`.
+
+Jalur yang dijalankan: `npx tsc --noEmit`; `test:enum`, `test:docs`, `test:snapshot`, `test:batch`,
+`test:seed`, `test:findings`, `test:ai-proxy` (semua hijau di backend uji `pt-pb-test` `127.0.0.1:8099`);
+`tools/pb/pb-schema-verify.mjs`; loop perangkat nyata (`adb reverse` + Metro + dev client + injeksi sesi
+lewat `test:auth:inject`, 17 artefak `tools/test/tmp/today-*.png`); surface web lewat Chrome headless +
+CDP (`expo start --web`, 8 rute); dan probe **read-only** ke produksi (`api.elarisnoir.my.id`) tanpa satu
+pun tulis.
+
+### M24.1 — Temuan, dengan angka yang menangkapnya
+
+| ID | Temuan | Bukti terukur | Issue |
+|---|---|---|---|
+| **F-83** | Alarm hanya terpasang saat task ditulis ulang; tidak ada rekonsiliasi saat login/cold start | `dumpsys alarm` = **0 alarm** untuk paket ini padahal ada task ber-alarm di jam berikutnya; `app/_layout.tsx` cold start hanya memuat auth+profile; `store/useStore.ts:170` `refreshArmedAlarms` murni baca OS. Setelah satu task di-save: `RTC_WAKEUP when=2026-11-05 18:28:00.000` → notifikasi bunyi → tap masuk Smart Alarm | [#45](https://github.com/ArkanFzi/Pickertime/issues/45) |
+| **F-84** | Produksi 61 commit di belakang dev; endpoint AI klien baru tidak ada di server live | `origin/main` terakhir `c86bb9a` (2026-10-07), `origin/dev` `8e9dbf2` (2026-10-15); `git diff --stat origin/main origin/dev -- pb_hooks pb_migrations` = `ai_proxy.pb.js` +107, snapshot +63, `1791526402_workspace_events_ketat.js` +166 (tak ada di `main`). Live: `POST /api/ai/complete` → **404**, `POST /api/ai/gemini` → 401 anonim, `/api/health` → 200 dalam **1,1 s**. `lib/gemini.ts:54` memanggil `/api/ai/complete`. Hook produksi masih `gemini-flash-lite-latest` (dev mengunci `gemini-3.5-flash-lite`, F-69/K-5); `occurred_at` yang ditulis `app/focus.tsx:26` dibuang senyap oleh skema lama. Run CI terakhir 2026-10-15 | [#46](https://github.com/ArkanFzi/Pickertime/issues/46) |
+| **F-85** | Dial Duration menangkap gesture scroll → durasi berubah sendiri dan tersimpan | Swipe scroll di atas dial mengubah task nyata **30m → 215m** (`Balas email klien`, id `1wx5ulshn9lmi5s`); sudah dikembalikan ke 30m (`end_time 2026-11-05 12:03:00Z`) | [#47](https://github.com/ArkanFzi/Pickertime/issues/47) |
+| **F-86** | Timeline menawarkan slot kosong yang sudah lewat (patokan 09:00 tetap) | Pukul 18:xx tertulis `FREE SLOT • 9H 16M`; muncul di perangkat dan di web | [#48](https://github.com/ArkanFzi/Pickertime/issues/48) |
+| **F-87** | Chip alarm Timeline → `/smart-alarm` tanpa taskId, berakhir ke task lain | Layar membuka dengan "Next up in 82m — F-50 format tanggal state", bukan task yang di-tap | [#49](https://github.com/ArkanFzi/Pickertime/issues/49) |
+| **F-88** | Insights tidak punya loading state | Jeda 3 s → "0 mins / 0/0 blocks"; jeda 12 s → **25 mins / 0/5 blocks** di layar yang sama. Query benar: `lib/localDay.ts` → `1793552400` = Senin 2 Nov 00:00 WIB (dihitung ulang di Node) | [#50](https://github.com/ArkanFzi/Pickertime/issues/50) |
+| **F-89** | `edit-task.tsx` tidak punya kontrol alarm maupun date picker | Tidak ada `has_alarm` / `alarm_minutes_before` di layar itu; mengoreksi alarm = hapus lalu buat ulang | [#51](https://github.com/ArkanFzi/Pickertime/issues/51) |
+| **F-90** | Schedule menggeser/mematikan alarm tanpa memberi tahu + `priority` default `High` + saran statis role `Professional` | `hasAlarm = false; safeAlarmMinutes = 0` dan `diffMinutes >= 3 ? 2 : 0`; `SUGGESTIONS.Professional = ['Q3 strategy doc','Client proposal','Sprint planning','Code review']` muncul identik di dua surface; `handleAutoPlan` juga hardcode `High` | [#52](https://github.com/ArkanFzi/Pickertime/issues/52) |
+| **F-91** | Layar Focus memulai sesi hanya karena dibuka; back header tidak menulis `STOP_FOCUS` | `useState(true)` + `useEffect` mount → `triggerWorkspaceEvent('START_FOCUS')`. Di web, navigasi ke `/focus` langsung `24:57 REMAINING` tanpa tap | [#53](https://github.com/ArkanFzi/Pickertime/issues/53) |
+| **F-92** | `Workspace_Events` hanya ditulis, tidak pernah dibaca | **1233** baris, **seluruhnya** `is_processed=false`, ~**600**/hari, nol pembaca di repo (tidak ada `pb.realtime.subscribe`, tidak ada pekerja) | [#54](https://github.com/ArkanFzi/Pickertime/issues/54) |
+| **F-93** | Kontrol palsu di Focus: Brown Noise tanpa `onPress`, Shield hanya state lokal | Tidak ada pustaka audio sama sekali di `package.json` (tanpa `expo-av`/`expo-audio`) | [#55](https://github.com/ArkanFzi/Pickertime/issues/55) |
+| **F-94** | Cold start & backend mati menabrak layout | `tools/test/tmp/today-13-backend-down.png`, `today-14-coldstart.png` (perilaku datanya jujur, tampilannya rusak) | [#56](https://github.com/ArkanFzi/Pickertime/issues/56) |
+| **F-95** | `device-up.sh` menjalankan preflight **sebelum** `adb reverse` yang diminta preflight | `npm run test:device:up` → `PREFLIGHT GAGAL (1)`; loop hanya jalan setelah reverse manual. Ikut: `NODE_BIN=$HOME/.nvm/…/v22.23.2` tidak ada di mesin ini (Node 26 sistem) — kelas F-54 | [#57](https://github.com/ArkanFzi/Pickertime/issues/57) |
+| **F-96** | `device-probe.sh` mencari `"Notification Record{"` padahal format nyata `NotificationRecord(` | 0 cocok vs **108** baris; diverifikasi di 5 artefak lama, semuanya mengklaim "(0 notifikasi untuk paket ini)" padahal notifikasi bunyi. Perkakas yang membuktikan fitur alarm buta terhadap dirinya sendiri | [#58](https://github.com/ArkanFzi/Pickertime/issues/58) |
+| **F-97** | Resep `docker run` di `backend-guard.mjs` tanpa `PB_ADMIN_EMAIL`/`PB_ADMIN_PASSWORD`; `pb-schema-verify.mjs` melempar stack mentah | Container hasil resep tidak punya superuser → schema-verify & snapshot-f57 mati. Dipulihkan dengan `docker exec pt-pb-test /usr/local/bin/pocketbase superuser upsert … --dir=/pb_data` (default `--dir` image ini `/usr/local/bin/pb_data`) — kelas F-58 | [#59](https://github.com/ArkanFzi/Pickertime/issues/59) |
+| **F-98** | Tidak ada test runner unit; `react-test-renderer` ter-deklarasi tapi tak terpakai | Tidak ada jest/vitest di `package.json`; logika murni (`lib/localDay.ts`, `lib/aiContract.ts`, `resolveLeadMinutes`) tanpa test tercepat — putusan F-55 belum diambil | [#60](https://github.com/ArkanFzi/Pickertime/issues/60) |
+| **F-99** | Web: semua kegagalan auth senyap + URL backend tidak bisa di-override + tak ada deteksi | CDP: submit benar → `POST http://127.0.0.1:8090/…auth-with-password` → `TypeError: Failed to fetch` (8090 di laptop ini = app uvicorn lain, jawab OPTIONS **405 tanpa header CORS**); submit salah & submit kosong → tidak ada perubahan apa pun, `[role=dialog]=false`. Penyebab: `Alert.alert` no-op di react-native-web, dipakai di `app/(auth)/sign-in.tsx:30,38,46,53`. Override gagal: `EXPO_PUBLIC_PB_URL=…` tetap ter-inline `8090` (`.env` menang), `EXPO_PUBLIC_POCKETBASE_URL` dari shell **tidak masuk bundle**. Kapabilitas web oke: dipaksa ke backend uji → `HTTP 200` + token + 5 task terbaca | [#61](https://github.com/ArkanFzi/Pickertime/issues/61) |
+| **F-100** | Web: tab bar melebar penuh, Smart Alarm mati, prop RN bocor ke DOM | `UnavailabilityError: getAllScheduledNotificationsAsync is not available on web` → `armedAlarms` selalu `[]`; konsol: `Unknown event handler property onStartShouldSetResponder/onResponderGrant/onPressIn`, `Invalid DOM property transform-origin`, `TouchableMixin is deprecated`, `useNativeDriver is not supported` | [#62](https://github.com/ArkanFzi/Pickertime/issues/62) |
+| **F-101** | Salinan error `moved` sudah ditulis tapi tidak pernah bisa muncul | `aiContract.ts:47,63` menyiapkan "This app build calls a retired AI endpoint"; `describeAiError` (`:79-105`) hanya punya cabang 429/413/0|>=500/400-not_configured → 404 produksi jatuh ke `unknown` + teks mentah PocketBase, `retryable=false` | [#63](https://github.com/ArkanFzi/Pickertime/issues/63) |
+
+### M24.2 — Yang justru terbukti baik (jangan diubah jadi "temuan")
+
+- **Fitur inti bekerja end-to-end di perangkat**: simpan task → alarm OS → notifikasi "… Starting Soon /
+  You have 5 minutes to prepare. Tap to open Smart Alarm." → tap mendarat di Smart Alarm.
+- **Edit profile (commit `21bf45d`) utuh**: tap Night Owl → Save → backend menyimpan
+  `energy_pref: "Night Owl"`, `updated` ikut bergeser. Percobaan pertama saya yang tidak menempel, bukan
+  aplikasinya.
+- **Logout bersih** (`app/(tabs)/profile.tsx:61-73`): `cancelAllTaskNotifications()` → `refreshArmedAlarms()`
+  → `setTasks([])` → `markIntentionalLogout()`. F-08 dan F-56 benar-benar diterapkan, bukan hanya ditulis.
+- **Permukaan data produksi tertutup**: unauthenticated list ke keempat koleksi semuanya
+  `HTTP 200` dengan **0 item** (rules berbasis `@request.auth.id` bekerja, tidak ada kebocoran),
+  `GET /api/collections` → 401, dan `/api/ai/gemini` anonim → 401 (proxy AI tidak terbuka publik).
+- Semua harness offline hijau di mesin kerja, bukan hanya di CI.
+
+### M24.3 — Yang TIDAK teruji (jangan dibaca sebagai sudah aman)
+
+- **Isi VM.** `tools/deploy/pb-env-drift.sh` dan `pb-stability-check.sh` butuh SSH ke mesin produksi;
+  tidak ada target SSH untuk VM itu di repo ini, dan M23 mengukur VM lewat `gcloud` + IAP SSH yang tidak
+  saya ulangi. Semua angka produksi di atas berasal dari **probe HTTP read-only** saja.
+- **`pb-prod-smoke.mjs`** sengaja tidak dijalankan: script itu **membuat record** (user `smoke-…@example.com`
+  + task) di target = tulis ke DB produksi.
+- Build **produksi** (yang saya uji adalah dev client), iOS, ketahanan alarm setelah reboot perangkat,
+  dan perilaku offline penuh.
+- Tidak ada satu pun pengukuran yang membuktikan alarm tetap hidup setelah reinstall — justru F-83
+  lahir dari ketiadaan jalur itu.
+
+### M24.4 — Aksi yang diambil sesi ini
+
+- **Tulis ke GitHub**: 8 label baru (`P0`,`P1`,`P2`,`app`,`backend`,`web`,`tooling`,`release`) + 19 issue
+  (#45–#63). Tidak ada branch, PR, atau push yang dibuat.
+- **Kembalikan data yang saya ubah tidak sengaja**: `1wx5ulshn9lmi5s` dipulihkan ke 30 menit
+  (`end_time 2026-11-05 12:03:00.000Z`, `duration_minutes 30`) — lihat F-85.
+- **Bersih-bersih**: container `pt-pb-snap` dihapus, Metro (perangkat & web) dan Chrome headless
+  dihentikan, skrip CDP scratch dihapus. `git status` kembali bersih.
+- **Catatan metode**: `tools/test/tmp/routes/*.png` hasil sweep 3 detik tidak bisa dipakai menilai
+  Insights (F-88) — angka di artefak itu 0, angka sebenarnya 25 menit.
+
+Gerbang di HEAD: `npx tsc --noEmit` `rc=0`, `npm run test:docs` `rc=0` (perubahan hanya dokumen),
+`test:enum` `rc=0` (`GREEN lib/periods.ts`), `test:batch` `rc=0` (`GREEN F-02h`), `test:snapshot` `rc=0`
+setelah container buang `pt-pb-snap` di `127.0.0.1:8097` dibuat ulang dari resep yang dicetak skripnya
+(`GREEN skema==snapshot` 76 field, `GREEN rule fresh` 3 koleksi × asing/anonim/milik = 400/400/200) —
+lalu dihapus lagi. Angka ini diambil di mesin kerja, bukan hanya di CI.
+
 ## Hutang proses (biar kesalahan sesi ini tidak berulang)
 
 - [ ] **H1** Semua klaim status lewat angka harus dikutip dari baris laporan alat, bukan
