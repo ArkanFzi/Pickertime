@@ -134,6 +134,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # fetch-depth 0 supaya ref origin/main ada dan langkah drift di bawah bisa membandingkan.
+          fetch-depth: 0
+
+      - name: Catatan drift backend main..HEAD (warning saja, bukan gerbang)
+        run: |
+          BELAKANG=$(git diff --name-only origin/main...HEAD -- pb_hooks pb_migrations | wc -l)
+          TANGGAL=$(git log -1 --format=%cs origin/main -- pb_hooks pb_migrations)
+          if [ "$BELAKANG" != "0" ]; then
+            echo "::warning::${BELAKANG} berkas backend di HEAD belum pernah mendarat di main (backend terakhir di main: ${TANGGAL:-tidak diketahui}). Hanya merge ke main yang memicu deploy.yml."
+          else
+            echo "backend HEAD == main: tidak ada perubahan pb_hooks/pb_migrations yang menunggu deploy"
+          fi
+          git diff --name-only origin/main...HEAD -- pb_hooks pb_migrations | sed 's/^/  menunggu: /'
 
       - name: Bangkitkan PocketBase dari pb_migrations
         run: |
