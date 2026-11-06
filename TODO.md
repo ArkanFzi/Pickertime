@@ -1961,7 +1961,7 @@ pun tulis.
 
 | ID | Temuan | Bukti terukur | Issue |
 |---|---|---|---|
-| **F-83** | Alarm hanya terpasang saat task ditulis ulang; tidak ada rekonsiliasi saat login/cold start | `dumpsys alarm` = **0 alarm** untuk paket ini padahal ada task ber-alarm di jam berikutnya; `app/_layout.tsx` cold start hanya memuat auth+profile; `store/useStore.ts:170` `refreshArmedAlarms` murni baca OS. Setelah satu task di-save: `RTC_WAKEUP when=2026-11-05 18:28:00.000` → notifikasi bunyi → tap masuk Smart Alarm | [#45](https://github.com/ArkanFzi/Pickertime/issues/45) |
+| **F-83** | Alarm hanya terpasang saat task ditulis ulang; tidak ada rekonsiliasi saat login/cold start | `dumpsys alarm` = **0 alarm** untuk paket ini padahal ada task ber-alarm di jam berikutnya; `app/_layout.tsx` cold start hanya memuat auth+profile; `store/useStore.ts:170` `refreshArmedAlarms` murni baca OS. Setelah satu task di-save: `RTC_WAKEUP when=2026-11-05 18:28:00.000` → notifikasi bunyi → tap masuk Smart Alarm. **Ditutup 2026-11-06, angka dua arah di M24.5** | [#45](https://github.com/ArkanFzi/Pickertime/issues/45) |
 | **F-84** | Produksi 61 commit di belakang dev; endpoint AI klien baru tidak ada di server live | `origin/main` terakhir `c86bb9a` (2026-10-07), `origin/dev` `8e9dbf2` (2026-10-15); `git diff --stat origin/main origin/dev -- pb_hooks pb_migrations` = `ai_proxy.pb.js` +107, snapshot +63, `1791526402_workspace_events_ketat.js` +166 (tak ada di `main`). Live: `POST /api/ai/complete` → **404**, `POST /api/ai/gemini` → 401 anonim, `/api/health` → 200 dalam **1,1 s**. `lib/gemini.ts:54` memanggil `/api/ai/complete`. Hook produksi masih `gemini-flash-lite-latest` (dev mengunci `gemini-3.5-flash-lite`, F-69/K-5); `occurred_at` yang ditulis `app/focus.tsx:26` dibuang senyap oleh skema lama. Run CI terakhir 2026-10-15 | [#46](https://github.com/ArkanFzi/Pickertime/issues/46) |
 | **F-85** | Dial Duration menangkap gesture scroll → durasi berubah sendiri dan tersimpan | Swipe scroll di atas dial mengubah task nyata **30m → 215m** (`Balas email klien`, id `1wx5ulshn9lmi5s`); sudah dikembalikan ke 30m (`end_time 2026-11-05 12:03:00Z`) | [#47](https://github.com/ArkanFzi/Pickertime/issues/47) |
 | **F-86** | Timeline menawarkan slot kosong yang sudah lewat (patokan 09:00 tetap) | Pukul 18:xx tertulis `FREE SLOT • 9H 16M`; muncul di perangkat dan di web | [#48](https://github.com/ArkanFzi/Pickertime/issues/48) |
@@ -2017,6 +2017,39 @@ pun tulis.
   dihentikan, skrip CDP scratch dihapus. `git status` kembali bersih.
 - **Catatan metode**: `tools/test/tmp/routes/*.png` hasil sweep 3 detik tidak bisa dipakai menilai
   Insights (F-88) — angka di artefak itu 0, angka sebenarnya 25 menit.
+
+### M24.5 — F-83 ditutup di perangkat (2026-11-06, `fix/reconcile-alarm-cold-start`)
+
+Rekonsiliasi dipasang di jalur tarik task (`store/useStore.ts:330` memanggil
+`reconcileTaskAlarms` dari `lib/notifications.ts`), predikatnya sama dengan `syncTaskAlarm`, dan
+sengaja **tanpa** guard `listArmedAlarmTaskIds()`. Angka dari MIUI `M2006C3LG` (Android 10), paket
+`my.id.elarisnoir.pickertime`, backend uji `pt-pb-test` `127.0.0.1:8099`, sesi disuntik lewat
+`test:auth:inject`, fixture task `4kd1jq81nwl1qgw` (`start 2026-11-06 02:40:55.000Z`, lead 5 menit
+→ trigger `02:35:55Z`):
+
+| Skenario | `RTC_WAKEUP … elarisnoir` |
+|---|---|
+| arah B — tanpa fix, state bersih (`pm clear` + inject) | **0**, padahal `syncFetchTasks` menarik **6** task dan 1 ber-alarm masa depan (`probe-20261106T011922Z-arah-B-bersih.txt`) |
+| arah A — dengan fix, state bersih | **1**, `when=1793932555000` = persis trigger fixture |
+| M1 — alarm terpasang lalu `am force-stop`, app tidak dijalankan | **1 → 0** |
+| T1 — sesudah M1, cold start dengan fix final (guard dibuang) | **1** |
+| T2 — tiga cold start berturut-turut | **1, 1, 1** (tidak menumpuk; `scheduleTaskNotification` cancel-by-identifier dulu, `lib/notifications.ts:85`) |
+
+Baris M1 adalah alasan guard dibuang: pembacaan `getAllScheduledNotificationsAsync()` bersumber ke DB
+expo yang catatannya tetap hidup setelah AlarmManager membuang alarm, jadi guard itu membuat
+swipe-away di MIUI jadi alarm mati permanen. Versi pertama fix (dengan guard) terukur gagal di T2 —
+`[alarm] 1 alarm dipasang ulang` tercetak tapi OS 0.
+
+### M24.6 — F-84: penjaga drift, bukan perbaikan rilis
+
+#46 belum bisa ditutup oleh kode: remedy sungguhnya adalah merge `dev` → `main` (memicu `deploy.yml`),
+itu tetap menunggu keputusan pemilik. Yang dikerjakan: kontrak endpoint dibaca dari `AI_ENDPOINT`
+(`lib/gemini.ts:54`) lalu ditegakkan terhadap `routerAdd` di hook (`tools/test/findings.mjs`, blok
+F-60 — terukur RED saat `AI_ENDPOINT` dimutasi), plus langkah CI warning-only di job `schema`
+`.github/workflows/ci.yml` yang menghitung berkas backend `origin/main...HEAD`. Output nyata run
+`42139150727`: `3 berkas backend di HEAD belum pernah mendarat di main (backend terakhir di main:
+2026-10-07)` — `pb_hooks/ai_proxy.pb.js`, `pb_migrations/1790909763_collections_snapshot.js`,
+`pb_migrations/1791526402_workspace_events_ketat.js`.
 
 Gerbang di HEAD: `npx tsc --noEmit` `rc=0`, `npm run test:docs` `rc=0` (perubahan hanya dokumen),
 `test:enum` `rc=0` (`GREEN lib/periods.ts`), `test:batch` `rc=0` (`GREEN F-02h`), `test:snapshot` `rc=0`

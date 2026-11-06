@@ -153,6 +153,23 @@ export async function listArmedAlarmTaskIds(): Promise<string[]> {
   }
 }
 
+// Alarm hanya terpasang lewat jalur tulis task (F-83): setelah reinstall, pindah perangkat,
+// atau alarm dibatalkan user, tidak ada yang pernah membandingkan daftar task dengan isi OS.
+// Sengaja TIDAK menyaring dari listArmedAlarmTaskIds(): pembacaan itu sumbernya DB expo, yang
+// tetap menyimpan catatan padahal AlarmManager sudah membuangnya (terukur: `am force-stop`
+// menurunkan RTC_WAKEUP 1 -> 0 tanpa app jalan). Guard itu bikin swipe-away di MIUI jadi
+// alarm mati permanen. scheduleTaskNotification sudah cancel-by-identifier dulu, jadi ulang
+// aman dan tidak menumpuk.
+export async function reconcileTaskAlarms(tasks: Task[]): Promise<number> {
+  let rearmed = 0;
+  for (const task of tasks) {
+    // Predikat harus sama dengan syncTaskAlarm di store, jangan ada dua aturan.
+    if (!task.has_alarm || task.is_completed || !task.start_time) continue;
+    if (await scheduleTaskNotification(task)) rearmed++;
+  }
+  return rearmed;
+}
+
 export async function cancelAllTaskNotifications(): Promise<void> {
   try {
     const Notifications = await getNotificationsModule();

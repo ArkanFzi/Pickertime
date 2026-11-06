@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { AuthModel, RecordModel } from 'pocketbase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { pb } from '@/lib/pocketbase';
-import { scheduleTaskNotification, cancelTaskNotification, listArmedAlarmTaskIds } from '@/lib/notifications';
+import { scheduleTaskNotification, cancelTaskNotification, listArmedAlarmTaskIds, reconcileTaskAlarms } from '@/lib/notifications';
 import { createTaskBatch, resolveLeadMinutes, type TaskWriter, type TaskWritePayload } from '@/lib/taskContract';
 import { localDayStartEpoch, localWeekStartEpoch } from '@/lib/localDay';
 import { bumpSnooze, emptyLedger, parseLedger, pruneBefore, serializeLedger, type SnoozeLedger } from '@/lib/snoozeLedger';
@@ -327,6 +327,10 @@ export const useStore = create<AppState>((set, get) => ({
       });
       if (records) {
         set({ tasks: records as any, tasksError: null });
+        const rearmed = await reconcileTaskAlarms(records as any);
+        if (rearmed > 0) {
+          console.log(`[alarm] ${rearmed} alarm dipasang ulang saat tarik task (F-83)`);
+        }
         await get().refreshArmedAlarms();
       }
     } catch (err) {
