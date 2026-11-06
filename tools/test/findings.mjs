@@ -514,6 +514,18 @@ const srcLayout = baca('app/_layout.tsx')
   for (const [nama, src] of Object.entries(pemanggil)) {
     if (!src.includes('/api/ai/complete')) rusak.push(`${nama} tidak memanggil /api/ai/complete`)
   }
+  // Kontrak sungguhan, bukan kebetulan hijau: endpoint yang DIPAKAI klien harus terdaftar di
+  // hook, apa pun namanya nanti. Sebelum baris ini kedua sisi di-hardcode ke string yang sama,
+  // jadi renama berikutnya bisa lolos tanpa bukti (kelas F-84).
+  const endpointKlien = (srcGemini.match(/const AI_ENDPOINT\s*=\s*['"`]([^'"`]+)['"`]/) || [])[1] || null
+  if (!endpointKlien) {
+    rusak.push('AI_ENDPOINT tidak terbaca di lib/gemini.ts — kontrak endpoint kehilangan pegangan')
+  } else {
+    const jalurHook = [...srcHook.matchAll(/routerAdd\(\s*["']POST["']\s*,\s*["']([^"']+)["']/g)].map((m) => m[1])
+    if (!jalurHook.includes(endpointKlien)) {
+      rusak.push(`klien memanggil ${endpointKlien} tapi hook hanya mendaftarkan ${jalurHook.join(', ') || '(tidak ada)'}`)
+    }
+  }
   if (srcGemini.includes('/api/ai/gemini')) rusak.push('lib/gemini.ts masih memakai jalur lama /api/ai/gemini')
   // Jalur lama hanya boleh hidup sebagai 410 (agen VM + build lama), bukan sebagai proxy.
   if (!/routerAdd\("POST",\s*"\/api\/ai\/gemini"/.test(srcHook)) rusak.push('jalur lama hilang total: gate agen VM akan membalas 404 dan deploy dianggap gagal')
