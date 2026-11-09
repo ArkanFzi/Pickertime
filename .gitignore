@@ -106,3 +106,6 @@ tools/test/tmp/
 .bolt/
 # lokal: agent scaffolding tidak boleh jadi noise status git
 .claude
+
+# AI tool artifacts
+.qoder/
