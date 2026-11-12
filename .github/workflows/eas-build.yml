@@ -1,0 +1,108 @@
+name: EAS Build (production)
+
+# M4.4: build AAB produksi dari `main` tanpa kredensial di repo.
+#
+# Kenapa ada job `credential-gate`: `secrets` tidak bisa dipakai langsung di
+# `jobs.<id>.if`. Gate membaca secret di step, menulis boolean ke output, lalu
+# job build bergantung pada output itu. Tanpa EAS_TOKEN workflow tetap hijau
+# dengan notice jelas - bukan merah yang menyamar sebagai kegagalan kode.
+#
+# Submit Play (M4.5) hanya jalan bila diminta lewat workflow_dispatch DAN
+# secret PLAY_SERVICE_ACCOUNT_JSON ada. Default track `internal`,
+# releaseStatus `draft`: build bisa diuji tanpa langsung terbit ke publik.
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: 'Submit ke Play Console (internal track, draft) setelah build'
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'constants/**'
+      - 'hooks/**'
+      - 'assets/**'
+      - 'app.json'
+      - 'eas.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/eas-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eas-production-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  credential-gate:
+    name: Cek kredensial EAS/Play
+    runs-on: ubuntu-latest
+    outputs:
+      eas: ${{ steps.gate.outputs.eas }}
+      play: ${{ steps.gate.outputs.play }}
+    steps:
+      - id: gate
+        name: Deteksi secret tanpa mencetak isinya
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${EAS_TOKEN}" ]]; then eas=true; else eas=false; fi
+          if [[ -n "${PLAY_SERVICE_ACCOUNT_JSON}" ]]; then play=true; else play=false; fi
+          echo "eas=$eas" >> "$GITHUB_OUTPUT"
+          echo "play=$play" >> "$GITHUB_OUTPUT"
+          if [[ "$eas" == "false" ]]; then
+            echo "::notice title=EAS_TOKEN belum diset::Build produksi dilewati (M4.4 BLOCKED-user). Tambahkan repository secret EAS_TOKEN."
+          fi
+          if [[ "$play" == "false" ]]; then
+            echo "::notice title=PLAY_SERVICE_ACCOUNT_JSON belum diset::Submit Play dilewati (M4.5 BLOCKED-user)."
+          fi
+
+  build:
+    name: EAS build production (AAB)
+    needs: credential-gate
+    if: needs.credential-gate.outputs.eas == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      EXPO_TOKEN: ${{ secrets.EAS_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Tulis service account Play (hanya bila submit diminta)
+        if: github.event_name == 'workflow_dispatch' && inputs.submit == true && needs.credential-gate.outputs.play == 'true'
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          mkdir -p secrets
+          printf '%s' "$PLAY_SERVICE_ACCOUNT_JSON" > secrets/play-service-account.json
+          chmod 600 secrets/play-service-account.json
+
+      - name: Build produksi (+ auto-submit bila diminta)
+        run: |
+          set -euo pipefail
+          args=(build --platform android --profile production --non-interactive)
+          if [[ "${{ inputs.submit }}" == "true" && "${{ needs.credential-gate.outputs.play }}" == "true" ]]; then
+            args+=(--auto-submit)
+          fi
+          npx --yes eas-cli@24.8.0 "${args[@]}"
+
+      - name: Hapus service account dari runner
+        if: always()
+        run: rm -f secrets/play-service-account.json

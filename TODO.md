@@ -254,10 +254,18 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
   dan itu tindakan pemilik. Status: DONE untuk jalur teruji-endpoint-VM; eksekusi GHA menunggu
   merge pertama ke `main`
 - [ ] **M4.4** Job EAS `production` (`eas build --profile production --platform android`) di `main`.
-  Prasyarat: `EAS_TOKEN` (Account Access Token dari expo.dev) sebagai repository secret — tidak bisa
-  saya buat dari CLI tanpa kredensial akun kamu. Status: BLOCKED-user
+  **Siap 2026-11-12**: `.github/workflows/eas-build.yml` (credential-gate, build AAB, auto-submit
+  opsional) + `eas.json` pindah ke `appVersionSource: remote` supaya versionCode tidak duplikat
+  antar-build CI. Prasyarat tersisa: repository secret `EAS_TOKEN` (Account Access Token expo.dev) —
+  tidak bisa dibuat dari CLI tanpa kredensial akun. Set: `gh secret set EAS_TOKEN -R ArkanFzi/Pickertime`,
+  lalu `gh workflow run "EAS Build (production)"`. Build pertama memakai versionCode 3.
+  Status: BLOCKED-user
 - [ ] **M4.5** Submit Play Store (opsional di tahap ini): butuh service account key Google Play
-  Console. Putuskan nanti setelah M4.4 terbukti. Status: TODO
+  Console. **Siap 2026-11-12**: `submit.production.android` → track `internal`, `releaseStatus: draft`,
+  key `./secrets/play-service-account.json` (gitignored, CI menulisnya dari secret). Prasyarat
+  tersisa: app di Play Console, service account + Google Play Android Developer API, invite
+  Release manager, secret `PLAY_SERVICE_ACCOUNT_JSON`. Runbook:
+  `docs/06_release/eas-build-and-play-store.md`. Status: BLOCKED-user
 - [ ] **M4.6** Gerbang smoke pasca-deploy. Koreksi cara pakai (dibaca dari
   `tools/pb/pb-prod-smoke.mjs:3-8`): basis URL adalah **argumen posisi**, bukan `PB_BASE_URL`,
   dan kredensial lewat env —
