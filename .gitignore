@@ -109,3 +109,6 @@ tools/test/tmp/
 
 # AI tool artifacts
 .qoder/
+
+# Kredensial store/submit (service account Play, key lain) — tidak pernah di-commit
+secrets/
