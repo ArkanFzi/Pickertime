@@ -22,8 +22,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0A0F1D"
       },
-      "predictiveBackGestureEnabled": false,
-      "versionCode": 2
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "bundler": "metro",

@@ -259,7 +259,9 @@ Fakta terukur yang jadi dasar rencana (dibaca 2026-10-02):
   antar-build CI. Prasyarat tersisa: repository secret `EAS_TOKEN` (Account Access Token expo.dev) —
   tidak bisa dibuat dari CLI tanpa kredensial akun. Set: `gh secret set EAS_TOKEN -R ArkanFzi/Pickertime`,
   lalu `gh workflow run "EAS Build (production)"`. Build pertama memakai versionCode 3.
-  Status: BLOCKED-user
+  **Bukti build manual 2026-11-12** (dari merge #67 di `dev`): build `c6fed646-9a13-441d-9251-1767e5f27bfe`,
+  AAB 71 MB, versionCode **3** (remote 2→3), keystore `rm9SIrYQd2`, URL produksi ter-inline.
+  Status: BLOCKED-user (hanya secret CI yang kurang)
 - [ ] **M4.5** Submit Play Store (opsional di tahap ini): butuh service account key Google Play
   Console. **Siap 2026-11-12**: `submit.production.android` → track `internal`, `releaseStatus: draft`,
   key `./secrets/play-service-account.json` (gitignored, CI menulisnya dari secret). Prasyarat

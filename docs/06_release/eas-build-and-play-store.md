@@ -2,8 +2,9 @@
 
 Status per 2026-11-12:
 
-- **Build produksi pernah terbukti** (P6, 2026-10-04): AAB 71 MB, versionCode 2,
-  keystore remote EAS `rm9SIrYQd2`, commit `b81b18a2`.
+- **Build produksi terbukti** dua kali: P6 (2026-10-04, versionCode 2) dan C5
+  (2026-11-12, versionCode **3** dengan `appVersionSource: remote`), keduanya
+  AAB 71 MB, keystore remote EAS `rm9SIrYQd2`.
 - **M4.4 (job CI) siap, BLOCKED-user**: butuh repository secret `EAS_TOKEN`.
 - **M4.5 (submit Play) siap, BLOCKED-user**: butuh service account Play Console.
 - **M4.6 smoke pasca-deploy** sudah DONE (lihat `TODO.md`).
@@ -29,9 +30,11 @@ diotomatiskan dari sisi kode.
   - `releaseStatus: draft` (tidak langsung terbit)
 - `secrets/` masuk `.gitignore`.
 
-Inisialisasi versionCode remote: build pertama akan mengambil nilai
-`android.versionCode` di `app.json` (saat ini **2**) lalu menaikkannya menjadi
-**3**. Tidak perlu menjalankan `eas build:version:set` manual.
+Inisialisasi versionCode remote: build pertama mengambil nilai
+`android.versionCode` di `app.json` (saat itu **2**) lalu menaikkannya menjadi
+**3**. Nilai `android.versionCode` sudah dihapus dari `app.json` supaya tidak
+ada dua sumber kebenaran; EAS memperingatkan nilai lokal diabaikan saat
+`appVersionSource: remote`. Build berikutnya naik 4, 5, dst. tanpa perlu commit.
 
 ### `.github/workflows/eas-build.yml`
 
@@ -180,9 +183,12 @@ npx eas-cli@24.8.0 submit --platform android --profile production --id <build-id
 | Hal | Nilai |
 |---|---|
 | Build P6 | `0ab3142e-0ea8-4909-bde7-e88d9ce5e74b` (2026-10-04) |
-| Artefak | `lKTEhzcBgYtQBy_tGv7LdWFBSq_lmnvXt4vHjLdZr_8.aab`, 71 MB |
+| Artefak P6 | `lKTEhzcBgYtQBy_tGv7LdWFBSq_lmnvXt4vHjLdZr_8.aab`, 71 MB |
+| Build C5 (2026-11-12) | `c6fed646-9a13-441d-9251-1767e5f27bfe`, profil `production`, commit `5787b0a` |
+| Artefak C5 | `nR-fPGOfFlIYzEE4kDfCLWbglRuxs5ZIVASezCW6Ui4.aab`, 71 MB, Zip valid |
+| versionCode C5 | **3** (remote; log: "Incrementing versionCode from 2 to 3") |
+| Verifikasi C5 | `base/assets/index.android.bundle` memuat `api.elarisnoir.my.id` (1 hit) |
 | Keystore | remote EAS `rm9SIrYQd2` |
-| versionCode | 2 (naik otomatis dari 1) |
 | `EXPO_PUBLIC_PB_URL` | ter-inline `https://api.elarisnoir.my.id` |
 | `expo-doctor` | 18/18 lolos (2026-11-12, setelah patch `expo@54.0.37`, `expo-router@6.0.24`) |
 | `npm run typecheck` | 0 error |
